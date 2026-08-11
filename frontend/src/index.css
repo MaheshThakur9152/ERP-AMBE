@@ -1,0 +1,253 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,300;0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg: #09090b;
+    --surface: #111113;
+    --surface-2: #18181b;
+    --border: rgba(255,255,255,0.08);
+    --border-strong: rgba(255,255,255,0.14);
+    --text-primary: #fafafa;
+    --text-secondary: #a1a1aa;
+    --text-muted: #52525b;
+    --accent: #6366f1;
+    --accent-glow: rgba(99,102,241,0.15);
+    --radius: 10px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body, #root {
+    height: 100%;
+  }
+
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text-primary);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  ::selection {
+    background: rgba(99, 102, 241, 0.3);
+  }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 999px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+}
+
+@layer components {
+
+  /* ── Sidebar ─────────────────────────────── */
+  .sidebar {
+    width: 232px;
+    min-width: 232px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    height: 100vh;
+    position: sticky;
+    top: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ── Topbar ──────────────────────────────── */
+  .topbar {
+    height: 52px;
+    background: rgba(9, 9, 11, 0.8);
+    backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    justify-content: space-between;
+  }
+
+  /* ── Nav links ───────────────────────────── */
+  .nav-link {
+    @apply flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium
+           transition-all duration-150 text-zinc-400 hover:text-zinc-100 hover:bg-white/5;
+  }
+  .nav-link.active {
+    @apply text-zinc-100 bg-white/5;
+    background: rgba(255,255,255,0.06);
+  }
+  .nav-link.active .nav-icon {
+    @apply text-indigo-400;
+  }
+
+  /* ── Card ────────────────────────────────── */
+  .card {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    transition: border-color 0.15s;
+  }
+  .card:hover { border-color: var(--border-strong); }
+
+  /* ── Buttons ─────────────────────────────── */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-1.5
+           text-sm font-medium rounded-lg transition-all duration-150
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50
+           disabled:opacity-40 disabled:pointer-events-none
+           bg-indigo-600 text-white hover:bg-indigo-500 px-4 py-2;
+    box-shadow: 0 0 0 1px rgba(99,102,241,0.3), 0 1px 2px rgba(0,0,0,0.4);
+  }
+  .btn-primary:hover {
+    box-shadow: 0 0 16px rgba(99,102,241,0.3), 0 0 0 1px rgba(99,102,241,0.5);
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-1.5
+           text-sm font-medium rounded-lg transition-all duration-150
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/20
+           disabled:opacity-40 disabled:pointer-events-none
+           bg-white/5 text-zinc-200 hover:bg-white/10 px-4 py-2;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-1.5
+           text-sm font-medium rounded-md transition-all duration-150
+           focus-visible:outline-none
+           disabled:opacity-40 disabled:pointer-events-none
+           text-zinc-400 hover:text-zinc-100 hover:bg-white/5 px-2.5 py-1.5;
+  }
+
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-1.5
+           text-sm font-medium rounded-lg transition-all duration-150
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/50
+           disabled:opacity-40 disabled:pointer-events-none
+           bg-red-600/80 text-white hover:bg-red-600 px-4 py-2;
+    border: 1px solid rgba(239,68,68,0.3);
+  }
+
+  .btn-sm { @apply px-2.5 py-1.5 text-xs; }
+
+  /* ── Form inputs ─────────────────────────── */
+  .field-input {
+    @apply w-full h-9 px-3 text-sm rounded-lg text-zinc-100
+           placeholder:text-zinc-600 transition-all duration-150
+           focus:outline-none;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  .field-input:focus {
+    border-color: rgba(99,102,241,0.6);
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+    background: rgba(255,255,255,0.06);
+  }
+
+  .field-label {
+    @apply block text-xs font-medium text-zinc-400 mb-1.5;
+  }
+
+  /* ── Badges ──────────────────────────────── */
+  .badge-green {
+    @apply inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium
+           bg-emerald-500/10 text-emerald-400;
+    border: 1px solid rgba(52,211,153,0.2);
+  }
+  .badge-yellow {
+    @apply inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium
+           bg-amber-500/10 text-amber-400;
+    border: 1px solid rgba(251,191,36,0.2);
+  }
+  .badge-red {
+    @apply inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium
+           bg-red-500/10 text-red-400;
+    border: 1px solid rgba(248,113,113,0.2);
+  }
+  .badge-slate {
+    @apply inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium
+           bg-white/5 text-zinc-400;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .badge-blue {
+    @apply inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium
+           bg-indigo-500/10 text-indigo-400;
+    border: 1px solid rgba(99,102,241,0.2);
+  }
+
+  /* ── Table ───────────────────────────────── */
+  .data-table { @apply w-full text-sm; }
+  .data-table thead tr { border-bottom: 1px solid rgba(255,255,255,0.06); }
+  .data-table th { @apply px-4 py-2.5 text-left text-xs font-medium text-zinc-500 uppercase tracking-wide; }
+  .data-table tbody tr { border-bottom: 1px solid rgba(255,255,255,0.04); transition: background 0.1s; }
+  .data-table tbody tr:hover { background: rgba(255,255,255,0.03); }
+  .data-table td { @apply px-4 py-3 text-zinc-300; }
+
+  /* ── Page header ─────────────────────────── */
+  .page-header { @apply flex items-center justify-between mb-6; }
+  .page-title  { @apply text-base font-semibold text-zinc-100; }
+  .page-desc   { @apply text-xs text-zinc-500 mt-0.5; }
+  .divider     { border-top: 1px solid rgba(255,255,255,0.06); margin: 16px 0; }
+
+  .empty-state      { @apply flex flex-col items-center justify-center py-20 text-center; }
+  .empty-state-icon { @apply w-10 h-10 text-zinc-700 mb-3; }
+
+  /* ── Glow effect ─────────────────────────── */
+  .glow-indigo {
+    box-shadow: 0 0 40px rgba(99,102,241,0.15);
+  }
+}
+
+/* ── Print Stylesheet ───────────────────────── */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .sidebar,
+  .topbar,
+  aside,
+  header,
+  nav,
+  button,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+  }
+
+  #printable-invoice {
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 8mm;
+  }
+}
+
