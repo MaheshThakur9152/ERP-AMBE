@@ -31,6 +31,8 @@ export interface ClientPartyInfo {
   siteName: string;
   workOrderRefNo: string;
   workOrderPeriod: string;
+  contactNo?: string;
+  email?: string;
 }
 
 export interface DeliveryDetails {

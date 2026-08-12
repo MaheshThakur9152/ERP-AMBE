@@ -77,6 +77,11 @@ const convertRecordToInvoiceData = (inv: InvoiceRecord): InvoiceData => {
   if (inv.payload && inv.payload.company && inv.payload.company.name) {
     return {
       ...inv.payload,
+      party: {
+        ...inv.payload.party,
+        contactNo: inv.payload.party?.contactNo || site?.contact_no || (site as any)?.contactNo || (site as any)?.contact_phone || (site as any)?.phone || '',
+        email: inv.payload.party?.email || site?.email || (site as any)?.email_address || '',
+      },
       isMaterial: inv.is_material || inv.payload?.isMaterial || false,
       mgmtPercent,
       machineryCharges,
@@ -141,6 +146,8 @@ const convertRecordToInvoiceData = (inv: InvoiceRecord): InvoiceData => {
       name: clientName,
       siteName: siteName,
       address: site?.address || '',
+      contactNo: site?.contact_no || (site as any)?.contactNo || inv.payload?.party?.contactNo || '',
+      email: site?.email || inv.payload?.party?.email || '',
       gstin: site?.gstin || '',
       workOrderRefNo: site?.work_order_ref || '',
       workOrderPeriod: site?.work_order_period || '',
@@ -201,7 +208,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
 
   const [activeTab, setActiveTab] = useState<'Tax' | 'Proforma' | 'Material'>('Tax');
   const [filterMonth, setFilterMonth] = useState<string>('all');
-  const [filterYear, setFilterYear] = useState<number>(2026);
+  const [filterYear, setFilterYear] = useState<string>('all');
   const [filterSite, setFilterSite] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
 
@@ -241,20 +248,57 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
     loadInvoicesFromApi();
   }, []);
 
-  const siteList = Array.from(new Set(invoices.map((inv) => inv.siteName)));
+  const siteList = Array.from(
+    new Set(
+      invoices
+        .map((inv) => inv.sites?.site_name || inv.siteName || (inv as any).site_name || inv.payload?.party?.siteName || '')
+        .filter(Boolean)
+    )
+  );
 
   const filteredInvoices = invoices.filter((inv) => {
     const isProforma = inv.type === 'Proforma Invoice';
     const isMaterial = inv.type === 'Material Invoice' || (inv as any).is_material === true;
-    if (activeTab === 'Material') return isMaterial;
-    if (activeTab === 'Proforma') return isProforma && !isMaterial;
-    // Tax tab: exclude proforma & material
-    if (activeTab === 'Tax') return !isProforma && !isMaterial;
 
-    const matchesSite = filterSite === 'all' || inv.siteName === filterSite;
-    const matchesStatus = filterStatus === 'all' || inv.status === filterStatus;
+    // 1. Tab filter check
+    let matchesTab = true;
+    if (activeTab === 'Material') matchesTab = isMaterial;
+    else if (activeTab === 'Proforma') matchesTab = isProforma && !isMaterial;
+    else if (activeTab === 'Tax') matchesTab = !isProforma && !isMaterial;
 
-    return matchesSite && matchesStatus;
+    if (!matchesTab) return false;
+
+    // 2. Site filter check
+    const siteName = inv.sites?.site_name || inv.siteName || (inv as any).site_name || inv.payload?.party?.siteName || '';
+    const codeName = inv.sites?.code_name || inv.sites?.codeName || (inv as any).code_name || (inv as any).codeName || '';
+    const matchesSite =
+      filterSite === 'all' ||
+      siteName.toLowerCase() === filterSite.toLowerCase() ||
+      codeName.toLowerCase() === filterSite.toLowerCase();
+
+    if (!matchesSite) return false;
+
+    // 3. Status filter check
+    const status = inv.status || 'Unpaid';
+    const matchesStatus =
+      filterStatus === 'all' || status.toLowerCase() === filterStatus.toLowerCase();
+
+    if (!matchesStatus) return false;
+
+    // 4. Month & Year filter check
+    const rawPeriod = (inv.monthYear || inv.billing_period || (inv as any).month_year || inv.payload?.meta?.billingPeriod || (inv as any).date || (inv as any).created_at || '').toUpperCase();
+
+    let matchesMonth = true;
+    if (filterMonth !== 'all') {
+      matchesMonth = rawPeriod.includes(filterMonth.toUpperCase());
+    }
+
+    let matchesYear = true;
+    if (filterYear !== 'all') {
+      matchesYear = rawPeriod.includes(String(filterYear));
+    }
+
+    return matchesMonth && matchesYear;
   });
 
   // Master checkbox toggle
@@ -410,20 +454,21 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
               className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs bg-white text-gray-800 shadow-sm outline-none focus:ring-2 focus:ring-[#20B2AA]/20 font-medium"
             >
               <option value="all">All Months</option>
-              {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+              {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m) => (
                 <option key={m} value={m}>
-                  {new Date(2000, m - 1, 1).toLocaleString('default', { month: 'short' })}
+                  {m}
                 </option>
               ))}
             </select>
 
             <select
               value={filterYear}
-              onChange={(e) => setFilterYear(parseInt(e.target.value))}
+              onChange={(e) => setFilterYear(e.target.value)}
               className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs bg-white text-gray-800 shadow-sm outline-none focus:ring-2 focus:ring-[#20B2AA]/20 font-medium"
             >
-              {[2024, 2025, 2026, 2027].map((year) => (
-                <option key={year} value={year}>
+              <option value="all">All Years</option>
+              {[2024, 2025, 2026, 2027, 2028].map((year) => (
+                <option key={year} value={String(year)}>
                   {year}
                 </option>
               ))}
@@ -553,18 +598,40 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
               ) : (
                 filteredInvoices.map((inv) => {
                   const isSelected = selectedIds.includes(inv.id);
-                  const clientDisplayName =
-                    inv.sites?.client_name ||
-                    inv.clientName ||
-                    (inv as any).client_name ||
-                    inv.payload?.party?.name ||
-                    'Unknown Client';
+                  const codeName =
+                    inv.sites?.code_name ||
+                    inv.sites?.codeName ||
+                    (inv as any).code_name ||
+                    (inv as any).codeName ||
+                    '';
                   const siteDisplayName =
                     inv.sites?.site_name ||
                     inv.siteName ||
                     (inv as any).site_name ||
                     inv.payload?.party?.siteName ||
                     '';
+                  const clientDisplayName =
+                    inv.sites?.client_name ||
+                    inv.clientName ||
+                    (inv as any).client_name ||
+                    inv.payload?.party?.name ||
+                    '';
+
+                  const displayTitle = codeName
+                    ? codeName
+                    : (siteDisplayName || clientDisplayName);
+                  const subTitle = codeName ? (siteDisplayName || clientDisplayName) : '';
+
+                  const rawPeriod =
+                    inv.monthYear ||
+                    inv.billing_period ||
+                    (inv as any).month_year ||
+                    inv.payload?.meta?.billingPeriod ||
+                    '';
+                  const monthMatch = rawPeriod.match(
+                    /(JANUARY|FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\s+\d{4}/i
+                  );
+                  const displayMonthYear = monthMatch ? monthMatch[0].toUpperCase() : rawPeriod;
                   const displayAmount = inv.grand_total || inv.amount || 0;
 
                   return (
@@ -590,16 +657,16 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
 
                       {/* Details Column */}
                       <td className="p-4 py-3.5">
-                        <div className="font-bold text-gray-900 text-sm">
-                          {clientDisplayName}
-                          {siteDisplayName && (
-                            <span className="text-xs text-gray-500 font-normal border-l border-gray-300 ml-2 pl-2">
-                              {siteDisplayName}
+                        <div className="font-bold text-gray-900 text-sm flex items-center gap-2">
+                          <span>{displayTitle}</span>
+                          {subTitle && (
+                            <span className="text-xs text-gray-500 font-normal border-l border-gray-300 pl-2">
+                              {subTitle}
                             </span>
                           )}
                         </div>
                         <div className="text-xs text-gray-400 font-mono mt-0.5">{inv.invoiceNo}</div>
-                        <div className="text-xs text-gray-400 font-medium">{inv.monthYear || inv.billing_period}</div>
+                        <div className="text-xs text-[#20B2AA] font-semibold mt-0.5">{displayMonthYear}</div>
                       </td>
 
                       {/* Amount Column */}

@@ -402,6 +402,8 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
         name: partyName,
         siteName: partySite,
         address: selectedSite.address || '',
+        contactNo: selectedSite.contactNo || (selectedSite as any).contact_no || '',
+        email: selectedSite.email || '',
         gstin: selectedSite.gstin || '',
         workOrderRefNo: selectedSite.workOrderRefNo || (selectedSite as any).work_order_ref || '',
         workOrderPeriod: selectedSite.workOrderPeriod || (selectedSite as any).work_order_period || '',

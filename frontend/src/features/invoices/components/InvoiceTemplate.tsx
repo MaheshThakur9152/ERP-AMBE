@@ -113,6 +113,16 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
                 </p>
               )}
               <p className="whitespace-pre-line text-zinc-900">{data.party.address}</p>
+              {Boolean(data.party.contactNo?.trim()) && (
+                <p className="font-normal text-zinc-900">
+                  Contact No: {data.party.contactNo}
+                </p>
+              )}
+              {Boolean(data.party.email?.trim()) && (
+                <p className="font-normal text-zinc-900">
+                  Email : {data.party.email}
+                </p>
+              )}
               {Boolean(data.party.gstin?.trim()) && (
                 <p className="font-normal text-zinc-900">GSTIN : {data.party.gstin}</p>
               )}

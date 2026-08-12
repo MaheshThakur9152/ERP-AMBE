@@ -201,6 +201,8 @@ export const pdfService = {
               <p style="margin: 2px 0; font-weight: bold; font-size: 12px;">${invoiceData.party.name}</p>
               ${invoiceData.party.siteName?.trim() ? `<p style="margin: 2px 0;">SITE NAME: ${invoiceData.party.siteName}</p>` : ''}
               <p style="margin: 2px 0; white-space: pre-line;">${invoiceData.party.address}</p>
+              ${invoiceData.party.contactNo?.trim() ? `<p style="margin: 2px 0;">Contact No: ${invoiceData.party.contactNo}</p>` : ''}
+              ${invoiceData.party.email?.trim() ? `<p style="margin: 2px 0;">Email : ${invoiceData.party.email}</p>` : ''}
               ${invoiceData.party.gstin?.trim() ? `<p style="margin: 2px 0;">GSTIN : ${invoiceData.party.gstin}</p>` : ''}
             </div>
             <div style="flex: 1; display: flex; flex-direction: column;">
