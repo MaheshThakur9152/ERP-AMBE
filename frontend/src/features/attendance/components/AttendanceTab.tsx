@@ -150,21 +150,48 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
 
   const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
 
+  const getWeeklyOffDayNum = (wOffStr: string = '') => {
+    const s = wOffStr.toUpperCase().trim();
+    if (s.startsWith('SUN')) return 0;
+    if (s.startsWith('MON')) return 1;
+    if (s.startsWith('TUE')) return 2;
+    if (s.startsWith('WED')) return 3;
+    if (s.startsWith('THU')) return 4;
+    if (s.startsWith('FRI')) return 5;
+    if (s.startsWith('SAT')) return 6;
+    return -1;
+  };
+
   const handleSaveStatus = (status: AttendanceStatus | null) => {
     if (!editingCell) return;
     const { empId, date } = editingCell;
+    const emp = employees.find((e) => e.id === empId);
+
+    const [rYear, rMonth, rDay] = date.split('-').map(Number);
+    const dateObj = new Date(rYear, rMonth - 1, rDay);
+    const dayOfWeekNum = dateObj.getDay();
+    const isWeeklyOffDay = emp && getWeeklyOffDayNum(emp.weeklyOff) === dayOfWeekNum;
+
+    let targetStatus = status;
+    let overtimeVal: string | undefined = undefined;
+
+    if (status === 'P' && isWeeklyOffDay) {
+      targetStatus = 'WOP';
+      overtimeVal = 'P';
+    }
 
     setAttendanceRecords((prev) => {
       const filtered = prev.filter((r) => !(r.employeeId === empId && r.date === date));
-      if (status !== null) {
+      if (targetStatus !== null) {
         filtered.push({
           id: Date.now().toString(),
           employeeId: empId,
           date,
-          status,
+          status: targetStatus,
+          overtimeStatus: overtimeVal,
           checkInTime: 'Manual',
           timestamp: new Date().toISOString(),
-          remarks: 'Added by Admin',
+          remarks: targetStatus === 'WOP' ? 'Present on Weekly Off' : 'Added by Admin',
         });
       }
       return filtered;
@@ -183,21 +210,71 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
             month: new Date(selectedYear, selectedMonth - 1, 1).toLocaleString('default', { month: 'long' }),
             year: selectedYear,
             daysCount: daysInMonth,
-            employees: filteredEmployees.map((emp, idx) => ({
-              id: emp.id,
-              srNo: idx + 1,
-              biometricCode: emp.biometricCode || '',
-              employeeName: emp.name || '',
-              weeklyOff: emp.weeklyOff || 'SUN',
-              designation: emp.role,
-              shifts: {
-                regular: Array.from({ length: daysInMonth }, (_, i) => {
-                  const dateStr = `${selectedYear}-${selectedMonth.toString().padStart(2, '0')}-${(i + 1).toString().padStart(2, '0')}`;
-                  return attendanceByEmployee.get(emp.id)?.get(dateStr)?.status || '';
-                }),
-                overtime: Array.from({ length: daysInMonth }, () => ''),
-              },
-            })),
+            employees: filteredEmployees.map((emp, idx) => {
+              const empRecordsMap = attendanceByEmployee.get(emp.id) || new Map();
+
+              // Calculate lastActiveIndex (highest day index where emp has a recorded status)
+              let lastActiveIndex = -1;
+              for (let i = 0; i < daysInMonth; i++) {
+                const d = i + 1;
+                const dateStr = `${selectedYear}-${selectedMonth.toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}`;
+                const rec = empRecordsMap.get(dateStr);
+                if (rec && rec.status) {
+                  lastActiveIndex = Math.max(lastActiveIndex, i);
+                }
+              }
+
+              // If current month & year, cap at today's date
+              const now = new Date();
+              if (now.getFullYear() === selectedYear && now.getMonth() + 1 === selectedMonth) {
+                lastActiveIndex = Math.max(lastActiveIndex, now.getDate() - 1);
+              }
+
+              const empWeeklyOffDay = getWeeklyOffDayNum(emp.weeklyOff);
+
+              const regularShifts = Array.from({ length: daysInMonth }, (_, i) => {
+                const d = i + 1;
+                const dateStr = `${selectedYear}-${selectedMonth.toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}`;
+                const rec = empRecordsMap.get(dateStr);
+
+                if (rec) {
+                  if (rec.status === 'WOP') return 'W/O';
+                  return rec.status;
+                }
+
+                // Auto-fill W/O ONLY if index <= lastActiveIndex and matches weeklyOff day
+                const dateObj = new Date(selectedYear, selectedMonth - 1, d);
+                if (i <= lastActiveIndex && empWeeklyOffDay !== -1 && dateObj.getDay() === empWeeklyOffDay) {
+                  return 'W/O';
+                }
+
+                return '';
+              });
+
+              const overtimeShifts = Array.from({ length: daysInMonth }, (_, i) => {
+                const d = i + 1;
+                const dateStr = `${selectedYear}-${selectedMonth.toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}`;
+                const rec = empRecordsMap.get(dateStr);
+
+                if (rec && (rec.status === 'WOP' || rec.overtimeStatus === 'P')) {
+                  return 'P';
+                }
+                return '';
+              });
+
+              return {
+                id: emp.id,
+                srNo: idx + 1,
+                biometricCode: emp.biometricCode || '',
+                employeeName: emp.name || '',
+                weeklyOff: emp.weeklyOff || 'SUN',
+                designation: emp.role,
+                shifts: {
+                  regular: regularShifts,
+                  overtime: overtimeShifts,
+                },
+              };
+            }),
           }}
         />
       </div>
@@ -392,26 +469,30 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
                     </tr>
                   )}
 
-                  <tr className="border-b border-gray-100 hover:bg-slate-50/60 transition-colors">
-                    {/* Employee Profile Cell */}
-                    <td className="p-3 sticky left-0 bg-white z-20 border-r border-gray-200 text-left font-medium text-gray-900 shadow-2xs">
+                  {/* Row 1: Main / Regular Shift */}
+                  <tr className="border-b border-slate-200 hover:bg-slate-50/80 transition-colors h-8">
+                    {/* Employee Profile Cell (Spans 2 rows with thick bottom & right borders) */}
+                    <td
+                      rowSpan={2}
+                      className="p-3 sticky left-0 bg-white z-20 border-r-2 border-b-2 border-slate-400 text-left font-medium text-gray-900 shadow-xs align-middle"
+                    >
                       <div className="flex items-center justify-between gap-2 min-w-[210px]">
                         <div className="flex items-center gap-3">
                           {/* Circle Avatar with Initials */}
-                          <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 text-white flex items-center justify-center font-bold text-xs shadow-xs flex-shrink-0">
-                            NS
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-xs flex-shrink-0">
+                            {(emp.name || 'NS').slice(0, 2).toUpperCase()}
                           </div>
 
                           <div className="text-left">
                             <div className="flex items-center gap-1.5">
                               <span className="font-bold text-gray-900 text-xs">{emp.name}</span>
                               {emp.weeklyOff && (
-                                <span className="text-[9px] font-extrabold text-red-600 bg-red-100/80 px-1.5 py-0.2 rounded uppercase">
+                                <span className="text-[9px] font-extrabold text-red-600 bg-red-100/90 border border-red-200 px-1.5 py-0.2 rounded uppercase">
                                   {emp.weeklyOff}
                                 </span>
                               )}
                             </div>
-                            <div className="flex items-center gap-2 text-[11px] text-gray-400 font-mono mt-0.5">
+                            <div className="flex items-center gap-2 text-[11px] text-gray-500 font-mono mt-0.5">
                               <span>{emp.biometricCode}</span>
                               {emp.phone && (
                                 <span className="text-blue-600 font-sans font-bold">
@@ -426,7 +507,7 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
                           <button
                             type="button"
                             onClick={() => onEditDeductions(emp)}
-                            className="p-1 text-gray-300 hover:text-teal-600 rounded transition-colors"
+                            className="p-1 text-gray-400 hover:text-teal-600 rounded transition-colors"
                           >
                             <Banknote size={14} />
                           </button>
@@ -434,52 +515,49 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
                       </div>
                     </td>
 
-                    {/* Day Cells */}
+                    {/* Day Cells (Regular Shift) */}
                     {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => {
                       const dateStr = `${selectedYear}-${selectedMonth
                         .toString()
                         .padStart(2, '0')}-${d.toString().padStart(2, '0')}`;
                       const record = empMap.get(dateStr);
 
-                      let statusBadge = <span className="text-gray-300/80">-</span>;
-                      let cellBg = 'hover:bg-gray-50';
+                      let regStatus = record?.status;
+                      if (regStatus === 'WOP') regStatus = 'W/O';
 
-                      if (record) {
-                        switch (record.status) {
+                      let statusBadge = <span className="text-slate-300 font-bold text-xs">-</span>;
+                      let cellBg = 'bg-white hover:bg-slate-100/70';
+
+                      if (regStatus) {
+                        switch (regStatus) {
                           case 'P':
-                            cellBg = 'bg-emerald-50/70 hover:bg-emerald-100/70';
+                            cellBg = 'bg-emerald-100/70 hover:bg-emerald-200/70';
                             statusBadge = (
-                              <span className="font-extrabold text-emerald-700 text-xs">P</span>
+                              <span className="font-extrabold text-emerald-800 text-xs">P</span>
                             );
                             break;
                           case 'A':
-                            cellBg = 'bg-red-50 hover:bg-red-100';
+                            cellBg = 'bg-red-100/70 hover:bg-red-200/70';
                             statusBadge = (
-                              <span className="font-extrabold text-red-600 text-xs">A</span>
+                              <span className="font-extrabold text-red-700 text-xs">A</span>
                             );
                             break;
                           case 'HD':
-                            cellBg = 'bg-amber-50 hover:bg-amber-100';
+                            cellBg = 'bg-amber-100/80 hover:bg-amber-200/80';
                             statusBadge = (
-                              <span className="font-bold text-amber-700 text-[11px]">HD</span>
+                              <span className="font-extrabold text-amber-800 text-[11px]">HD</span>
                             );
                             break;
                           case 'W/O':
-                            cellBg = 'bg-blue-50/70 hover:bg-blue-100/70';
+                            cellBg = 'bg-blue-100/80 hover:bg-blue-200/80';
                             statusBadge = (
-                              <span className="font-bold text-blue-600 text-[11px]">W/O</span>
-                            );
-                            break;
-                          case 'WOP':
-                            cellBg = 'bg-purple-50 hover:bg-purple-100';
-                            statusBadge = (
-                              <span className="font-bold text-purple-700 text-[11px]">WOP</span>
+                              <span className="font-extrabold text-blue-800 text-[11px]">W/O</span>
                             );
                             break;
                           default:
                             statusBadge = (
-                              <span className="font-medium text-gray-600 text-xs">
-                                {record.status}
+                              <span className="font-bold text-gray-700 text-xs">
+                                {regStatus}
                               </span>
                             );
                         }
@@ -487,7 +565,7 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
 
                       return (
                         <td
-                          key={d}
+                          key={`reg-${d}`}
                           onClick={() =>
                             setEditingCell({
                               empId: emp.id,
@@ -496,9 +574,48 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
                               currentRecord: record,
                             })
                           }
-                          className={`border-r border-gray-100 p-1 text-center align-middle cursor-pointer transition-colors ${cellBg}`}
+                          className={`border-r border-b border-slate-300 p-1 text-center align-middle cursor-pointer transition-colors ${cellBg}`}
                         >
                           {statusBadge}
+                        </td>
+                      );
+                    })}
+                  </tr>
+
+                  {/* Row 2: Overtime / Extra Shift (Amber-tinted with thick bottom border) */}
+                  <tr className="border-b-2 border-slate-400 hover:bg-amber-100/40 transition-colors h-7 bg-amber-50/40">
+                    {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => {
+                      const dateStr = `${selectedYear}-${selectedMonth
+                        .toString()
+                        .padStart(2, '0')}-${d.toString().padStart(2, '0')}`;
+                      const record = empMap.get(dateStr);
+
+                      const isOt = record?.status === 'WOP' || record?.overtimeStatus === 'P';
+
+                      return (
+                        <td
+                          key={`ot-${d}`}
+                          onClick={() =>
+                            setEditingCell({
+                              empId: emp.id,
+                              empName: emp.name,
+                              date: dateStr,
+                              currentRecord: record,
+                            })
+                          }
+                          className={`border-r border-b-2 border-slate-400 p-1 text-center align-middle cursor-pointer transition-colors ${
+                            isOt
+                              ? 'bg-emerald-200/90 hover:bg-emerald-300/90'
+                              : 'hover:bg-amber-100/60'
+                          }`}
+                        >
+                          {isOt ? (
+                            <span className="font-black text-emerald-900 text-xs bg-emerald-300/90 border border-emerald-400 px-1.5 py-0.2 rounded shadow-2xs">
+                              P
+                            </span>
+                          ) : (
+                            <span className="text-slate-300 font-bold text-xs">-</span>
+                          )}
                         </td>
                       );
                     })}
