@@ -17,7 +17,7 @@ import {
   Loader2,
   AlertTriangle,
 } from 'lucide-react';
-import { formatCurrency } from '@/features/invoices/utils/invoiceCalculator';
+import { formatCurrency, computeInvoiceCalculations } from '@/features/invoices/utils/invoiceCalculator';
 import { InvoiceData } from '@/features/invoices/types/invoice';
 import { InvoiceTemplate } from '@/features/invoices/components/InvoiceTemplate';
 import { MaterialInvoiceTemplate } from '@/features/invoices/components/MaterialInvoiceTemplate';
@@ -32,10 +32,55 @@ interface InvoiceHubTableProps {
 }
 
 const convertRecordToInvoiceData = (inv: InvoiceRecord): InvoiceData => {
+  const comp = inv.companies;
+  const site = inv.sites;
+
+  const mgmtPercent = Number(
+    inv.payload?.mgmtPercent ??
+    (inv as any).mgmt_percent ??
+    (inv as any).mgmtPercent ??
+    (inv as any).management_fee_percent ??
+    site?.management_fee_percent ??
+    site?.mgmt_percent ??
+    5
+  );
+
+  let machineryCharges = Number(
+    inv.payload?.machineryCharges ||
+    (inv as any).machinery_charges ||
+    (inv as any).machineryCharges ||
+    site?.default_machinery_charges ||
+    site?.defaultMachineryCharges ||
+    0
+  );
+
+  let materialCharges = Number(
+    inv.payload?.materialCharges ||
+    (inv as any).material_charges ||
+    (inv as any).materialCharges ||
+    site?.default_material_charges ||
+    site?.defaultMaterialCharges ||
+    0
+  );
+
+  const itemsList = inv.payload?.items || inv.line_items || [];
+  const targetAmount = Number(inv.amount || (inv as any).grand_total || inv.payload?.meta?.amount || 0);
+
+  if (machineryCharges === 0 && materialCharges === 0 && targetAmount > 0 && itemsList.length > 0) {
+    const basicCalc = computeInvoiceCalculations(itemsList, mgmtPercent, 9, 9, 0, 0);
+    const diff = targetAmount - basicCalc.grandTotal;
+    if (diff > 5) {
+      materialCharges = Math.round(diff / 1.18);
+    }
+  }
+
   if (inv.payload && inv.payload.company && inv.payload.company.name) {
     return {
       ...inv.payload,
       isMaterial: inv.is_material || inv.payload?.isMaterial || false,
+      mgmtPercent,
+      machineryCharges,
+      materialCharges,
       delivery: inv.payload?.delivery || {},
     };
   }
@@ -47,6 +92,9 @@ const convertRecordToInvoiceData = (inv: InvoiceRecord): InvoiceData => {
         return {
           ...parsed,
           isMaterial: inv.is_material || parsed.isMaterial || false,
+          mgmtPercent: Number(parsed.mgmtPercent ?? mgmtPercent),
+          machineryCharges: Number(parsed.machineryCharges || machineryCharges),
+          materialCharges: Number(parsed.materialCharges || materialCharges),
           delivery: parsed.delivery || {},
         };
       }
@@ -54,9 +102,6 @@ const convertRecordToInvoiceData = (inv: InvoiceRecord): InvoiceData => {
       console.error(e);
     }
   }
-
-  const comp = inv.companies;
-  const site = inv.sites;
 
   const companyName =
     comp?.legal_name ||
@@ -135,7 +180,9 @@ const convertRecordToInvoiceData = (inv: InvoiceRecord): InvoiceData => {
         amount: inv.amount,
       },
     ],
-    mgmtPercent: 5,
+    mgmtPercent: Number((inv as any).mgmt_percent ?? (inv as any).mgmtPercent ?? (inv as any).management_fee_percent ?? site?.management_fee_percent ?? site?.mgmt_percent ?? 5),
+    machineryCharges: Number((inv as any).machinery_charges ?? (inv as any).machineryCharges ?? 0),
+    materialCharges: Number((inv as any).material_charges ?? (inv as any).materialCharges ?? 0),
     cgstPercent: 9,
     sgstPercent: 9,
     terms: formattedTerms,

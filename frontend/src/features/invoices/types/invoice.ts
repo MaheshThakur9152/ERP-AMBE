@@ -70,14 +70,16 @@ export interface BankDetails {
 
 export interface InvoiceCalculations {
   subTotal: number;
-  mgmtChargesPercent?: number;
-  mgmtChargesAmount?: number;
-  totalBeforeTax?: number;
-  cgstPercent?: number;
-  cgstAmount?: number;
-  sgstPercent?: number;
-  sgstAmount?: number;
-  totalWithTax?: number;
+  mgmtChargesPercent: number;
+  mgmtChargesAmount: number;
+  machineryCharges: number;
+  materialCharges: number;
+  totalBeforeTax: number;
+  cgstPercent: number;
+  cgstAmount: number;
+  sgstPercent: number;
+  sgstAmount: number;
+  totalWithTax: number;
   roundOff: number;
   grandTotal: number;
   amountInWords: string;
@@ -90,6 +92,8 @@ export interface InvoiceData {
   bank: BankDetails;
   items: InvoiceLineItem[];
   mgmtPercent?: number;
+  machineryCharges?: number;
+  materialCharges?: number;
   cgstPercent?: number;
   sgstPercent?: number;
   terms?: string;

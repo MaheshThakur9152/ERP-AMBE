@@ -50,6 +50,16 @@
   ::-webkit-scrollbar-thumb:hover { background: #179B94; }
 }
 
+/* Hide number input spinners across all browsers */
+input[type=number]::-webkit-inner-spin-button, 
+input[type=number]::-webkit-outer-spin-button { 
+  -webkit-appearance: none; 
+  margin: 0; 
+}
+input[type=number] { 
+  -moz-appearance: textfield; 
+}
+
 /* Print rules for Attendance print preview */
 @media screen {
   .attendance-print-area {

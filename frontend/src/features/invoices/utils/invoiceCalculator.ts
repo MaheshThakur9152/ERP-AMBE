@@ -23,7 +23,9 @@ export function computeInvoiceCalculations(
   items: InvoiceLineItem[],
   mgmtPercent: number = 5,
   cgstPercent: number = 9,
-  sgstPercent: number = 9
+  sgstPercent: number = 9,
+  machineryCharges: number = 0,
+  materialCharges: number = 0
 ): InvoiceCalculations {
   // 1. Sub total from items
   const subTotalRaw = items.reduce((sum, item) => sum + (item.amount || 0), 0);
@@ -33,32 +35,38 @@ export function computeInvoiceCalculations(
   const mgmtChargesAmountRaw = (subTotal * mgmtPercent) / 100;
   const mgmtChargesAmount = Math.round(mgmtChargesAmountRaw * 100) / 100;
 
-  // 3. Total before tax
-  const totalBeforeTax = Math.round((subTotal + mgmtChargesAmount) * 100) / 100;
+  // 3. Machinery & Material charges
+  const machinery = Number(machineryCharges || 0);
+  const materials = Number(materialCharges || 0);
 
-  // 4. CGST & SGST
+  // 4. Total before tax
+  const totalBeforeTax = Math.round((subTotal + mgmtChargesAmount + machinery + materials) * 100) / 100;
+
+  // 5. CGST & SGST
   const cgstAmountRaw = (totalBeforeTax * cgstPercent) / 100;
   const cgstAmount = Math.round(cgstAmountRaw * 100) / 100;
 
   const sgstAmountRaw = (totalBeforeTax * sgstPercent) / 100;
   const sgstAmount = Math.round(sgstAmountRaw * 100) / 100;
 
-  // 5. Total with tax
+  // 6. Total with tax
   const totalWithTaxRaw = totalBeforeTax + cgstAmount + sgstAmount;
   const totalWithTax = Math.round(totalWithTaxRaw * 100) / 100;
 
-  // 6. Round off calculation
+  // 7. Round off calculation
   const grandTotalRounded = Math.round(totalWithTax);
   const roundOff = Math.round((grandTotalRounded - totalWithTax) * 100) / 100;
   const grandTotal = grandTotalRounded;
 
-  // 7. Amount in words
+  // 8. Amount in words
   const amountInWords = numberToIndianWords(grandTotal);
 
   return {
     subTotal,
     mgmtChargesPercent: mgmtPercent,
     mgmtChargesAmount,
+    machineryCharges: machinery,
+    materialCharges: materials,
     totalBeforeTax,
     cgstPercent,
     cgstAmount,

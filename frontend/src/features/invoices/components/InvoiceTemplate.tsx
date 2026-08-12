@@ -1,6 +1,7 @@
 import React from 'react';
 import { InvoiceData } from '../types/invoice';
 import { computeInvoiceCalculations, formatCurrency, formatInteger } from '../utils/invoiceCalculator';
+import { formatCleanCompanyAddress } from '@/services/pdfService';
 
 interface InvoiceTemplateProps {
   data: InvoiceData;
@@ -12,10 +13,12 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
   colorMode = 'color',
 }) => {
   const calc = computeInvoiceCalculations(
-    data.items,
-    data.mgmtPercent,
-    data.cgstPercent,
-    data.sgstPercent
+    data.items || [],
+    data.mgmtPercent ?? 5,
+    data.cgstPercent ?? 9,
+    data.sgstPercent ?? 9,
+    data.machineryCharges || 0,
+    data.materialCharges || 0
   );
 
   const MIN_ROWS = 8;
@@ -63,8 +66,15 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
           <div className="grid grid-cols-12 items-stretch border-b border-black">
             {/* Left Column (col-span-7 p-2): Company Address, Contact, CIN, GSTIN */}
             <div className="col-span-7 p-2 space-y-0.5">
-              <p className="text-[11px] text-zinc-900">{data.company.addressLine1}</p>
-              <p className="text-[11px] text-zinc-900">{data.company.addressLine2}</p>
+              {(() => {
+                const clean = formatCleanCompanyAddress(data.company.addressLine1, data.company.addressLine2);
+                return (
+                  <>
+                    {clean.line1 && <p className="text-[11px] text-zinc-900">{clean.line1}</p>}
+                    {clean.line2 && <p className="text-[11px] text-zinc-900">{clean.line2}</p>}
+                  </>
+                );
+              })()}
               <p className="text-[11px] text-zinc-900">Contact No: {data.company.contactNo}</p>
               <p className="text-[11px] text-zinc-900">Email : {data.company.emailWebsite}</p>
               {Boolean(data.company.cinNo?.trim()) && (
@@ -175,10 +185,10 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
                       ) : null /* Condition B: Overtime Row -> do NOT render HSN & Rate td cells */}
 
                       <td className="border-r border-black py-0.5 px-1 text-center font-normal">
-                        {item.workingDays > 0 ? item.workingDays : 0}
+                        {(item.workingDays || 0) > 0 ? item.workingDays : 0}
                       </td>
                       <td className="border-r border-black py-0.5 px-1 text-center font-normal">
-                        {item.persons > 0 ? item.persons : 0}
+                        {(item.persons || 0) > 0 ? item.persons : 0}
                       </td>
                       <td className="py-0.5 px-1.5 text-right font-normal">
                         {formatCurrency(item.amount)}
@@ -242,12 +252,18 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
                   <span>{formatCurrency(calc.subTotal)}</span>
                 </div>
 
-                {calc.mgmtChargesPercent > 0 && (
-                  <div className="flex justify-between p-1">
-                    <span>Management charges @ {calc.mgmtChargesPercent}%</span>
-                    <span>{formatCurrency(calc.mgmtChargesAmount)}</span>
-                  </div>
-                )}
+                <div className="flex justify-between p-1">
+                  <span>Management charges @ {calc.mgmtChargesPercent}%</span>
+                  <span>{formatCurrency(calc.mgmtChargesAmount)}</span>
+                </div>
+                <div className="flex justify-between p-1">
+                  <span>Machinery Charges</span>
+                  <span>{formatCurrency(Number(data.machineryCharges ?? calc.machineryCharges ?? 0))}</span>
+                </div>
+                <div className="flex justify-between p-1">
+                  <span>Material Charges</span>
+                  <span>{formatCurrency(Number(data.materialCharges ?? calc.materialCharges ?? 0))}</span>
+                </div>
 
                 <div className="flex justify-between p-1 font-normal">
                   <span>Total</span>

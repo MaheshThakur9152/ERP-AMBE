@@ -54,6 +54,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
     resolver: zodResolver(siteSchema) as any,
     defaultValues: {
       siteName: '',
+      codeName: '',
       clientName: '',
       gstin: '',
       workOrderRefNo: '',
@@ -62,9 +63,11 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
       contactNo: '',
       email: '',
       mgmtPercent: 5,
+      defaultMachineryCharges: 0,
+      defaultMaterialCharges: 0,
       status: 'Active',
       rateCards: [
-        { roleName: '', monthlyRate: 0, workingDays: 31, hsnCode: '9985' },
+        { roleName: '', monthlyRate: 0, workingDays: 31, hsnCode: '9985', persons: 1 },
       ],
     },
   });
@@ -81,6 +84,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
       }
       reset({
         siteName: editingSite.siteName || '',
+        codeName: editingSite.codeName || editingSite.code_name || '',
         clientName: editingSite.clientName || '',
         gstin: editingSite.gstin || '',
         workOrderRefNo: editingSite.workOrderRefNo || '',
@@ -88,13 +92,16 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
         address: editingSite.address || '',
         contactNo: editingSite.contactNo || '',
         email: editingSite.email || '',
-        mgmtPercent: editingSite.mgmtPercent ?? 5,
+        mgmtPercent: editingSite.mgmtPercent ?? editingSite.management_fee_percent ?? 5,
+        defaultMachineryCharges: editingSite.defaultMachineryCharges ?? editingSite.default_machinery_charges ?? 0,
+        defaultMaterialCharges: editingSite.defaultMaterialCharges ?? editingSite.default_material_charges ?? 0,
         status: editingSite.status || 'Active',
         rateCards: editingSite.rateCards || [],
       });
     } else {
       reset({
         siteName: '',
+        codeName: '',
         clientName: '',
         gstin: '',
         workOrderRefNo: '',
@@ -103,9 +110,11 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
         contactNo: '',
         email: '',
         mgmtPercent: 5,
+        defaultMachineryCharges: 0,
+        defaultMaterialCharges: 0,
         status: 'Active',
         rateCards: [
-          { roleName: '', monthlyRate: 0, workingDays: 31, hsnCode: '9985' },
+          { roleName: '', monthlyRate: 0, workingDays: 31, hsnCode: '9985', persons: 1 },
         ],
       });
     }
@@ -117,9 +126,13 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
     const payload = {
       ...data,
       company_id: selectedCompanyId || (companies[0]?.id || undefined),
+      code_name: data.codeName || '',
+      codeName: data.codeName || '',
       contact_no: data.contactNo || '',
       email: data.email || '',
       management_fee_percent: Number(data.mgmtPercent) ?? 5,
+      default_machinery_charges: Number(data.defaultMachineryCharges) || 0,
+      default_material_charges: Number(data.defaultMaterialCharges) || 0,
     };
 
     try {
@@ -198,7 +211,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-gray-700 mb-1">Site Name *</label>
                 <input
@@ -210,6 +223,16 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
                 {errors.siteName && (
                   <p className="text-[11px] text-red-500 mt-1">{errors.siteName.message}</p>
                 )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Code Name (Internal)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Ajmera(HK)"
+                  {...register('codeName')}
+                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 font-mono focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
+                />
               </div>
 
               <div>
@@ -324,6 +347,30 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
                 />
               </div>
             </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Default Machinery Charges (₹)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="0"
+                  {...register('defaultMachineryCharges', { valueAsNumber: true })}
+                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Default Material Charges (₹)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="0"
+                  {...register('defaultMaterialCharges', { valueAsNumber: true })}
+                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
+                />
+              </div>
+            </div>
           </div>
 
           {/* Section 3: Dynamic Rate Cards (useFieldArray) */}
@@ -336,7 +383,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
               <button
                 type="button"
                 onClick={() =>
-                  append({ roleName: '', monthlyRate: 0, workingDays: 31, hsnCode: '9985' })
+                  append({ roleName: '', monthlyRate: 0, workingDays: 31, hsnCode: '9985', persons: 1 })
                 }
                 className="text-xs px-3 py-1.5 rounded-lg bg-[#20B2AA]/10 text-[#20B2AA] hover:bg-[#20B2AA]/20 border border-[#20B2AA]/30 flex items-center gap-1 font-semibold transition-colors"
               >
@@ -355,7 +402,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
                   key={field.id}
                   className="grid grid-cols-12 gap-2 bg-slate-50 p-3.5 rounded-xl border border-gray-200 items-end"
                 >
-                  <div className="col-span-5">
+                  <div className="col-span-4">
                     <label className="block text-[11px] font-medium text-gray-600 mb-1">Role / Designation *</label>
                     <input
                       type="text"
@@ -384,7 +431,18 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
                     />
                   </div>
 
-                  <div className="col-span-2 flex items-center justify-end gap-1">
+                  <div className="col-span-2">
+                    <label className="block text-[11px] font-medium text-gray-600 mb-1">Persons</label>
+                    <input
+                      type="number"
+                      placeholder="1"
+                      min={1}
+                      {...register(`rateCards.${idx}.persons`, { valueAsNumber: true })}
+                      className="w-full bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-800 font-mono text-center focus:outline-none focus:border-[#20B2AA]"
+                    />
+                  </div>
+
+                  <div className="col-span-1 flex items-center justify-end">
                     {fields.length > 1 && (
                       <button
                         type="button"

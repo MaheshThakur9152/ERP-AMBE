@@ -80,6 +80,9 @@ function mapRowToInvoiceRecord(row: any): InvoiceRecord {
           name: row.payload.party?.name || clientName,
           siteName: row.payload.party?.siteName || siteName,
         },
+        mgmtPercent: Number(row.payload.mgmtPercent ?? row.mgmt_percent ?? row.mgmtPercent ?? row.management_fee_percent ?? site?.management_fee_percent ?? site?.mgmt_percent ?? 5),
+        machineryCharges: Number(row.payload.machineryCharges ?? row.machinery_charges ?? row.machineryCharges ?? 0),
+        materialCharges: Number(row.payload.materialCharges ?? row.material_charges ?? row.materialCharges ?? 0),
       }
     : {
         company: defaultCompany,
@@ -87,7 +90,9 @@ function mapRowToInvoiceRecord(row: any): InvoiceRecord {
         party: defaultParty,
         bank: defaultBank,
         items: row.line_items || [],
-        mgmtPercent: 5,
+        mgmtPercent: Number(row.mgmt_percent ?? row.mgmtPercent ?? row.management_fee_percent ?? site?.management_fee_percent ?? site?.mgmt_percent ?? 5),
+        machineryCharges: Number(row.machinery_charges ?? row.machineryCharges ?? 0),
+        materialCharges: Number(row.material_charges ?? row.materialCharges ?? 0),
         cgstPercent: 9,
         sgstPercent: 9,
         terms: formattedTerms,
@@ -125,7 +130,7 @@ function mapRowToInvoiceRecord(row: any): InvoiceRecord {
     companies: row.companies,
     is_material: row.is_material || row.payload?.isMaterial || false,
     payload: fullPayload,
-    created_at: row.created_at,
+    created_at: row.created_at || row.createdAt,
     updated_at: row.updated_at,
   };
 }
@@ -187,6 +192,10 @@ export class InvoiceService {
       sub_total: payload.sub_total || payload.subTotal || 0,
       tax_total: payload.tax_total || payload.taxTotal || 0,
       grand_total: payload.grand_total || payload.amount || 0,
+      management_fee_percent: payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? payload.payload?.mgmtPercent ?? 5,
+      mgmt_percent: payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? payload.payload?.mgmtPercent ?? 5,
+      machinery_charges: payload.machinery_charges ?? payload.machineryCharges ?? payload.payload?.machineryCharges ?? 0,
+      material_charges: payload.material_charges ?? payload.materialCharges ?? payload.payload?.materialCharges ?? 0,
       challan_no: payload.challan_no || payload.challanNo || payload.meta?.challanNo || '',
       challan_date: payload.challan_date || payload.challanDate || payload.meta?.challanDate || '',
       buyer_order_no: payload.buyer_order_no || payload.buyerOrderNo || payload.meta?.buyerOrderNo || '',
@@ -195,6 +204,7 @@ export class InvoiceService {
       destination: payload.destination || payload.meta?.destination || '',
       terms_of_delivery: payload.terms_of_delivery || payload.termsOfDelivery || payload.meta?.termsOfDelivery || '',
       is_material: payload.is_material || payload.isMaterial || false,
+      payload: payload.payload || payload.invoice_data || payload,
       created_at: now,
     };
 

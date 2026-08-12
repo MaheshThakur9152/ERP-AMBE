@@ -4,6 +4,7 @@ export interface RateCardItem {
   monthlyRate: number;
   workingDays?: number;
   hsnCode?: string;
+  persons?: number;
 }
 
 export interface Site {
@@ -11,6 +12,8 @@ export interface Site {
   company_id?: string;
   companyId?: string;
   siteName: string;
+  code_name?: string;
+  codeName?: string;
   clientName: string;
   gstin?: string;
   workOrderRefNo?: string;
@@ -21,6 +24,10 @@ export interface Site {
   status: 'Active' | 'Inactive';
   management_fee_percent?: number;
   mgmtPercent?: number;
+  default_machinery_charges?: number;
+  defaultMachineryCharges?: number;
+  default_material_charges?: number;
+  defaultMaterialCharges?: number;
   createdAt?: string;
   created_at?: string;
   updated_at?: string;

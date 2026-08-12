@@ -8,6 +8,8 @@ function mapRowToSite(row: any): Site {
     company_id: row.company_id || row.companyId || '',
     companyId: row.company_id || row.companyId || '',
     siteName: row.site_name || row.siteName || '',
+    code_name: row.code_name || row.codeName || '',
+    codeName: row.code_name || row.codeName || '',
     clientName: row.client_name || row.clientName || '',
     gstin: row.gstin || '',
     workOrderRefNo: row.work_order_ref || row.work_order_ref_no || row.workOrderRefNo || '',
@@ -18,6 +20,10 @@ function mapRowToSite(row: any): Site {
     status: row.status || 'Active',
     management_fee_percent: row.management_fee_percent ?? row.mgmt_percent ?? row.mgmtPercent ?? 5,
     mgmtPercent: row.management_fee_percent ?? row.mgmt_percent ?? row.mgmtPercent ?? 5,
+    default_machinery_charges: Number(row.default_machinery_charges ?? row.defaultMachineryCharges ?? 0),
+    defaultMachineryCharges: Number(row.default_machinery_charges ?? row.defaultMachineryCharges ?? 0),
+    default_material_charges: Number(row.default_material_charges ?? row.defaultMaterialCharges ?? 0),
+    defaultMaterialCharges: Number(row.default_material_charges ?? row.defaultMaterialCharges ?? 0),
     rateCards: row.rate_cards || row.rateCards || [],
     createdAt: row.created_at || row.createdAt,
     created_at: row.created_at,
@@ -78,6 +84,7 @@ export class SiteService {
       company_id: companyId,
       client_name: payload.client_name || payload.clientName,
       site_name: payload.site_name || payload.siteName || '',
+      code_name: payload.code_name || payload.codeName || '',
       address: payload.address,
       gstin: payload.gstin || '',
       work_order_ref: payload.work_order_ref || payload.workOrderRefNo || '',
@@ -85,6 +92,8 @@ export class SiteService {
       contact_no: payload.contact_no || payload.contactNo || '',
       email: payload.email || '',
       management_fee_percent: payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? 5,
+      default_machinery_charges: Number(payload.default_machinery_charges ?? payload.defaultMachineryCharges ?? 0),
+      default_material_charges: Number(payload.default_material_charges ?? payload.defaultMaterialCharges ?? 0),
       rate_cards: payload.rate_cards || payload.rateCards || [],
       created_at: now,
     };
@@ -113,6 +122,9 @@ export class SiteService {
     if (payload.siteName !== undefined || payload.site_name !== undefined) {
       updateData.site_name = payload.siteName || payload.site_name || '';
     }
+    if (payload.codeName !== undefined || payload.code_name !== undefined) {
+      updateData.code_name = payload.codeName || payload.code_name || '';
+    }
     if (payload.clientName !== undefined || payload.client_name !== undefined) {
       updateData.client_name = payload.clientName || payload.client_name || '';
     }
@@ -125,6 +137,12 @@ export class SiteService {
     }
     if (payload.management_fee_percent !== undefined || payload.mgmt_percent !== undefined || payload.mgmtPercent !== undefined) {
       updateData.management_fee_percent = payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent;
+    }
+    if (payload.default_machinery_charges !== undefined || payload.defaultMachineryCharges !== undefined) {
+      updateData.default_machinery_charges = Number(payload.default_machinery_charges ?? payload.defaultMachineryCharges ?? 0);
+    }
+    if (payload.default_material_charges !== undefined || payload.defaultMaterialCharges !== undefined) {
+      updateData.default_material_charges = Number(payload.default_material_charges ?? payload.defaultMaterialCharges ?? 0);
     }
     if (payload.address !== undefined) updateData.address = payload.address;
     if (payload.contactNo !== undefined || payload.contact_no !== undefined) {

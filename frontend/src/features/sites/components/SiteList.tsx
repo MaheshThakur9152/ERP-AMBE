@@ -143,7 +143,14 @@ export const SiteList: React.FC<SiteListProps> = ({
                     <td className="py-3.5 px-4 font-semibold text-gray-900">
                       <div className="flex items-center gap-2">
                         <MapPin className="w-4 h-4 text-[#20B2AA] flex-shrink-0" />
-                        <span>{site.siteName}</span>
+                        <div className="flex items-center gap-2">
+                          <span>{site.siteName}</span>
+                          {(site.codeName || site.code_name) && (
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-teal-50 text-[#20B2AA] border border-teal-200 font-semibold">
+                              {site.codeName || site.code_name}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </td>
                     <td className="py-3.5 px-4 text-gray-800 font-medium">{site.clientName}</td>

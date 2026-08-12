@@ -80,7 +80,7 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
     fetchSitesApi()
       .then((data) => {
         setSites(data);
-        if (data.length > 0) {
+        if (data.length > 0 && !initialRecord) {
           setSelectedSiteId(data[0].id);
         }
       })
@@ -94,12 +94,46 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
       });
   }, []);
 
-  const [invoiceType, setInvoiceType] = useState<'Tax Invoice' | 'Proforma Invoice'>(
-    'Tax Invoice'
-  );
+  const MONTHS = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+
+  const getDaysInMonth = (monthIndex: number, year: number): number => {
+    return new Date(year, monthIndex + 1, 0).getDate();
+  };
+
+  const getOrdinalSuffix = (day: number): string => {
+    if (day >= 11 && day <= 13) return 'th';
+    switch (day % 10) {
+      case 1: return 'st';
+      case 2: return 'nd';
+      case 3: return 'rd';
+      default: return 'th';
+    }
+  };
+
+  const formatBillingPeriodText = (monthIndex: number, year: number): string => {
+    const monthName = MONTHS[monthIndex].toUpperCase();
+    const daysCount = getDaysInMonth(monthIndex, year);
+    const suffix = getOrdinalSuffix(daysCount);
+    return `1st to ${daysCount}${suffix} ${monthName} ${year}`;
+  };
+
+  const now = new Date();
+  const [invoiceType, setInvoiceType] = useState<'Tax Invoice' | 'Proforma Invoice'>('Tax Invoice');
   const [invoiceNo, setInvoiceNo] = useState<string>('');
-  const [invoiceDate, setInvoiceDate] = useState<string>('10 August 2026');
-  const [billingPeriod, setBillingPeriod] = useState<string>('1st to 31th JULY 2026');
+  const [invoiceDate, setInvoiceDate] = useState<string>(() => {
+    const day = now.getDate();
+    return `${day} ${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
+  });
+
+  // Month & Year selection for dynamic billing period (defaults to current month/year)
+  const [selectedMonth, setSelectedMonth] = useState<number>(now.getMonth());
+  const [selectedYear, setSelectedYear] = useState<number>(now.getFullYear());
+  const [billingPeriod, setBillingPeriod] = useState<string>(() =>
+    formatBillingPeriodText(now.getMonth(), now.getFullYear())
+  );
 
   // Auto-calculate & inject Next Invoice No based on selected Company sequence & Invoice Type
   useEffect(() => {
@@ -122,48 +156,158 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
     }
   }, [selectedCompanyId, invoiceType, companies, initialRecord, editId]);
 
+  // Auto-populated line items & extra charges state
+  const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([]);
+  const [machineryCharges, setMachineryCharges] = useState<number>(0);
+  const [materialCharges, setMaterialCharges] = useState<number>(0);
+  const [isEditLoaded, setIsEditLoaded] = useState<boolean>(false);
+
   // Handle Edit Mode initialRecord populate
   useEffect(() => {
-    if (!initialRecord) return;
+    if (!initialRecord || !sites.length) return;
     setInvoiceNo(initialRecord.invoiceNo);
     setInvoiceDate(initialRecord.date);
     if (initialRecord.monthYear) {
-      setBillingPeriod(`1st to 31th ${initialRecord.monthYear.toUpperCase()}`);
+      const rawMonth = initialRecord.monthYear.toUpperCase();
+      const matchedIdx = MONTHS.findIndex((m) => rawMonth.includes(m.toUpperCase()));
+      if (matchedIdx !== -1) {
+        setSelectedMonth(matchedIdx);
+        setBillingPeriod(formatBillingPeriodText(matchedIdx, selectedYear));
+      } else {
+        setBillingPeriod(`1st to 31st ${rawMonth}`);
+      }
     }
-    const matchingSite = sites.find(
-      (s) => s.siteName === initialRecord.siteName || s.clientName === initialRecord.clientName
+
+    // 1. Match Company
+    const recCompanyId = initialRecord.companyId || (initialRecord as any).company_id;
+    const recCompName = (initialRecord as any).companyName || (initialRecord as any).company_name || (initialRecord as any).company?.name;
+    const matchingCompany = companies.find(
+      (c) => (recCompanyId && c.id === recCompanyId) || (recCompName && (c.name?.trim().toLowerCase() === recCompName.trim().toLowerCase() || c.legal_name?.trim().toLowerCase() === recCompName.trim().toLowerCase()))
     );
+    if (matchingCompany) {
+      setSelectedCompanyId(matchingCompany.id);
+    }
+
+    // 2. Match Site (STRICTLY by siteId or siteName -- NEVER match on shared clientName!)
+    const recSiteId = initialRecord.siteId || (initialRecord as any).site_id;
+    const recSiteName = initialRecord.siteName || (initialRecord as any).site_name || (initialRecord as any).party?.siteName;
+
+    const matchingSite = sites.find((s) => {
+      if (recSiteId && s.id === recSiteId) return true;
+      if (recSiteName && s.siteName && s.siteName.trim().toLowerCase() === recSiteName.trim().toLowerCase()) return true;
+      if (recSiteName && (s as any).name && (s as any).name.trim().toLowerCase() === recSiteName.trim().toLowerCase()) return true;
+      return false;
+    });
+
     if (matchingSite) {
       setSelectedSiteId(matchingSite.id);
     }
-  }, [initialRecord, sites]);
 
-  // Auto-populated line items state
-  const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([]);
+    const loadedItems = initialRecord.line_items || (initialRecord as any).items || initialRecord.payload?.items || initialRecord.payload?.line_items || [];
+    if (loadedItems.length > 0) {
+      setLineItems(loadedItems);
+    }
+
+    let mach = Number(
+      initialRecord.payload?.machineryCharges ||
+      (initialRecord as any).machinery_charges ||
+      (initialRecord as any).machineryCharges ||
+      (initialRecord as any).payload?.machinery_charges ||
+      matchingSite?.default_machinery_charges ||
+      matchingSite?.defaultMachineryCharges ||
+      0
+    );
+
+    let mat = Number(
+      initialRecord.payload?.materialCharges ||
+      (initialRecord as any).material_charges ||
+      (initialRecord as any).materialCharges ||
+      (initialRecord as any).payload?.material_charges ||
+      matchingSite?.default_material_charges ||
+      matchingSite?.defaultMaterialCharges ||
+      0
+    );
+
+    const recTargetAmount = Number(initialRecord.amount || (initialRecord as any).grand_total || initialRecord.payload?.meta?.amount || 0);
+
+    if (mach === 0 && mat === 0 && recTargetAmount > 0 && loadedItems.length > 0) {
+      const recMgmt = matchingSite?.mgmtPercent ?? (matchingSite as any)?.management_fee_percent ?? 5;
+      const basicCalc = computeInvoiceCalculations(loadedItems, recMgmt, 9, 9, 0, 0);
+      const diff = recTargetAmount - basicCalc.grandTotal;
+      if (diff > 5) {
+        mat = Math.round(diff / 1.18);
+      }
+    }
+
+    setMachineryCharges(mach);
+    setMaterialCharges(mat);
+
+    setIsEditLoaded(true);
+  }, [initialRecord, sites, companies]);
+
+  const handleMonthYearChange = (mIndex: number, yr: number) => {
+    setSelectedMonth(mIndex);
+    setSelectedYear(yr);
+    const newPeriodText = formatBillingPeriodText(mIndex, yr);
+    setBillingPeriod(newPeriodText);
+
+    const daysInNewMonth = getDaysInMonth(mIndex, yr);
+    setLineItems((prevItems) =>
+      prevItems.map((item) => {
+        const wDays = item.workingDays ?? 0;
+        if (item.rate > 0 && wDays > 0) {
+          const daysToUse = (wDays === 31 || wDays === 30 || wDays === 28 || wDays === 29) ? daysInNewMonth : wDays;
+          const newAmount = calculateLineItemAmount(item.rate, daysToUse, daysInNewMonth);
+          return { ...item, workingDays: daysToUse, amount: newAmount };
+        }
+        return item;
+      })
+    );
+  };
 
   // Selected site object
   const selectedSite = sites.find((s) => s.id === selectedSiteId);
 
+  // Auto-sync Operating Company when selected site changes
+  useEffect(() => {
+    if (!selectedSite) return;
+    const siteCompId = selectedSite.company_id || selectedSite.companyId;
+    if (siteCompId && companies.some((c) => c.id === siteCompId)) {
+      setSelectedCompanyId(siteCompId);
+    }
+  }, [selectedSiteId, selectedSite, companies]);
+
+  // Auto-populate Machinery & Material Charges when selected site changes
+  useEffect(() => {
+    if (!selectedSite || isEditLoaded) return;
+    setMachineryCharges(selectedSite.defaultMachineryCharges ?? selectedSite.default_machinery_charges ?? 0);
+    setMaterialCharges(selectedSite.defaultMaterialCharges ?? selectedSite.default_material_charges ?? 0);
+  }, [selectedSiteId, sites, isEditLoaded]);
+
   // Populate line items dynamically when selected site changes
   useEffect(() => {
+    if (isEditLoaded) return;
     if (!selectedSite || !selectedSite.rateCards) {
       setLineItems([]);
       return;
     }
 
+    const currentDays = getDaysInMonth(selectedMonth, selectedYear);
     const items: InvoiceLineItem[] = [];
     let sr = 1;
 
     selectedSite.rateCards.forEach((rc) => {
-      const mainAmount = calculateLineItemAmount(rc.monthlyRate, rc.workingDays || 31, 31);
+      const defaultDays = rc.workingDays || currentDays;
+      const defaultPersons = rc.persons || 1;
+      const mainAmount = calculateLineItemAmount(rc.monthlyRate, defaultDays, currentDays);
       items.push({
         id: `sg-main-${sr}`,
         srNo: sr++,
         description: rc.roleName,
         hsnCode: rc.hsnCode || '9985',
         rate: rc.monthlyRate,
-        workingDays: rc.workingDays || 31,
-        persons: 1,
+        workingDays: defaultDays,
+        persons: defaultPersons,
         amount: mainAmount,
       });
 
@@ -180,7 +324,7 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
     });
 
     setLineItems(items);
-  }, [selectedSiteId, sites]);
+  }, [selectedSiteId, sites, isEditLoaded, selectedMonth, selectedYear]);
 
   // Live item change handler
   const handleItemChange = (
@@ -194,7 +338,8 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
     if (field === 'rate' || field === 'workingDays' || field === 'persons') {
       const r = Number(field === 'rate' ? value : item.rate) || 0;
       const d = Number(field === 'workingDays' ? value : item.workingDays) || 0;
-      item.amount = calculateLineItemAmount(r, d, 31);
+      const currentDays = getDaysInMonth(selectedMonth, selectedYear);
+      item.amount = calculateLineItemAmount(r, d, currentDays);
     } else if (field === 'amount') {
       item.amount = Number(value) || 0;
     }
@@ -206,7 +351,14 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
   // Computations
   const selectedSiteObj = sites.find((s) => s.id === selectedSiteId);
   const dynamicMgmtPercent = selectedSiteObj?.management_fee_percent ?? selectedSiteObj?.mgmtPercent ?? 5;
-  const calc = computeInvoiceCalculations(lineItems, dynamicMgmtPercent, 9, 9);
+  const calc = computeInvoiceCalculations(
+    lineItems,
+    dynamicMgmtPercent,
+    9,
+    9,
+    machineryCharges,
+    materialCharges
+  );
 
   const handleGenerateInvoice = async () => {
     if (!selectedSite) {
@@ -269,6 +421,8 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
           },
       items: lineItems,
       mgmtPercent: selectedSite?.mgmtPercent ?? (selectedSite as any)?.management_fee_percent ?? 5,
+      machineryCharges,
+      materialCharges,
       cgstPercent: 9,
       sgstPercent: 9,
       terms: Array.isArray(currentCompany?.terms_and_conditions || currentCompany?.default_terms)
@@ -309,6 +463,13 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
         tax_total: calc.cgstAmount + calc.sgstAmount,
         grand_total: calc.grandTotal,
         amount: calc.grandTotal,
+        mgmt_percent: dynamicMgmtPercent,
+        mgmtPercent: dynamicMgmtPercent,
+        management_fee_percent: dynamicMgmtPercent,
+        machinery_charges: machineryCharges,
+        machineryCharges,
+        material_charges: materialCharges,
+        materialCharges,
         type: isProforma ? ('Proforma Invoice' as const) : ('Tax Invoice' as const),
         status: isProforma ? ('Draft' as const) : ('Pending' as const),
         itemsCount: generatedInvoice.items.length,
@@ -316,6 +477,9 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
           ...generatedInvoice,
           company_id: currentCompany?.id,
           site_id: selectedSite?.id,
+          mgmtPercent: dynamicMgmtPercent,
+          machineryCharges,
+          materialCharges,
           company: {
             ...generatedInvoice.company,
             id: currentCompany?.id,
@@ -374,146 +538,183 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
       )}
 
       {/* Step Controls Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Step 1: Select Company & Type */}
-        <div className="bg-white border border-gray-200 p-5 rounded-xl space-y-4 shadow-sm">
-          <h2 className="text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-2 border-b border-gray-100 pb-2">
-            <Building2 className="w-4 h-4 text-[#20B2AA]" />
-            <span>1. Company &amp; Document Type</span>
-          </h2>
+        <div className="bg-white border border-gray-200 p-5 rounded-xl space-y-4 shadow-sm flex flex-col justify-between">
+          <div className="space-y-4">
+            <h2 className="text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-2 border-b border-gray-100 pb-2">
+              <Building2 className="w-4 h-4 text-[#20B2AA]" />
+              <span>1. Company &amp; Document Type</span>
+            </h2>
 
-          <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1.5">Select Entity</label>
-            {isLoadingCompanies ? (
-              <div className="flex items-center gap-2 text-xs text-gray-500 py-2">
-                <Loader2 className="w-4 h-4 animate-spin text-[#20B2AA]" />
-                <span>Fetching GET /api/companies...</span>
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5">Select Operating Entity</label>
+              {isLoadingCompanies ? (
+                <div className="flex items-center gap-2 text-xs text-gray-500 py-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-[#20B2AA]" />
+                  <span>Loading companies...</span>
+                </div>
+              ) : (
+                <select
+                  value={selectedCompanyId}
+                  onChange={(e) => setSelectedCompanyId(e.target.value)}
+                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-medium transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 truncate"
+                >
+                  {companies.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      🏢 {c.legal_name || c.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5">Invoice Type</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setInvoiceType('Tax Invoice')}
+                  className={`py-2 px-3 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                    invoiceType === 'Tax Invoice'
+                      ? 'bg-teal-50 border-[#20B2AA] text-[#20B2AA] shadow-sm'
+                      : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  <CheckCircle className={`w-3.5 h-3.5 ${invoiceType === 'Tax Invoice' ? 'text-[#20B2AA]' : 'opacity-0'}`} />
+                  <span>Tax Invoice</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setInvoiceType('Proforma Invoice')}
+                  className={`py-2 px-3 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                    invoiceType === 'Proforma Invoice'
+                      ? 'bg-purple-50 border-purple-500 text-purple-700 shadow-sm'
+                      : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  <CheckCircle className={`w-3.5 h-3.5 ${invoiceType === 'Proforma Invoice' ? 'text-purple-600' : 'opacity-0'}`} />
+                  <span>Proforma</span>
+                </button>
               </div>
-            ) : (
-              <select
-                value={selectedCompanyId}
-                onChange={(e) => setSelectedCompanyId(e.target.value)}
-                className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
-              >
-                {companies.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    🏢 {c.legal_name || c.name}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1.5">Invoice Type</label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setInvoiceType('Tax Invoice')}
-                className={`py-2 px-3 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
-                  invoiceType === 'Tax Invoice'
-                    ? 'bg-teal-50 border-[#20B2AA] text-[#20B2AA] shadow-sm'
-                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                <CheckCircle className={`w-3.5 h-3.5 ${invoiceType === 'Tax Invoice' ? 'text-[#20B2AA]' : 'opacity-0'}`} />
-                <span>Tax Invoice</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setInvoiceType('Proforma Invoice')}
-                className={`py-2 px-3 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
-                  invoiceType === 'Proforma Invoice'
-                    ? 'bg-purple-50 border-purple-500 text-purple-700 shadow-sm'
-                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                <CheckCircle className={`w-3.5 h-3.5 ${invoiceType === 'Proforma Invoice' ? 'text-purple-600' : 'opacity-0'}`} />
-                <span>Proforma</span>
-              </button>
             </div>
           </div>
         </div>
 
         {/* Step 2: Select Site Master */}
-        <div className="bg-white border border-gray-200 p-5 rounded-xl space-y-4 shadow-sm">
-          <h2 className="text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-2 border-b border-gray-100 pb-2">
-            <MapPin className="w-4 h-4 text-[#20B2AA]" />
-            <span>2. Select Site Master</span>
-          </h2>
+        <div className="bg-white border border-gray-200 p-5 rounded-xl space-y-4 shadow-sm flex flex-col justify-between">
+          <div className="space-y-4">
+            <h2 className="text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-2 border-b border-gray-100 pb-2">
+              <MapPin className="w-4 h-4 text-[#20B2AA]" />
+              <span>2. Select Site Location</span>
+            </h2>
 
-          <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1.5">Site Location *</label>
-            {isLoadingSites ? (
-              <div className="flex items-center gap-2 text-xs text-gray-500 py-2">
-                <Loader2 className="w-4 h-4 animate-spin text-[#20B2AA]" />
-                <span>Fetching GET /api/sites...</span>
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1.5">Site Location *</label>
+              {isLoadingSites ? (
+                <div className="flex items-center gap-2 text-xs text-gray-500 py-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-[#20B2AA]" />
+                  <span>Loading site masters...</span>
+                </div>
+              ) : sites.length === 0 ? (
+                <p className="text-xs text-gray-500 py-2">No site masters found in database.</p>
+              ) : (
+                <select
+                  value={selectedSiteId}
+                  onChange={(e) => {
+                    setIsEditLoaded(false);
+                    setSelectedSiteId(e.target.value);
+                  }}
+                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-medium transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 truncate"
+                >
+                  {sites.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      🏢 {s.codeName || s.code_name ? `[${s.codeName || s.code_name}] ` : ''}{s.siteName} ({s.clientName})
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            {selectedSite && (
+              <div className="bg-slate-50 p-3 rounded-lg border border-gray-200 space-y-1 text-xs">
+                <div className="font-semibold text-gray-900 truncate">{selectedSite.clientName}</div>
+                <div className="text-[11px] text-gray-500 font-mono">GSTIN: {selectedSite.gstin || 'N/A'}</div>
+                <div className="text-[11px] text-[#20B2AA] font-semibold">
+                  {(selectedSite.rateCards || []).length} Rate Card Roles Configured
+                </div>
               </div>
-            ) : sites.length === 0 ? (
-              <p className="text-xs text-gray-500 py-2">No site masters found in database.</p>
-            ) : (
-              <select
-                value={selectedSiteId}
-                onChange={(e) => setSelectedSiteId(e.target.value)}
-                className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 font-medium transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
-              >
-                {sites.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    🏢 {s.siteName} ({s.clientName})
-                  </option>
-                ))}
-              </select>
             )}
           </div>
-
-          {selectedSite && (
-            <div className="bg-slate-50 p-3 rounded-lg border border-gray-200 space-y-1 text-xs">
-              <div className="font-semibold text-gray-900">{selectedSite.clientName}</div>
-              <div className="text-xs text-gray-500 font-mono">GSTIN: {selectedSite.gstin || 'N/A'}</div>
-              <div className="text-xs text-[#20B2AA] font-semibold">
-                {(selectedSite.rateCards || []).length} Rate Card Roles Configured
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Step 3: Meta & Dates */}
-        <div className="bg-white border border-gray-200 p-5 rounded-xl space-y-4 shadow-sm">
-          <h2 className="text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-2 border-b border-gray-100 pb-2">
-            <Calendar className="w-4 h-4 text-[#20B2AA]" />
-            <span>3. Billing Meta &amp; Period</span>
-          </h2>
+        <div className="bg-white border border-gray-200 p-5 rounded-xl space-y-4 shadow-sm flex flex-col justify-between">
+          <div className="space-y-2.5">
+            <h2 className="text-xs font-bold text-gray-700 uppercase tracking-wider flex items-center gap-2 border-b border-gray-100 pb-2">
+              <Calendar className="w-4 h-4 text-[#20B2AA]" />
+              <span>3. Billing Meta &amp; Period</span>
+            </h2>
 
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Invoice No</label>
-              <input
-                type="text"
-                value={invoiceNo}
-                onChange={(e) => setInvoiceNo(e.target.value)}
-                className="w-full bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-800 font-mono transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Invoice Date</label>
-              <input
-                type="text"
-                value={invoiceDate}
-                onChange={(e) => setInvoiceDate(e.target.value)}
-                className="w-full bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-800 transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
-              />
-            </div>
-          </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-700 mb-1">Invoice No</label>
+                <input
+                  type="text"
+                  value={invoiceNo}
+                  onChange={(e) => setInvoiceNo(e.target.value)}
+                  className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-800 font-mono transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                />
+              </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-gray-700 mb-1">Billing Period</label>
-            <input
-              type="text"
-              value={billingPeriod}
-              onChange={(e) => setBillingPeriod(e.target.value)}
-              className="w-full bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-800 transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
-            />
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-700 mb-1">Invoice Date</label>
+                <input
+                  type="text"
+                  value={invoiceDate}
+                  onChange={(e) => setInvoiceDate(e.target.value)}
+                  className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-800 transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-700 mb-1">Select Month &amp; Year</label>
+                <div className="grid grid-cols-2 gap-1">
+                  <select
+                    value={selectedMonth}
+                    onChange={(e) => handleMonthYearChange(Number(e.target.value), selectedYear)}
+                    className="bg-white border border-gray-200 rounded-lg px-1 py-1.5 text-xs text-gray-800 font-medium transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                  >
+                    {MONTHS.map((m, idx) => (
+                      <option key={m} value={idx}>{m.slice(0, 3)}</option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={selectedYear}
+                    onChange={(e) => handleMonthYearChange(selectedMonth, Number(e.target.value))}
+                    className="bg-white border border-gray-200 rounded-lg px-1 py-1.5 text-xs text-gray-800 font-medium transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                  >
+                    {[2024, 2025, 2026, 2027, 2028].map((y) => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-700 mb-1">Billing Period</label>
+                <input
+                  type="text"
+                  value={billingPeriod}
+                  onChange={(e) => setBillingPeriod(e.target.value)}
+                  className="w-full bg-white border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-800 font-medium transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 truncate"
+                />
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -566,24 +767,27 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
                     <td className="py-2.5 px-3 text-right">
                       <input
                         type="number"
-                        value={item.rate}
-                        onChange={(e) => handleItemChange(idx, 'rate', Number(e.target.value))}
+                        value={item.rate === 0 ? '' : item.rate}
+                        onChange={(e) => handleItemChange(idx, 'rate', e.target.value === '' ? 0 : e.target.value)}
+                        placeholder="0"
                         className="w-24 bg-white border border-gray-200 rounded px-2.5 py-1 text-right text-gray-800 transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 font-mono"
                       />
                     </td>
                     <td className="py-2.5 px-3 text-right">
                       <input
                         type="number"
-                        value={item.workingDays}
-                        onChange={(e) => handleItemChange(idx, 'workingDays', Number(e.target.value))}
+                        value={item.workingDays === 0 ? '' : item.workingDays}
+                        onChange={(e) => handleItemChange(idx, 'workingDays', e.target.value === '' ? 0 : e.target.value)}
+                        placeholder="0"
                         className="w-20 bg-white border border-gray-200 rounded px-2.5 py-1 text-right text-gray-800 transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 font-mono"
                       />
                     </td>
                     <td className="py-2.5 px-3 text-right">
                       <input
                         type="number"
-                        value={item.persons}
-                        onChange={(e) => handleItemChange(idx, 'persons', Number(e.target.value))}
+                        value={item.persons === 0 ? '' : item.persons}
+                        onChange={(e) => handleItemChange(idx, 'persons', e.target.value === '' ? 0 : e.target.value)}
+                        placeholder="0"
                         className="w-16 bg-white border border-gray-200 rounded px-2.5 py-1 text-right text-gray-800 transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 font-mono"
                       />
                     </td>
@@ -614,6 +818,28 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
             <div className="flex justify-between items-center py-1 text-slate-600 border-b border-slate-100">
               <span className="font-medium">Mgmt Charges @ {dynamicMgmtPercent}%</span>
               <span className="font-mono font-semibold text-slate-900 text-sm">₹{formatCurrency(calc.mgmtChargesAmount)}</span>
+            </div>
+            <div className="flex justify-between items-center py-1 text-slate-600 border-b border-slate-100 gap-3">
+              <span className="font-medium text-gray-700">Machinery Charges (₹)</span>
+              <input
+                type="number"
+                step="0.01"
+                value={machineryCharges === 0 ? '' : machineryCharges}
+                onChange={(e) => setMachineryCharges(e.target.value === '' ? 0 : Number(e.target.value))}
+                placeholder="0"
+                className="w-28 bg-white border border-gray-200 rounded px-2 py-1 text-right text-gray-800 font-mono text-xs focus:outline-none focus:border-teal-500 shadow-2xs"
+              />
+            </div>
+            <div className="flex justify-between items-center py-1 text-slate-600 border-b border-slate-100 gap-3">
+              <span className="font-medium text-gray-700">Material Charges (₹)</span>
+              <input
+                type="number"
+                step="0.01"
+                value={materialCharges === 0 ? '' : materialCharges}
+                onChange={(e) => setMaterialCharges(e.target.value === '' ? 0 : Number(e.target.value))}
+                placeholder="0"
+                className="w-28 bg-white border border-gray-200 rounded px-2 py-1 text-right text-gray-800 font-mono text-xs focus:outline-none focus:border-teal-500 shadow-2xs"
+              />
             </div>
             <div className="flex justify-between items-center py-1 text-slate-600 border-b border-slate-100">
               <span className="font-medium">Tax (CGST 9% + SGST 9%)</span>

@@ -12,6 +12,43 @@ import {
   computeMaterialCalculations,
 } from '@/features/invoices/utils/materialCalculator';
 
+export function formatCleanCompanyAddress(rawAddr1: string = '', rawAddr2: string = ''): { line1: string; line2: string } {
+  const rawCombined = `${rawAddr1 || ''}, ${rawAddr2 || ''}`;
+  const parts = rawCombined.split(/,|\n/).map((s) => s.trim().replace(/\.$/, '')).filter(Boolean);
+  
+  const cleanParts: string[] = [];
+  
+  for (const part of parts) {
+    const pLower = part.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!pLower) continue;
+
+    let isDuplicate = false;
+    for (let i = 0; i < cleanParts.length; i++) {
+      const existingLower = cleanParts[i].toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (existingLower === pLower || existingLower.includes(pLower) || pLower.includes(existingLower)) {
+        isDuplicate = true;
+        if (part.length > cleanParts[i].length) {
+          cleanParts[i] = part;
+        }
+        break;
+      }
+    }
+    if (!isDuplicate) {
+      cleanParts.push(part);
+    }
+  }
+
+  if (cleanParts.length === 0) return { line1: '', line2: '' };
+  if (cleanParts.length <= 3) {
+    return { line1: cleanParts.join(', '), line2: '' };
+  }
+  const mid = Math.ceil(cleanParts.length / 2);
+  return {
+    line1: cleanParts.slice(0, mid).join(', '),
+    line2: cleanParts.slice(mid).join(', '),
+  };
+}
+
 // ─── Shared helper to render off-screen and capture to PDF blob ───────────────
 async function renderHtmlToPdfBlob(html: string): Promise<Blob> {
   const container = document.createElement('div');
@@ -57,9 +94,11 @@ export const pdfService = {
     // ── MANPOWER INVOICE BRANCH (original) ─────────────────────────────────────
     const calc = computeInvoiceCalculations(
       invoiceData.items || [],
-      invoiceData.mgmtPercent || 5,
-      invoiceData.cgstPercent || 9,
-      invoiceData.sgstPercent || 9
+      invoiceData.mgmtPercent ?? 5,
+      invoiceData.cgstPercent ?? 9,
+      invoiceData.sgstPercent ?? 9,
+      invoiceData.machineryCharges || 0,
+      invoiceData.materialCharges || 0
     );
 
     const isBw = colorMode === 'bw';
@@ -105,8 +144,8 @@ export const pdfService = {
       }
 
       rowsHtml += `
-        <td style="border-right: 1px solid #000; padding: 4px 6px; text-align: center;">${item.workingDays > 0 ? item.workingDays : 0}</td>
-        <td style="border-right: 1px solid #000; padding: 4px 6px; text-align: center;">${item.persons > 0 ? item.persons : 0}</td>
+        <td style="border-right: 1px solid #000; padding: 4px 6px; text-align: center;">${(item.workingDays || 0) > 0 ? item.workingDays : 0}</td>
+        <td style="border-right: 1px solid #000; padding: 4px 6px; text-align: center;">${(item.persons || 0) > 0 ? item.persons : 0}</td>
         <td style="padding: 4px 6px; text-align: right;">${formatCurrency(item.amount)}</td>
       </tr>`;
     });
@@ -128,6 +167,8 @@ export const pdfService = {
         ? 'PROFORMA INVOICE'
         : 'TAX INVOICE';
 
+    const cleanAddr = formatCleanCompanyAddress(invoiceData.company.addressLine1, invoiceData.company.addressLine2);
+
     container.innerHTML = `
       <div style="font-family: Arial, Helvetica, sans-serif; padding: 24px; color: #000; font-size: 11px; background: #fff;">
         <div style="text-align: center; font-size: 14px; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 0.5px;">${docTitle}</div>
@@ -139,8 +180,8 @@ export const pdfService = {
           </div>
           <div style="display: flex; border-bottom: 1px solid #000;">
             <div style="flex: 1.2; padding: 8px 10px;">
-              <p style="margin: 2px 0;">${invoiceData.company.addressLine1}</p>
-              <p style="margin: 2px 0;">${invoiceData.company.addressLine2}</p>
+              ${cleanAddr.line1 ? `<p style="margin: 2px 0;">${cleanAddr.line1}</p>` : ''}
+              ${cleanAddr.line2 ? `<p style="margin: 2px 0;">${cleanAddr.line2}</p>` : ''}
               <p style="margin: 2px 0;">Contact No: ${invoiceData.company.contactNo}</p>
               <p style="margin: 2px 0;">Email : ${invoiceData.company.emailWebsite}</p>
               ${invoiceData.company.cinNo?.trim() ? `<p style="margin: 2px 0;">CIN NO. : ${invoiceData.company.cinNo}</p>` : ''}
@@ -217,14 +258,18 @@ export const pdfService = {
                   <span>Sub Total</span>
                   <span>${formatCurrency(calc.subTotal)}</span>
                 </div>
-                ${
-                  calc.mgmtChargesPercent > 0
-                    ? `<div style="display: flex; justify-content: space-between; padding: 4px 8px; border-bottom: 1px solid #000;">
-                        <span>Management charges @ ${calc.mgmtChargesPercent}%</span>
-                        <span>${formatCurrency(calc.mgmtChargesAmount)}</span>
-                      </div>`
-                    : ''
-                }
+                <div style="display: flex; justify-content: space-between; padding: 4px 8px; border-bottom: 1px solid #000;">
+                  <span>Management charges @ ${calc.mgmtChargesPercent}%</span>
+                  <span>${formatCurrency(calc.mgmtChargesAmount)}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; padding: 4px 8px; border-bottom: 1px solid #000;">
+                  <span>Machinery Charges</span>
+                  <span>${formatCurrency(Number(invoiceData.machineryCharges || 0))}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; padding: 4px 8px; border-bottom: 1px solid #000;">
+                  <span>Material Charges</span>
+                  <span>${formatCurrency(Number(invoiceData.materialCharges || 0))}</span>
+                </div>
                 <div style="display: flex; justify-content: space-between; padding: 4px 8px; border-bottom: 1px solid #000;">
                   <span>Total</span>
                   <span>${formatCurrency(calc.totalBeforeTax)}</span>
@@ -377,6 +422,8 @@ export const pdfService = {
         <td style="border: 1px solid #000; padding: 2px 4px; text-align: right; font-weight: bold; font-size: 11px;">${calc.grandTotal.toLocaleString('en-IN')}</td>
       </tr>`;
 
+    const cleanAddr = formatCleanCompanyAddress(invoiceData.company.addressLine1, invoiceData.company.addressLine2);
+
     const html = `
       <div style="font-family: Arial, Helvetica, sans-serif; padding: 24px; color: #000; font-size: 10px; background: #fff;">
         <div style="text-align: center; font-size: 13px; margin-bottom: 16px; text-transform: uppercase;">${docTitle}</div>
@@ -387,8 +434,8 @@ export const pdfService = {
             <div style="flex: 0 0 45%; border-right: 1px solid #000;">
               <div style="padding: 8px 10px; border-bottom: 1px solid #000;">
                 <h1 style="color: ${sellerColor}; margin: 0 0 4px 0; font-size: 14px; font-weight: bold;">${invoiceData.company.name || 'BHAGWATI ENTERPRISES'}</h1>
-                <p style="margin: 2px 0;">${invoiceData.company.addressLine1}</p>
-                <p style="margin: 2px 0;">${invoiceData.company.addressLine2}</p>
+                ${cleanAddr.line1 ? `<p style="margin: 2px 0;">${cleanAddr.line1}</p>` : ''}
+                ${cleanAddr.line2 ? `<p style="margin: 2px 0;">${cleanAddr.line2}</p>` : ''}
                 <p style="margin: 2px 0;">GSTIN : ${invoiceData.company.gstin || ''}</p>
                 <p style="margin: 2px 0;">Contact No: ${invoiceData.company.contactNo}</p>
                 <p style="margin: 2px 0;">Email : ${invoiceData.company.emailWebsite}</p>
