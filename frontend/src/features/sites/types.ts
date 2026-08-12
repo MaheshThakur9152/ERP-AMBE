@@ -20,6 +20,7 @@ export const siteSchema = z.object({
   address: z.string().min(5, 'Address is required'),
   contactNo: z.string().optional().or(z.literal('')),
   email: z.string().optional().or(z.literal('')),
+  mgmtPercent: z.number().optional().default(5),
   status: z.enum(['Active', 'Inactive']).default('Active'),
   rateCards: z.array(rateCardSchema).min(1, 'At least one rate card item is required'),
 });

@@ -19,6 +19,8 @@ export interface Site {
   contactNo?: string;
   email?: string;
   status: 'Active' | 'Inactive';
+  management_fee_percent?: number;
+  mgmtPercent?: number;
   createdAt?: string;
   created_at?: string;
   updated_at?: string;

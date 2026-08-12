@@ -20,6 +20,7 @@ import {
 import { formatCurrency } from '@/features/invoices/utils/invoiceCalculator';
 import { InvoiceData } from '@/features/invoices/types/invoice';
 import { InvoiceTemplate } from '@/features/invoices/components/InvoiceTemplate';
+import { MaterialInvoiceTemplate } from '@/features/invoices/components/MaterialInvoiceTemplate';
 import { SmartGeneratorForm } from '@/features/smart-generator/components/SmartGeneratorForm';
 import { pdfService } from '@/services/pdfService';
 
@@ -32,14 +33,22 @@ interface InvoiceHubTableProps {
 
 const convertRecordToInvoiceData = (inv: InvoiceRecord): InvoiceData => {
   if (inv.payload && inv.payload.company && inv.payload.company.name) {
-    return inv.payload;
+    return {
+      ...inv.payload,
+      isMaterial: inv.is_material || inv.payload?.isMaterial || false,
+      delivery: inv.payload?.delivery || {},
+    };
   }
   const saved = localStorage.getItem('asf_active_invoice');
   if (saved) {
     try {
       const parsed = JSON.parse(saved);
       if (parsed.meta?.invoiceNo === inv.invoiceNo && parsed.company?.name) {
-        return parsed;
+        return {
+          ...parsed,
+          isMaterial: inv.is_material || parsed.isMaterial || false,
+          delivery: parsed.delivery || {},
+        };
       }
     } catch (e) {
       console.error(e);
@@ -91,6 +100,16 @@ const convertRecordToInvoiceData = (inv: InvoiceRecord): InvoiceData => {
       workOrderRefNo: site?.work_order_ref || '',
       workOrderPeriod: site?.work_order_period || '',
     },
+    isMaterial: inv.is_material || inv.payload?.isMaterial || false,
+    delivery: inv.payload?.delivery || {
+      challanNo: (inv as any).challan_no || '',
+      challanDate: (inv as any).challan_date || '',
+      buyerOrderNo: (inv as any).buyer_order_no || '',
+      dispatchDocNo: (inv as any).dispatch_doc_no || '',
+      dispatchedThrough: (inv as any).dispatched_through || '',
+      destination: (inv as any).destination || '',
+      termsOfDelivery: (inv as any).terms_of_delivery || '',
+    },
     meta: {
       invoiceNo: inv.invoiceNo,
       invoiceDate: inv.date,
@@ -133,7 +152,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [apiError, setApiError] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'Tax' | 'Proforma'>('Tax');
+  const [activeTab, setActiveTab] = useState<'Tax' | 'Proforma' | 'Material'>('Tax');
   const [filterMonth, setFilterMonth] = useState<string>('all');
   const [filterYear, setFilterYear] = useState<number>(2026);
   const [filterSite, setFilterSite] = useState<string>('all');
@@ -179,8 +198,11 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
 
   const filteredInvoices = invoices.filter((inv) => {
     const isProforma = inv.type === 'Proforma Invoice';
-    if (activeTab === 'Tax' && isProforma) return false;
-    if (activeTab === 'Proforma' && !isProforma) return false;
+    const isMaterial = inv.type === 'Material Invoice' || (inv as any).is_material === true;
+    if (activeTab === 'Material') return isMaterial;
+    if (activeTab === 'Proforma') return isProforma && !isMaterial;
+    // Tax tab: exclude proforma & material
+    if (activeTab === 'Tax') return !isProforma && !isMaterial;
 
     const matchesSite = filterSite === 'all' || inv.siteName === filterSite;
     const matchesStatus = filterStatus === 'all' || inv.status === filterStatus;
@@ -296,7 +318,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
         <div className="flex flex-col md:flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-3">
             <h2 className="text-2xl font-bold text-gray-900 tracking-tight">
-              {activeTab === 'Tax' ? 'Invoices' : 'Proforma Invoices'}
+              {activeTab === 'Tax' ? 'Invoices' : activeTab === 'Material' ? 'Material Bills' : 'Proforma Invoices'}
             </h2>
             {/* Sub tab selector */}
             <div className="flex bg-gray-200 p-1 rounded-lg text-xs font-semibold">
@@ -319,6 +341,16 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                   }`}
               >
                 Proforma Invoices
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('Material')}
+                className={`px-3 py-1 rounded-md transition-all ${activeTab === 'Material'
+                    ? 'bg-orange-600 text-white shadow-sm'
+                    : 'text-gray-700 hover:text-black'
+                  }`}
+              >
+                Material Bills
               </button>
             </div>
           </div>
@@ -651,7 +683,11 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
 
             {/* Modal Body */}
             <div className="p-6 overflow-y-auto bg-gray-100 flex justify-center print:p-0 print:bg-white">
-              <InvoiceTemplate data={previewInvoice} colorMode={colorMode} />
+              {previewInvoice.isMaterial ? (
+                <MaterialInvoiceTemplate data={previewInvoice} colorMode={colorMode} />
+              ) : (
+                <InvoiceTemplate data={previewInvoice} colorMode={colorMode} />
+              )}
             </div>
           </div>
         </div>
@@ -705,7 +741,9 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
       {/* Stealth Print Container */}
       {stealthPrintData && (
         <div className="hidden print:block absolute inset-0 bg-white z-[9999]">
-          <InvoiceTemplate data={stealthPrintData} colorMode="color" />
+          {stealthPrintData.isMaterial
+            ? <MaterialInvoiceTemplate data={stealthPrintData} colorMode="color" />
+            : <InvoiceTemplate data={stealthPrintData} colorMode="color" />}
         </div>
       )}
     </>

@@ -16,6 +16,8 @@ function mapRowToSite(row: any): Site {
     contactNo: row.contact_no || row.contactNo || '',
     email: row.email || '',
     status: row.status || 'Active',
+    management_fee_percent: row.management_fee_percent ?? row.mgmt_percent ?? row.mgmtPercent ?? 5,
+    mgmtPercent: row.management_fee_percent ?? row.mgmt_percent ?? row.mgmtPercent ?? 5,
     rateCards: row.rate_cards || row.rateCards || [],
     createdAt: row.created_at || row.createdAt,
     created_at: row.created_at,
@@ -80,6 +82,9 @@ export class SiteService {
       gstin: payload.gstin || '',
       work_order_ref: payload.work_order_ref || payload.workOrderRefNo || '',
       work_order_period: payload.work_order_period || payload.workOrderPeriod || '',
+      contact_no: payload.contact_no || payload.contactNo || '',
+      email: payload.email || '',
+      management_fee_percent: payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? 5,
       rate_cards: payload.rate_cards || payload.rateCards || [],
       created_at: now,
     };
@@ -117,6 +122,9 @@ export class SiteService {
     }
     if (payload.workOrderPeriod !== undefined || payload.work_order_period !== undefined) {
       updateData.work_order_period = payload.workOrderPeriod || payload.work_order_period || '';
+    }
+    if (payload.management_fee_percent !== undefined || payload.mgmt_percent !== undefined || payload.mgmtPercent !== undefined) {
+      updateData.management_fee_percent = payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent;
     }
     if (payload.address !== undefined) updateData.address = payload.address;
     if (payload.contactNo !== undefined || payload.contact_no !== undefined) {

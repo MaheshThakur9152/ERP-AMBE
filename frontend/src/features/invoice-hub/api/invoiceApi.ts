@@ -4,7 +4,7 @@ import { InvoiceData } from '@/features/invoices/types/invoice';
 const API_BASE = '/api/invoices';
 
 export interface CreateInvoicePayload extends Partial<InvoiceRecord> {
-  payload?: InvoiceData;
+  payload?: any;
 }
 
 export async function fetchInvoicesApi(): Promise<InvoiceRecord[]> {

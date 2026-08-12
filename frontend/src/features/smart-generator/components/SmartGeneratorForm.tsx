@@ -204,7 +204,9 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
   };
 
   // Computations
-  const calc = computeInvoiceCalculations(lineItems, 5, 9, 9);
+  const selectedSiteObj = sites.find((s) => s.id === selectedSiteId);
+  const dynamicMgmtPercent = selectedSiteObj?.management_fee_percent ?? selectedSiteObj?.mgmtPercent ?? 5;
+  const calc = computeInvoiceCalculations(lineItems, dynamicMgmtPercent, 9, 9);
 
   const handleGenerateInvoice = async () => {
     if (!selectedSite) {
@@ -266,7 +268,7 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
             branch: '',
           },
       items: lineItems,
-      mgmtPercent: 5,
+      mgmtPercent: selectedSite?.mgmtPercent ?? (selectedSite as any)?.management_fee_percent ?? 5,
       cgstPercent: 9,
       sgstPercent: 9,
       terms: Array.isArray(currentCompany?.terms_and_conditions || currentCompany?.default_terms)
@@ -601,7 +603,7 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
             <div>
               <strong className="text-gray-900">Amount in Words:</strong> {calc.amountInWords}
             </div>
-            <div>Management charges @ 5% | CGST @ 9% | SGST @ 9%</div>
+            <div>Management charges @ {dynamicMgmtPercent}% | CGST @ 9% | SGST @ 9%</div>
           </div>
 
           <div className="bg-slate-50/80 p-5 rounded-xl border border-slate-200/80 shadow-sm space-y-2 text-xs">
@@ -610,7 +612,7 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
               <span className="font-mono font-semibold text-slate-900 text-sm">₹{formatCurrency(calc.subTotal)}</span>
             </div>
             <div className="flex justify-between items-center py-1 text-slate-600 border-b border-slate-100">
-              <span className="font-medium">Mgmt Charges @ 5%</span>
+              <span className="font-medium">Mgmt Charges @ {dynamicMgmtPercent}%</span>
               <span className="font-mono font-semibold text-slate-900 text-sm">₹{formatCurrency(calc.mgmtChargesAmount)}</span>
             </div>
             <div className="flex justify-between items-center py-1 text-slate-600 border-b border-slate-100">

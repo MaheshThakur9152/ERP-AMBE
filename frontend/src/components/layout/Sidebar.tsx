@@ -13,6 +13,7 @@ import {
   Sparkles,
   LogOut,
   FileSpreadsheet,
+  Package,
 } from 'lucide-react';
 import { useAuth } from '@/features/auth/context/AuthContext';
 
@@ -64,7 +65,7 @@ export const Sidebar: React.FC = () => {
                   }`
                 }
               >
-                Invoices
+                Tax Invoices
               </NavLink>
 
               <NavLink
@@ -77,7 +78,7 @@ export const Sidebar: React.FC = () => {
                   }`
                 }
               >
-                Bill Generator
+                Proforma Invoices
               </NavLink>
             </div>
           )}
@@ -114,6 +115,30 @@ export const Sidebar: React.FC = () => {
                 Staff
               </NavLink>
               <NavLink
+                to="/attendance"
+                className={({ isActive }) =>
+                  `w-full flex gap-3 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                    isActive
+                      ? 'bg-[#20B2AA] text-white shadow-md'
+                      : 'hover:bg-white/5 text-gray-300'
+                  }`
+                }
+              >
+                Attendance
+              </NavLink>
+              <NavLink
+                to="/logs"
+                className={({ isActive }) =>
+                  `w-full flex gap-3 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                    isActive
+                      ? 'bg-[#20B2AA] text-white shadow-md'
+                      : 'hover:bg-white/5 text-gray-300'
+                  }`
+                }
+              >
+                Logs
+              </NavLink>
+              <NavLink
                 to="/payroll"
                 className={({ isActive }) =>
                   `w-full flex gap-3 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
@@ -145,7 +170,7 @@ export const Sidebar: React.FC = () => {
 
         {/* Photos */}
         <NavLink
-          to="/companies"
+          to="/photos"
           className={({ isActive }) =>
             `w-full flex gap-3 px-4 py-3 rounded-lg font-medium transition-colors ${
               isActive
@@ -154,7 +179,7 @@ export const Sidebar: React.FC = () => {
             }`
           }
         >
-          <Camera size={18} /> <span>Company Profiles</span>
+          <Camera size={18} /> <span>Photos</span>
         </NavLink>
 
         {/* Device History */}

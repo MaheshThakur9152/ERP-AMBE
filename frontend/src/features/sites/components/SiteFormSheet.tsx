@@ -61,6 +61,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
       address: '',
       contactNo: '',
       email: '',
+      mgmtPercent: 5,
       status: 'Active',
       rateCards: [
         { roleName: '', monthlyRate: 0, workingDays: 31, hsnCode: '9985' },
@@ -87,6 +88,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
         address: editingSite.address || '',
         contactNo: editingSite.contactNo || '',
         email: editingSite.email || '',
+        mgmtPercent: editingSite.mgmtPercent ?? 5,
         status: editingSite.status || 'Active',
         rateCards: editingSite.rateCards || [],
       });
@@ -100,6 +102,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
         address: '',
         contactNo: '',
         email: '',
+        mgmtPercent: 5,
         status: 'Active',
         rateCards: [
           { roleName: '', monthlyRate: 0, workingDays: 31, hsnCode: '9985' },
@@ -114,6 +117,9 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
     const payload = {
       ...data,
       company_id: selectedCompanyId || (companies[0]?.id || undefined),
+      contact_no: data.contactNo || '',
+      email: data.email || '',
+      management_fee_percent: Number(data.mgmtPercent) ?? 5,
     };
 
     try {
@@ -243,6 +249,28 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
               </div>
             </div>
 
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Contact Number (Optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. +91 9876543210"
+                  {...register('contactNo')}
+                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Email Address (Optional)</label>
+                <input
+                  type="email"
+                  placeholder="e.g. client@example.com"
+                  {...register('email')}
+                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
+                />
+              </div>
+            </div>
+
             <div>
               <label className="block text-xs font-semibold text-gray-700 mb-1">Address *</label>
               <textarea
@@ -264,7 +292,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
               <span>Work Order Details</span>
             </h3>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-gray-700 mb-1">Work Order Ref No. (Optional)</label>
                 <input
@@ -282,6 +310,17 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
                   placeholder="01st April 2026 to 31st March 2027"
                   {...register('workOrderPeriod')}
                   className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">Management Fee (%)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="5"
+                  {...register('mgmtPercent', { valueAsNumber: true })}
+                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
                 />
               </div>
             </div>

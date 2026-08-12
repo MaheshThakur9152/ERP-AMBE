@@ -18,13 +18,48 @@ export interface InvoiceRecord {
   type: 'Tax Invoice' | 'Proforma Invoice' | string;
   status: 'Paid' | 'Pending' | 'Draft' | 'Overdue' | string;
   itemsCount: number;
+  line_items?: any[];
+  isMaterial?: boolean;
+  is_material?: boolean;
+  challan_no?: string;
+
+  challan_date?: string;
+  buyer_order_no?: string;
+  dispatch_doc_no?: string;
+  dispatched_through?: string;
+  destination?: string;
+  terms_of_delivery?: string;
   sites?: {
     client_name?: string;
     site_name?: string;
+    address?: string;
+    gstin?: string;
+    work_order_ref?: string;
+    work_order_period?: string;
+    [key: string]: any;
   };
   companies?: {
     name?: string;
     legal_name?: string;
+    address_line1?: string;
+    address_line2?: string;
+    city?: string;
+    pincode?: string;
+    phone?: string;
+    contact_no?: string;
+    email?: string;
+    email_website?: string;
+    cin?: string;
+    cin_no?: string;
+    gstin?: string;
+    bank_name?: string;
+    bank_account_no?: string;
+    account_no?: string;
+    bank_ifsc?: string;
+    ifsc_code?: string;
+    bank_branch?: string;
+    branch_name?: string;
+    [key: string]: any;
   };
   payload?: any;
 }

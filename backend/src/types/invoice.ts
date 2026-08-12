@@ -19,7 +19,16 @@ export interface InvoiceRecord {
   status: 'Paid' | 'Pending' | 'Draft' | 'Overdue' | string;
   itemsCount: number;
   line_items?: any[];
+  challan_no?: string;
+  challan_date?: string;
+  buyer_order_no?: string;
+  dispatch_doc_no?: string;
+  dispatched_through?: string;
+  destination?: string;
+  terms_of_delivery?: string;
+  is_material?: boolean;
   sites?: {
+
     client_name?: string;
     site_name?: string;
   };

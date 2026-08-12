@@ -4,8 +4,11 @@ export interface InvoiceLineItem {
   description: string;
   hsnCode: string;
   rate: number;
-  workingDays: number;
-  persons: number;
+  workingDays?: number;
+  persons?: number;
+  quantity?: number;
+  unit?: string;
+  gstRate?: number;
   amount: number;
 }
 
@@ -17,6 +20,8 @@ export interface HeaderCompanyInfo {
   emailWebsite: string;
   cinNo: string;
   gstin: string;
+  stateNameCode?: string;
+  udyamNo?: string;
 }
 
 export interface ClientPartyInfo {
@@ -28,11 +33,32 @@ export interface ClientPartyInfo {
   workOrderPeriod: string;
 }
 
+export interface DeliveryDetails {
+  challanNo?: string;
+  challanDate?: string;
+  buyerOrderNo?: string;
+  dated?: string;
+  dispatchDocNo?: string;
+  deliveryNotedDate?: string;
+  dispatchedThrough?: string;
+  destination?: string;
+  termsOfDelivery?: string;
+  referenceNoDate?: string;
+  otherReferences?: string;
+}
+
 export interface InvoiceMetadata {
   invoiceNo: string;
   invoiceDate: string;
   billingPeriod: string;
   invoiceType?: 'Tax Invoice' | 'Proforma Invoice' | string;
+  challanNo?: string;
+  challanDate?: string;
+  buyerOrderNo?: string;
+  dispatchDocNo?: string;
+  dispatchedThrough?: string;
+  destination?: string;
+  termsOfDelivery?: string;
 }
 
 export interface BankDetails {
@@ -44,14 +70,14 @@ export interface BankDetails {
 
 export interface InvoiceCalculations {
   subTotal: number;
-  mgmtChargesPercent: number;
-  mgmtChargesAmount: number;
-  totalBeforeTax: number;
-  cgstPercent: number;
-  cgstAmount: number;
-  sgstPercent: number;
-  sgstAmount: number;
-  totalWithTax: number;
+  mgmtChargesPercent?: number;
+  mgmtChargesAmount?: number;
+  totalBeforeTax?: number;
+  cgstPercent?: number;
+  cgstAmount?: number;
+  sgstPercent?: number;
+  sgstAmount?: number;
+  totalWithTax?: number;
   roundOff: number;
   grandTotal: number;
   amountInWords: string;
@@ -63,9 +89,20 @@ export interface InvoiceData {
   meta: InvoiceMetadata;
   bank: BankDetails;
   items: InvoiceLineItem[];
-  mgmtPercent: number;
-  cgstPercent: number;
-  sgstPercent: number;
-  terms: string;
+  mgmtPercent?: number;
+  cgstPercent?: number;
+  sgstPercent?: number;
+  terms?: string;
   type?: 'Tax Invoice' | 'Proforma Invoice' | string;
+  isMaterial?: boolean;
+  delivery?: DeliveryDetails;
+  taxGroups?: Array<{
+    gstRate: number;
+    taxableAmount: number;
+    cgstRate: number;
+    cgstAmount: number;
+    sgstRate: number;
+    sgstAmount: number;
+    taxAmount: number;
+  }>;
 }

@@ -11,6 +11,10 @@ import { InvoiceHubPage } from '@/pages/InvoiceHubPage';
 import { SmartGeneratorPage } from '@/pages/SmartGeneratorPage';
 import { PayrollPage } from '@/pages/PayrollPage';
 import { StaffPage } from '@/pages/StaffPage';
+import { AttendancePage } from '@/pages/AttendancePage';
+import { LogsPage } from '@/pages/LogsPage';
+import { MaterialsMasterPage } from '@/pages/MaterialsMasterPage';
+import { MaterialGeneratorPage } from '@/pages/MaterialGeneratorPage';
 
 export const App: React.FC = () => {
   return (
@@ -27,11 +31,16 @@ export const App: React.FC = () => {
               <Route path="/dashboard" element={<InvoiceHubPage />} />
               <Route path="/companies" element={<CompanyProfilesPage />} />
               <Route path="/sites" element={<SitesMasterPage />} />
+              <Route path="/materials" element={<MaterialsMasterPage />} />
               <Route path="/invoice-hub" element={<InvoiceHubPage />} />
               <Route path="/smart-generator" element={<SmartGeneratorPage />} />
+              <Route path="/material-generator" element={<MaterialGeneratorPage />} />
               <Route path="/invoices" element={<InvoicePage />} />
+              <Route path="/attendance" element={<AttendancePage />} />
               <Route path="/payroll" element={<PayrollPage />} />
               <Route path="/employees" element={<StaffPage />} />
+              <Route path="/logs" element={<LogsPage />} />
+              <Route path="/photos" element={<CompanyProfilesPage />} />
               <Route path="/settings" element={<CompanyProfilesPage />} />
             </Route>
           </Route>

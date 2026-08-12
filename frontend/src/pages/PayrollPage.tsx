@@ -125,7 +125,7 @@ const MOCK_PAYROLL_EMPLOYEES: PayrollEmployee[] = [
   },
 ];
 
-export const PayrollPage: React.FC = () => {
+export const PayrollTab: React.FC = () => {
   const [employees, setEmployees] = useState<PayrollEmployee[]>(MOCK_PAYROLL_EMPLOYEES);
   const [selectedMonth, setSelectedMonth] = useState<string>('Aug');
   const [selectedYear, setSelectedYear] = useState<number>(2026);
@@ -164,7 +164,7 @@ export const PayrollPage: React.FC = () => {
 
   return (
     <div className="p-6 space-y-6 bg-slate-50 min-h-screen font-sans">
-      {/* Top Header Bar matching old frontend Screenshot 4 */}
+      {/* Top Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <DollarSign className="w-7 h-7 text-[#20B2AA]" />
@@ -173,7 +173,7 @@ export const PayrollPage: React.FC = () => {
 
         <div className="flex flex-wrap items-center gap-3">
           {/* Month/Year selector */}
-          <div className="flex items-center border border-gray-300 rounded-lg px-3 py-1.5 bg-white text-xs text-gray-800 font-medium shadow-sm">
+          <div className="flex items-center border border-gray-300 rounded-lg px-3 py-1.5 bg-white text-xs text-gray-800 font-medium shadow-2xs">
             <select
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
@@ -195,7 +195,7 @@ export const PayrollPage: React.FC = () => {
           </div>
 
           {/* Site Filter */}
-          <div className="flex items-center border border-gray-300 rounded-lg px-3 py-1.5 bg-white text-xs text-gray-800 font-medium shadow-sm gap-1.5">
+          <div className="flex items-center border border-gray-300 rounded-lg px-3 py-1.5 bg-white text-xs text-gray-800 font-medium shadow-2xs gap-1.5">
             <Filter className="w-3.5 h-3.5 text-gray-400" />
             <select
               value={selectedSite}
@@ -213,7 +213,7 @@ export const PayrollPage: React.FC = () => {
           {/* Export Payroll Button */}
           <button
             type="button"
-            className="bg-[#10B981] hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-xs font-semibold shadow-sm flex items-center gap-2 transition-all"
+            className="bg-[#10B981] hover:bg-emerald-600 text-white px-4 py-2 rounded-lg text-xs font-semibold shadow-xs flex items-center gap-2 transition-all cursor-pointer"
           >
             <Download className="w-4 h-4" />
             <span>Export Payroll</span>
@@ -221,8 +221,8 @@ export const PayrollPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Payroll Table matching old frontend Screenshot 4 */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+      {/* Main Payroll Table */}
+      <div className="bg-white rounded-xl shadow-xs border border-gray-200 overflow-hidden">
         <table className="w-full text-left text-sm text-gray-700 border-collapse min-w-[800px]">
           <thead className="bg-white border-b border-gray-200">
             <tr>
@@ -331,3 +331,6 @@ export const PayrollPage: React.FC = () => {
     </div>
   );
 };
+
+export const PayrollPage = PayrollTab;
+export default PayrollPage;
