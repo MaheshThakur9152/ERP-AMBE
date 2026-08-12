@@ -4,9 +4,13 @@ import { computeInvoiceCalculations, formatCurrency, formatInteger } from '../ut
 
 interface InvoiceTemplateProps {
   data: InvoiceData;
+  colorMode?: 'color' | 'bw';
 }
 
-export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({ data }) => {
+export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
+  data,
+  colorMode = 'color',
+}) => {
   const calc = computeInvoiceCalculations(
     data.items,
     data.mgmtPercent,
@@ -18,28 +22,39 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({ data }) => {
   const MIN_EMPTY_ROWS = 2;
   const emptyRowsCount = Math.max(MIN_EMPTY_ROWS, MIN_ROWS - data.items.length);
   const fontStyle = { fontFamily: 'Arial, Helvetica, sans-serif' };
+  const isBw = colorMode === 'bw';
 
   return (
-    <div className="w-full flex flex-col items-center select-none text-black" style={fontStyle}>
-      {/* Row 1: TAX INVOICE Header floating above main box (Arial, 12pt, Normal, No borders) */}
+    <div
+      id="printable-invoice"
+      className={`w-full flex flex-col items-center select-none text-black print:w-full print:max-w-none ${
+        isBw ? 'bw-mode grayscale' : ''
+      }`}
+      style={fontStyle}
+    >
+      {/* Row 1: Document Title Header floating above main box (Arial, 12pt, Normal, No borders) */}
       <div
-        className="text-center font-normal text-[12pt] tracking-normal uppercase text-black mb-6 print:mb-6"
+        className="text-center font-normal text-[12pt] tracking-normal uppercase text-black mb-6 print:mb-4"
         style={fontStyle}
       >
-        TAX INVOICE
+        {data.type === 'Proforma Invoice' || data.meta?.invoiceType === 'Proforma Invoice'
+          ? 'PROFORMA INVOICE'
+          : 'TAX INVOICE'}
       </div>
 
       {/* Printable Invoice Container */}
       <div
-        id="printable-invoice"
         className="w-full max-w-4xl bg-white text-black text-[11px] leading-tight shadow-2xl rounded-sm print:shadow-none print:p-0 print:max-w-none print:w-full"
         style={fontStyle}
       >
         {/* Single Outer Box surrounding all invoice sections starting at Row 2 */}
         <div className="border border-black w-full">
-          {/* Row 1 (Full Width): Red Company Name ONLY */}
+          {/* Row 1 (Full Width): Red Company Name (or Black in B&W mode) */}
           <div className="border-b border-black p-2 pb-1">
-            <h1 style={{ color: '#FF0000' }} className="font-bold text-sm sm:text-base leading-snug tracking-tight">
+            <h1
+              style={{ color: isBw ? '#000000' : '#FF0000' }}
+              className="font-bold text-sm sm:text-base leading-snug tracking-tight"
+            >
               {data.company.name}
             </h1>
           </div>
@@ -52,8 +67,12 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({ data }) => {
               <p className="text-[11px] text-zinc-900">{data.company.addressLine2}</p>
               <p className="text-[11px] text-zinc-900">Contact No: {data.company.contactNo}</p>
               <p className="text-[11px] text-zinc-900">Email : {data.company.emailWebsite}</p>
-              <p className="text-[11px] text-zinc-900">CIN NO. : {data.company.cinNo}</p>
-              <p className="text-[11px] font-normal text-zinc-900">GSTIN : {data.company.gstin}</p>
+              {Boolean(data.company.cinNo?.trim()) && (
+                <p className="text-[11px] text-zinc-900">CIN NO. : {data.company.cinNo}</p>
+              )}
+              {Boolean(data.company.gstin?.trim()) && (
+                <p className="text-[11px] font-normal text-zinc-900">GSTIN : {data.company.gstin}</p>
+              )}
             </div>
 
             {/* Right Column (col-span-5 border-l border-black p-2): Invoice No, Date, Billing Period */}
@@ -78,13 +97,15 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({ data }) => {
                 Name &amp; Add of Party:
               </p>
               <p className="font-bold text-xs text-black">{data.party.name}</p>
-              {data.party.siteName && (
+              {Boolean(data.party.siteName?.trim()) && (
                 <p className="font-normal text-zinc-900">
                   SITE NAME: {data.party.siteName}
                 </p>
               )}
               <p className="whitespace-pre-line text-zinc-900">{data.party.address}</p>
-              <p className="font-normal text-zinc-900">GSTIN : {data.party.gstin}</p>
+              {Boolean(data.party.gstin?.trim()) && (
+                <p className="font-normal text-zinc-900">GSTIN : {data.party.gstin}</p>
+              )}
             </div>
 
             {/* Right: Work Order Ref No vs Work Order Period with Horizontal Divider */}
@@ -92,12 +113,12 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({ data }) => {
               {/* Work Order Ref No Sub-row */}
               <div className="p-2 border-b border-black flex-1 space-y-0.5">
                 <p className="text-zinc-900">Work Order Ref No. :</p>
-                <p className="text-zinc-900 font-normal">{data.party.workOrderRefNo}</p>
+                <p className="text-zinc-900 font-normal">{data.party.workOrderRefNo || ''}</p>
               </div>
               {/* Work Order Period Sub-row */}
               <div className="p-2 flex-1 space-y-0.5">
                 <p className="text-zinc-900">Work Order Period :</p>
-                <p className="text-zinc-900 font-normal">{data.party.workOrderPeriod}</p>
+                <p className="text-zinc-900 font-normal">{data.party.workOrderPeriod || ''}</p>
               </div>
             </div>
           </div>
@@ -250,7 +271,7 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({ data }) => {
                     {calc.roundOff >= 0 ? `${calc.roundOff.toFixed(2)}` : calc.roundOff.toFixed(2)}
                   </span>
                 </div>
-                <div className="flex justify-between p-1 font-bold border-t border-black">
+                <div className="flex justify-between p-1 font-normal border-t border-black">
                   <span>Total Amount</span>
                   <span>{formatCurrency(calc.grandTotal)}</span>
                 </div>
@@ -258,7 +279,7 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({ data }) => {
 
               {/* Signatory Block */}
               <div className="p-2 text-right border-t border-black min-h-[90px] flex flex-col justify-between">
-                <p className="font-normal text-[10px] text-zinc-900">For Ambe Service Facilities Pvt Ltd</p>
+                <p className="font-normal text-[10px] text-zinc-900">For {data.company.name}</p>
                 <div className="pt-8">
                   <p className="font-normal text-[10px] text-zinc-900">Authorized signatory</p>
                 </div>

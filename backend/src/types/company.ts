@@ -22,6 +22,10 @@ export interface CompanyProfile {
   bank_branch: string;
   upi_id?: string;
   terms_and_conditions: string[];
+  tax_prefix?: string;
+  tax_sequence?: number;
+  proforma_prefix?: string;
+  proforma_sequence?: number;
   logo_url?: string;
   stamp_url?: string;
   signature_url?: string;

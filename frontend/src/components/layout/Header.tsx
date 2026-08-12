@@ -12,26 +12,26 @@ export const Header: React.FC = () => {
   return (
     <header className="topbar">
       {/* Left: breadcrumb */}
-      <div className="flex items-center gap-1.5 text-xs text-zinc-400">
-        <span className="font-semibold text-zinc-300">ERP</span>
-        <ChevronRight className="w-3.5 h-3.5 text-zinc-600" />
-        <span className="text-zinc-100 font-medium">Facility Management</span>
+      <div className="flex items-center gap-1.5 text-xs text-gray-500">
+        <span className="font-bold text-[#34495E]">ERP</span>
+        <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
+        <span className="text-gray-800 font-semibold">Facility Management</span>
       </div>
 
       {/* Right: user controls */}
       <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2.5 bg-white/5 border border-white/10 px-2.5 py-1 rounded-full">
-          <div className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px] font-bold">
+        <div className="flex items-center gap-2.5 bg-gray-50 border border-gray-200 px-3 py-1 rounded-full shadow-sm">
+          <div className="w-5 h-5 rounded-full bg-[#20B2AA] text-white flex items-center justify-center text-[10px] font-bold">
             {initials}
           </div>
-          <span className="text-xs text-zinc-200 font-medium hidden sm:block">
+          <span className="text-xs text-gray-800 font-semibold hidden sm:block">
             {profile?.full_name || user?.email}
           </span>
         </div>
-        <div className="w-px h-4 bg-white/10" />
+        <div className="w-px h-4 bg-gray-200" />
         <button
           onClick={signOut}
-          className="btn-ghost text-zinc-400 hover:text-zinc-100 text-xs px-2 py-1"
+          className="text-xs font-semibold text-gray-600 hover:text-red-600 flex items-center gap-1 px-2 py-1 transition-colors"
           title="Sign out"
         >
           <LogOut className="w-3.5 h-3.5" />

@@ -6,8 +6,9 @@ export class CompanyController {
     try {
       const companies = await CompanyService.getAllCompanies();
       res.json({ success: true, data: companies });
-    } catch (err) {
-      next(err);
+    } catch (err: any) {
+      console.error('[CompanyController.list] Error:', err);
+      res.status(500).json({ success: false, error: err.message || 'Failed to fetch companies' });
     }
   }
 
@@ -15,9 +16,14 @@ export class CompanyController {
     try {
       const { id } = req.params;
       const company = await CompanyService.getCompanyById(id);
+      if (!company) {
+        res.status(404).json({ success: false, error: 'Company profile not found' });
+        return;
+      }
       res.json({ success: true, data: company });
-    } catch (err) {
-      next(err);
+    } catch (err: any) {
+      console.error('[CompanyController.getById] Error:', err);
+      res.status(500).json({ success: false, error: err.message || 'Failed to fetch company profile' });
     }
   }
 
@@ -25,8 +31,9 @@ export class CompanyController {
     try {
       const company = await CompanyService.createCompany(req.body);
       res.status(201).json({ success: true, data: company });
-    } catch (err) {
-      next(err);
+    } catch (err: any) {
+      console.error('[CompanyController.create] Error:', err);
+      res.status(500).json({ success: false, error: err.message || 'Failed to create company profile' });
     }
   }
 
@@ -35,8 +42,9 @@ export class CompanyController {
       const { id } = req.params;
       const company = await CompanyService.updateCompany(id, req.body);
       res.json({ success: true, data: company });
-    } catch (err) {
-      next(err);
+    } catch (err: any) {
+      console.error('[CompanyController.update] Error:', err);
+      res.status(500).json({ success: false, error: err.message || 'Failed to update company profile' });
     }
   }
 
@@ -46,8 +54,9 @@ export class CompanyController {
       const { is_active } = req.body;
       const company = await CompanyService.toggleActiveState(id, Boolean(is_active));
       res.json({ success: true, data: company });
-    } catch (err) {
-      next(err);
+    } catch (err: any) {
+      console.error('[CompanyController.toggleStatus] Error:', err);
+      res.status(500).json({ success: false, error: err.message || 'Failed to toggle company status' });
     }
   }
 }

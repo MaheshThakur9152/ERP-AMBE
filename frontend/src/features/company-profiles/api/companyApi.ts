@@ -1,30 +1,44 @@
 import { supabase } from '@/lib/supabase';
 import { CompanyProfile, CreateCompanyInput, UpdateCompanyInput } from '../types';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const API_BASE = '/api';
 
 async function getAuthHeader() {
   const { data: { session } } = await supabase.auth.getSession();
   return {
     'Content-Type': 'application/json',
-    'Authorization': `Bearer ${session?.access_token || ''}`,
+    'Authorization': session?.access_token ? `Bearer ${session.access_token}` : '',
   };
 }
 
 export async function fetchCompanies(): Promise<CompanyProfile[]> {
   const headers = await getAuthHeader();
   const res = await fetch(`${API_BASE}/companies`, { headers });
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error(`[GET /api/companies] API Error ${res.status}:`, errorText);
+    throw new Error(`Failed to fetch companies from backend (Status: ${res.status}): ${errorText}`);
+  }
   const json = await res.json();
-  if (!res.ok) throw new Error(json.error || 'Failed to fetch companies');
-  return json.data;
+  if (json.data && Array.isArray(json.data)) {
+    return json.data;
+  }
+  if (Array.isArray(json)) {
+    return json;
+  }
+  return [];
 }
 
 export async function fetchCompanyById(id: string): Promise<CompanyProfile> {
   const headers = await getAuthHeader();
   const res = await fetch(`${API_BASE}/companies/${id}`, { headers });
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error(`[GET /api/companies/${id}] API Error ${res.status}:`, errorText);
+    throw new Error(`Failed to fetch company profile ${id} (Status: ${res.status})`);
+  }
   const json = await res.json();
-  if (!res.ok) throw new Error(json.error || 'Failed to fetch company details');
-  return json.data;
+  return json.data || json;
 }
 
 export async function createCompany(payload: CreateCompanyInput): Promise<CompanyProfile> {
@@ -34,9 +48,13 @@ export async function createCompany(payload: CreateCompanyInput): Promise<Compan
     headers,
     body: JSON.stringify(payload),
   });
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error(`[POST /api/companies] API Error ${res.status}:`, errorText);
+    throw new Error(`Failed to create company (Status: ${res.status}): ${errorText}`);
+  }
   const json = await res.json();
-  if (!res.ok) throw new Error(json.error || 'Failed to create company profile');
-  return json.data;
+  return json.data || json;
 }
 
 export async function updateCompany(id: string, payload: UpdateCompanyInput): Promise<CompanyProfile> {
@@ -46,7 +64,11 @@ export async function updateCompany(id: string, payload: UpdateCompanyInput): Pr
     headers,
     body: JSON.stringify(payload),
   });
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error(`[PUT /api/companies/${id}] API Error ${res.status}:`, errorText);
+    throw new Error(`Failed to update company (Status: ${res.status}): ${errorText}`);
+  }
   const json = await res.json();
-  if (!res.ok) throw new Error(json.error || 'Failed to update company profile');
-  return json.data;
+  return json.data || json;
 }

@@ -2,8 +2,7 @@ import React from 'react';
 import { CompanyProfile } from '../types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardFooter } from '@/components/ui/card';
-import { Pencil, Building2, CreditCard, FileText } from 'lucide-react';
+import { Pencil, Building2, CreditCard, FileText, MapPin, Hash, CheckCircle2 } from 'lucide-react';
 
 interface CompanyCardProps {
   company: CompanyProfile;
@@ -12,86 +11,109 @@ interface CompanyCardProps {
 
 export const CompanyCard: React.FC<CompanyCardProps> = ({ company, onEdit }) => {
   return (
-    <Card className="hover:border-white/20 transition-all duration-200 bg-zinc-900/60 backdrop-blur-md">
-      <CardContent className="p-5">
-        {/* Header row */}
+    <div className="bg-white border border-gray-200 rounded-2xl shadow-sm hover:shadow-md hover:border-[#20B2AA]/50 transition-all duration-200 overflow-hidden flex flex-col justify-between">
+      <div className="p-5 space-y-4">
+        {/* Header Row */}
         <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 flex-shrink-0">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-teal-50 border border-teal-100 flex items-center justify-center text-[#20B2AA] flex-shrink-0 shadow-sm">
               <Building2 className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-2 mb-0.5">
-                <span className="text-xs font-mono font-semibold text-indigo-400">{company.code}</span>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs font-mono font-bold text-[#20B2AA] bg-teal-50 border border-teal-100 px-2 py-0.5 rounded-md">
+                  {company.code}
+                </span>
                 <Badge variant={company.is_active ? 'green' : 'slate'}>
-                  {company.is_active ? 'Active' : 'Inactive'}
+                  {company.is_active ? 'Active Entity' : 'Inactive'}
                 </Badge>
               </div>
-              <p className="text-sm font-semibold text-white truncate">{company.name}</p>
-              <p className="text-xs text-zinc-400 truncate">{company.legal_name}</p>
+              <h3 className="text-base font-bold text-gray-900 truncate leading-snug">{company.name}</h3>
+              <p className="text-xs text-gray-500 truncate font-medium">{company.legal_name}</p>
             </div>
           </div>
-          <Button variant="ghost" size="sm" onClick={() => onEdit(company)} className="flex-shrink-0 text-zinc-400 hover:text-white">
-            <Pencil className="w-3.5 h-3.5" />
-          </Button>
+          <button
+            type="button"
+            onClick={() => onEdit(company)}
+            className="p-2 rounded-lg text-gray-400 hover:text-[#20B2AA] hover:bg-teal-50 transition-all border border-transparent hover:border-teal-100 flex-shrink-0"
+            title="Edit Company Profile"
+          >
+            <Pencil className="w-4 h-4" />
+          </button>
         </div>
 
-        <div className="divider" />
-
-        {/* Tax & Compliance */}
-        <div className="grid grid-cols-2 gap-3 mb-4">
-          <div className="p-2.5 rounded-lg bg-white/[0.02] border border-white/5">
-            <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wide mb-0.5">GSTIN</p>
-            <p className="text-xs font-mono text-zinc-200">{company.gstin || '—'}</p>
+        {/* Tax & Compliance Boxes */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+              <Hash className="w-3 h-3 text-[#20B2AA]" /> GSTIN
+            </p>
+            <p className="text-xs font-mono font-bold text-gray-900">{company.gstin || 'N/A'}</p>
           </div>
-          <div className="p-2.5 rounded-lg bg-white/[0.02] border border-white/5">
-            <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wide mb-0.5">PAN</p>
-            <p className="text-xs font-mono text-zinc-200">{company.pan || '—'}</p>
+          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+              <Hash className="w-3 h-3 text-[#20B2AA]" /> PAN
+            </p>
+            <p className="text-xs font-mono font-bold text-gray-900">{company.pan || 'N/A'}</p>
           </div>
         </div>
 
-        {/* Address */}
-        <div className="mb-4 text-xs text-zinc-400 leading-relaxed">
-          <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wide mb-1">Registered Address</p>
-          <p className="text-zinc-300">
-            {company.address_line1}{company.address_line2 ? `, ${company.address_line2}` : ''}
+        {/* Registered Address */}
+        <div className="p-3.5 rounded-xl bg-slate-50/70 border border-slate-200/60 text-xs space-y-1">
+          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
+            <MapPin className="w-3 h-3 text-[#20B2AA]" /> Registered Office
           </p>
-          <p className="text-zinc-500">{company.city}, {company.state} — {company.pincode}</p>
+          <p className="font-semibold text-gray-800 leading-snug">
+            {company.address_line1}
+            {company.address_line2 ? `, ${company.address_line2}` : ''}
+          </p>
+          <p className="text-gray-500 font-medium">
+            {company.city}, {company.state} — {company.pincode}
+          </p>
         </div>
 
-        {/* Bank */}
-        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 space-y-2">
-          <div className="flex items-center gap-1.5 text-[10px] font-semibold text-zinc-400 uppercase tracking-wide">
-            <CreditCard className="w-3 h-3 text-indigo-400" />
-            <span>Bank Account</span>
+        {/* Bank Credentials Sleek Dark Card */}
+        <div className="rounded-xl bg-slate-900 text-white p-4 space-y-2.5 shadow-sm border border-slate-800">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs font-bold tracking-wide text-teal-400 uppercase">
+              <CreditCard className="w-3.5 h-3.5 text-teal-400" />
+              <span>Primary Bank Account</span>
+            </div>
+            <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
+              IFSC: {company.bank_ifsc}
+            </span>
           </div>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
-            <div>
-              <span className="text-zinc-500">Bank: </span>
-              <span className="font-medium text-zinc-200">{company.bank_name}</span>
-            </div>
-            <div>
-              <span className="text-zinc-500">A/C: </span>
-              <span className="font-mono text-zinc-200">{company.bank_account_no}</span>
-            </div>
-            <div>
-              <span className="text-zinc-500">IFSC: </span>
-              <span className="font-mono text-zinc-300">{company.bank_ifsc}</span>
-            </div>
-            <div>
-              <span className="text-zinc-500">Branch: </span>
-              <span className="text-zinc-300">{company.bank_branch}</span>
-            </div>
-          </div>
-        </div>
-      </CardContent>
 
-      <CardFooter className="px-5 py-3 border-t border-white/5 bg-white/[0.01]">
-        <div className="flex items-center gap-1.5 text-xs text-zinc-500">
-          <FileText className="w-3.5 h-3.5" />
-          <span>{company.terms_and_conditions?.length || 0} terms &amp; conditions configured</span>
+          <div className="grid grid-cols-2 gap-y-1.5 gap-x-4 text-xs">
+            <div>
+              <span className="text-slate-400 font-medium">Bank Name:</span>
+              <p className="font-bold text-white truncate">{company.bank_name}</p>
+            </div>
+            <div>
+              <span className="text-slate-400 font-medium">Account No:</span>
+              <p className="font-mono font-bold text-teal-300 truncate">{company.bank_account_no}</p>
+            </div>
+            <div className="col-span-2">
+              <span className="text-slate-400 font-medium">Branch:</span>
+              <p className="text-slate-200 truncate">{company.bank_branch}</p>
+            </div>
+          </div>
         </div>
-      </CardFooter>
-    </Card>
+      </div>
+
+      {/* Card Footer */}
+      <div className="px-5 py-3 border-t border-gray-100 bg-gray-50/50 flex items-center justify-between text-xs text-gray-500">
+        <div className="flex items-center gap-1.5">
+          <FileText className="w-3.5 h-3.5 text-[#20B2AA]" />
+          <span className="font-medium text-gray-600">
+            {company.terms_and_conditions?.length || 0} Invoice Terms Attached
+          </span>
+        </div>
+        <div className="flex items-center gap-1 text-green-600 font-semibold text-[11px]">
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          <span>Active</span>
+        </div>
+      </div>
+    </div>
   );
 };

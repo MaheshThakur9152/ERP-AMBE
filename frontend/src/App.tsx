@@ -4,9 +4,13 @@ import { AuthProvider } from '@/features/auth/context/AuthContext';
 import { ProtectedRoute } from '@/features/auth/components/ProtectedRoute';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { LoginPage } from '@/pages/LoginPage';
-import { DashboardPage } from '@/pages/DashboardPage';
 import { CompanyProfilesPage } from '@/pages/CompanyProfilesPage';
 import { InvoicePage } from '@/pages/InvoicePage';
+import { SitesMasterPage } from '@/pages/SitesMasterPage';
+import { InvoiceHubPage } from '@/pages/InvoiceHubPage';
+import { SmartGeneratorPage } from '@/pages/SmartGeneratorPage';
+import { PayrollPage } from '@/pages/PayrollPage';
+import { StaffPage } from '@/pages/StaffPage';
 
 export const App: React.FC = () => {
   return (
@@ -19,17 +23,20 @@ export const App: React.FC = () => {
           {/* Protected Enterprise Routes */}
           <Route element={<ProtectedRoute />}>
             <Route element={<DashboardLayout />}>
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/" element={<Navigate to="/invoice-hub" replace />} />
+              <Route path="/dashboard" element={<InvoiceHubPage />} />
               <Route path="/companies" element={<CompanyProfilesPage />} />
+              <Route path="/sites" element={<SitesMasterPage />} />
+              <Route path="/invoice-hub" element={<InvoiceHubPage />} />
+              <Route path="/smart-generator" element={<SmartGeneratorPage />} />
               <Route path="/invoices" element={<InvoicePage />} />
-              <Route path="/payroll" element={<DashboardPage />} />
-              <Route path="/employees" element={<DashboardPage />} />
+              <Route path="/payroll" element={<PayrollPage />} />
+              <Route path="/employees" element={<StaffPage />} />
               <Route path="/settings" element={<CompanyProfilesPage />} />
             </Route>
           </Route>
 
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          <Route path="*" element={<Navigate to="/invoice-hub" replace />} />
         </Routes>
       </AuthProvider>
     </BrowserRouter>

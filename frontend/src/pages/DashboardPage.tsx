@@ -10,31 +10,31 @@ const tiles = [
     icon: Building2,
     href: '/companies',
     status: 'Live',
-    color: 'from-blue-500/20 to-indigo-500/10 text-blue-400',
+    color: 'bg-teal-50 text-[#20B2AA]',
   },
   {
-    title: 'Invoices',
+    title: 'Invoices Hub',
     description: 'Proforma and tax invoice lifecycle with auto-incrementing numbers.',
     icon: FileText,
-    href: '/invoices',
-    status: 'Phase 3',
-    color: 'from-amber-500/20 to-orange-500/10 text-amber-400',
+    href: '/invoice-hub',
+    status: 'Live',
+    color: 'bg-[#20B2AA]/10 text-[#20B2AA]',
   },
   {
     title: 'Payroll Engine',
     description: 'Attendance-based payroll, bulk NEFT/RTGS Excel generation.',
     icon: CreditCard,
     href: '/payroll',
-    status: 'Phase 7',
-    color: 'from-purple-500/20 to-pink-500/10 text-purple-400',
+    status: 'Live',
+    color: 'bg-indigo-50 text-indigo-600',
   },
   {
-    title: 'Employee KYC Vault',
-    description: 'PAN, address proofs, and documents securely stored in Supabase.',
+    title: 'Sites Master',
+    description: 'Manage client facility locations, GSTIN details & designation rate cards.',
     icon: Users,
-    href: '/employees',
-    status: 'Phase 2',
-    color: 'from-emerald-500/20 to-teal-500/10 text-emerald-400',
+    href: '/sites',
+    status: 'Live',
+    color: 'bg-green-50 text-green-600',
   },
 ];
 
@@ -43,40 +43,39 @@ export const DashboardPage: React.FC = () => {
     <div className="max-w-5xl space-y-6">
       {/* Page header */}
       <div>
-        <h1 className="page-title text-xl font-bold tracking-tight text-white">Overview</h1>
-        <p className="page-desc text-zinc-400">Enterprise Resource Planning — Facility Management Division</p>
+        <h1 className="text-xl font-bold tracking-tight text-gray-900">Overview</h1>
+        <p className="text-xs text-gray-500 mt-0.5">Enterprise Resource Planning — Facility Management Division</p>
       </div>
 
       {/* Status banner */}
-      <div className="flex items-center gap-3 px-4 py-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-xs text-emerald-300">
-        <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-        <span>Phase 1 Deployed — Database, Authentication, and Company Profiles active.</span>
+      <div className="flex items-center gap-3 px-4 py-3 rounded-xl border border-green-200 bg-green-50 text-xs text-green-700 font-semibold">
+        <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+        <span>Facility ERP Modules Active — Invoices, Sites Master, Smart Generator, and Payroll Engine ready.</span>
       </div>
 
       {/* Tiles */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {tiles.map((tile) => (
           <Link key={tile.title} to={tile.href}>
-            <Card className="hover:border-white/20 transition-all duration-200 cursor-pointer group bg-zinc-900/50 hover:bg-zinc-900/80 backdrop-blur-sm">
+            <Card className="hover:border-[#20B2AA] transition-all duration-200 cursor-pointer group bg-white border border-gray-200 shadow-sm">
               <CardContent className="flex flex-col gap-4 p-5">
                 <div className="flex items-start justify-between">
-                  <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${tile.color} flex items-center justify-center border border-white/10 group-hover:scale-105 transition-transform`}>
+                  <div className={`w-10 h-10 rounded-xl ${tile.color} flex items-center justify-center border border-gray-200 group-hover:scale-105 transition-transform`}>
                     <tile.icon className="w-5 h-5" />
                   </div>
-                  <span className={`badge ${tile.status === 'Live' ? 'badge-green' : 'badge-slate'}`}>
-                    {tile.status !== 'Live' && <Clock className="w-2.5 h-2.5 mr-1" />}
+                  <span className="bg-green-100 text-green-700 border border-green-200 text-xs font-semibold px-2.5 py-0.5 rounded-full">
                     {tile.status}
                   </span>
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-white group-hover:text-indigo-300 transition-colors">
+                  <p className="text-sm font-bold text-gray-900 group-hover:text-[#20B2AA] transition-colors">
                     {tile.title}
                   </p>
-                  <p className="text-xs text-zinc-400 mt-1 leading-relaxed">{tile.description}</p>
+                  <p className="text-xs text-gray-500 mt-1 leading-relaxed">{tile.description}</p>
                 </div>
-                <div className="flex items-center gap-1 text-xs text-zinc-500 group-hover:text-zinc-300 transition-colors pt-2 border-t border-white/5">
+                <div className="flex items-center gap-1 text-xs font-semibold text-[#20B2AA] group-hover:translate-x-0.5 transition-transform pt-2 border-t border-gray-100">
                   <span>Open module</span>
-                  <ArrowRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
+                  <ArrowRight className="w-3 h-3" />
                 </div>
               </CardContent>
             </Card>

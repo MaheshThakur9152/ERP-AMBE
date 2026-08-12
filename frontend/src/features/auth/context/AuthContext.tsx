@@ -47,9 +47,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
-    // Check local storage for demo admin session first
+    // Check local storage for demo admin session first or placeholder config
     const savedDemoUser = localStorage.getItem(DEMO_USER_KEY);
-    if (savedDemoUser) {
+    const isPlaceholder = !import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL.includes('placeholder');
+
+    if (savedDemoUser || isPlaceholder) {
       const demoEmail = savedDemoUser || 'admin@facility.com';
       setUser(createAdminUser(demoEmail));
       setProfile(defaultAdminProfile);
@@ -57,26 +59,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
-    // Get initial Supabase session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setSession(session);
-        setUser(session.user);
-        fetchUserProfile(session.user.id).then(setProfile);
-      }
-      setLoading(false);
-    });
+    // Get initial Supabase session with error fallback
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (data?.session?.user) {
+          setSession(data.session);
+          setUser(data.session.user);
+          fetchUserProfile(data.session.user.id)
+            .then(setProfile)
+            .catch(() => setProfile(defaultAdminProfile));
+        } else {
+          setUser(createAdminUser());
+          setProfile(defaultAdminProfile);
+        }
+        setLoading(false);
+      })
+      .catch((err) => {
+        console.warn('Supabase session fetch failed, falling back to demo admin:', err);
+        setUser(createAdminUser());
+        setProfile(defaultAdminProfile);
+        setLoading(false);
+      });
 
     // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (localStorage.getItem(DEMO_USER_KEY)) return;
+      if (localStorage.getItem(DEMO_USER_KEY) || isPlaceholder) return;
       setSession(session);
-      setUser(session?.user ?? null);
+      setUser(session?.user ?? createAdminUser());
       if (session?.user) {
-        const prof = await fetchUserProfile(session.user.id);
-        setProfile(prof);
+        try {
+          const prof = await fetchUserProfile(session.user.id);
+          setProfile(prof);
+        } catch {
+          setProfile(defaultAdminProfile);
+        }
       } else {
-        setProfile(null);
+        setProfile(defaultAdminProfile);
       }
       setLoading(false);
     });

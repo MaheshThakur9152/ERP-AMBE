@@ -32,6 +32,7 @@ export interface InvoiceMetadata {
   invoiceNo: string;
   invoiceDate: string;
   billingPeriod: string;
+  invoiceType?: 'Tax Invoice' | 'Proforma Invoice' | string;
 }
 
 export interface BankDetails {
@@ -66,4 +67,5 @@ export interface InvoiceData {
   cgstPercent: number;
   sgstPercent: number;
   terms: string;
+  type?: 'Tax Invoice' | 'Proforma Invoice' | string;
 }
