@@ -127,7 +127,7 @@ export const Sidebar: React.FC = () => {
                 Attendance
               </NavLink>
               <NavLink
-                to="/logs"
+                to="/documents"
                 className={({ isActive }) =>
                   `w-full flex gap-3 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
                     isActive
@@ -136,7 +136,7 @@ export const Sidebar: React.FC = () => {
                   }`
                 }
               >
-                Logs
+                Emp. Documents
               </NavLink>
               <NavLink
                 to="/payroll"

@@ -12,7 +12,7 @@ import { SmartGeneratorPage } from '@/pages/SmartGeneratorPage';
 import { PayrollPage } from '@/pages/PayrollPage';
 import { StaffPage } from '@/pages/StaffPage';
 import { AttendancePage } from '@/pages/AttendancePage';
-import { LogsPage } from '@/pages/LogsPage';
+import { EmployeeDocuments } from '@/pages/EmployeeDocuments';
 import { MaterialsMasterPage } from '@/pages/MaterialsMasterPage';
 import { MaterialGeneratorPage } from '@/pages/MaterialGeneratorPage';
 
@@ -39,7 +39,7 @@ export const App: React.FC = () => {
               <Route path="/attendance" element={<AttendancePage />} />
               <Route path="/payroll" element={<PayrollPage />} />
               <Route path="/employees" element={<StaffPage />} />
-              <Route path="/logs" element={<LogsPage />} />
+              <Route path="/documents" element={<EmployeeDocuments />} />
               <Route path="/photos" element={<CompanyProfilesPage />} />
               <Route path="/settings" element={<CompanyProfilesPage />} />
             </Route>

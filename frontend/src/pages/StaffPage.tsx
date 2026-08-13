@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Users,
   Search,
@@ -17,6 +17,8 @@ import {
   Calendar,
   CreditCard,
 } from 'lucide-react';
+import { AddStaffModal } from '@/features/attendance/components/AddStaffModal';
+import { supabase } from '@/lib/supabase';
 
 interface StaffDocument {
   name: string;
@@ -27,105 +29,46 @@ interface StaffDocument {
 
 interface StaffMember {
   id: string;
-  name: string;
-  biometricCode: string;
-  phone: string;
-  role: string;
-  siteName: string;
-  status: 'Active' | 'Inactive' | 'On Leave';
-  joiningDate: string;
+  employee_name?: string;
+  name?: string;
+  biometric_code?: string;
+  biometricCode?: string;
+  phone?: string;
+  designation?: string;
+  role?: string;
+  site_id?: string;
+  site_name?: string;
+  siteName?: string;
+  sites?: {
+    site_name?: string;
+    code_name?: string;
+    companies?: {
+      name?: string;
+    };
+  };
+  status?: string;
+  joining_date?: string;
+  joiningDate?: string;
+  created_at?: string;
   photoUrl?: string;
   aadharNo?: string;
   panNo?: string;
   bankAccountNo?: string;
   bankIfsc?: string;
   bankName?: string;
-  documents: StaffDocument[];
+  documents?: StaffDocument[];
 }
 
-const INITIAL_STAFF: StaffMember[] = [
-  {
-    id: 'staff-1',
-    name: 'Rahul Sharma',
-    biometricCode: '3765',
-    phone: '9876543210',
-    role: 'Supervisor',
-    siteName: 'Lokhandwala Minerva CHS LTD',
-    status: 'Active',
-    joiningDate: '2024-01-15',
-    photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-    aadharNo: '4839-2938-1928',
-    panNo: 'ABCDE1234F',
-    bankAccountNo: '924020001871570',
-    bankIfsc: 'UTIB0001572',
-    bankName: 'Axis Bank',
-    documents: [
-      { name: 'Aadhar_Rahul.pdf', url: '#', type: 'Aadhar', uploadedAt: '2024-01-15' },
-      { name: 'PAN_Rahul.jpg', url: '#', type: 'PAN', uploadedAt: '2024-01-15' },
-    ],
-  },
-  {
-    id: 'staff-2',
-    name: 'Suman Kumar',
-    biometricCode: '1092',
-    phone: '9819203948',
-    role: 'Janitor',
-    siteName: 'Acme Metal Industries Pvt Ltd',
-    status: 'Active',
-    joiningDate: '2023-08-01',
-    photoUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150',
-    aadharNo: '8821-9920-1123',
-    bankAccountNo: '029310029381',
-    bankIfsc: 'SBIN0001928',
-    bankName: 'State Bank of India',
-    documents: [
-      { name: 'Aadhar_Suman.pdf', url: '#', type: 'Aadhar', uploadedAt: '2023-08-01' },
-    ],
-  },
-  {
-    id: 'staff-3',
-    name: 'Fareenbano Khan',
-    biometricCode: '2048',
-    phone: '9769201928',
-    role: 'Housekeeping',
-    siteName: 'Ajmera Enclave',
-    status: 'Active',
-    joiningDate: '2023-11-10',
-    aadharNo: '1102-9930-4491',
-    panNo: 'XYZP9876Q',
-    documents: [],
-  },
-  {
-    id: 'staff-4',
-    name: 'Manish Verma',
-    biometricCode: '4920',
-    phone: '9128392019',
-    role: 'Security Guard',
-    siteName: 'Ruparel Optima',
-    status: 'Active',
-    joiningDate: '2024-03-01',
-    documents: [],
-  },
-  {
-    id: 'staff-5',
-    name: 'Aarti Patil',
-    biometricCode: '5821',
-    phone: '9867512340',
-    role: 'Janitor',
-    siteName: 'Minerva Ho',
-    status: 'Active',
-    joiningDate: '2024-04-12',
-    documents: [],
-  },
-];
-
 export const StaffPage: React.FC = () => {
-  const [staffList, setStaffList] = useState<StaffMember[]>(INITIAL_STAFF);
+  const [staffList, setStaffList] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('All');
   const [statusFilter, setStatusFilter] = useState<string>('All');
 
-  // Modal State
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  // Modal State for edit
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
 
@@ -135,25 +78,49 @@ export const StaffPage: React.FC = () => {
     biometricCode: '',
     phone: '',
     role: 'Janitor',
-    siteName: 'Lokhandwala Minerva CHS LTD',
+    siteName: '',
     status: 'Active',
-    joiningDate: new Date().toISOString().split('T')[0],
-    aadharNo: '',
-    panNo: '',
-    bankAccountNo: '',
-    bankIfsc: '',
-    bankName: '',
     documents: [],
   });
 
-  // Filtered staff list by search name, biometric code, phone, role
+  // Fetch live staff data on mount & refresh
+  useEffect(() => {
+    const fetchStaff = async () => {
+      const { data, error } = await supabase
+        .from('staff')
+        .select('*, sites(site_name, code_name, companies(name))')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching staff:', error);
+      } else if (data) {
+        setStaffList(data);
+      }
+    };
+
+    fetchStaff();
+  }, [refreshKey]);
+
+  // Filtered staff list by search name, biometric code, site name
   const filteredStaff = staffList.filter((staff) => {
+    const empName = (staff.employee_name || staff.name || '').toLowerCase();
+    const bioCode = (staff.biometric_code || staff.biometricCode || '').toLowerCase();
+    const phone = (staff.phone || 'n/a').toLowerCase();
+    const siteText = (
+      staff.sites?.companies?.name
+        ? `${staff.sites.companies.name} - ${staff.sites.code_name || staff.sites.site_name || ''}`
+        : (staff.sites?.code_name || staff.sites?.site_name || staff.site_name || staff.siteName || '')
+    ).toLowerCase();
+
+    const searchLower = searchTerm.toLowerCase();
     const matchesSearch =
-      staff.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      staff.biometricCode.includes(searchTerm) ||
-      staff.phone.includes(searchTerm) ||
-      staff.siteName.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesRole = roleFilter === 'All' || staff.role === roleFilter;
+      empName.includes(searchLower) ||
+      bioCode.includes(searchLower) ||
+      phone.includes(searchLower) ||
+      siteText.includes(searchLower);
+
+    const roleName = staff.designation || staff.role || '';
+    const matchesRole = roleFilter === 'All' || roleName === roleFilter;
     const matchesStatus = statusFilter === 'All' || staff.status === statusFilter;
     return matchesSearch && matchesRole && matchesStatus;
   });
@@ -165,14 +132,8 @@ export const StaffPage: React.FC = () => {
       biometricCode: '',
       phone: '',
       role: 'Janitor',
-      siteName: 'Lokhandwala Minerva CHS LTD',
+      siteName: '',
       status: 'Active',
-      joiningDate: new Date().toISOString().split('T')[0],
-      aadharNo: '',
-      panNo: '',
-      bankAccountNo: '',
-      bankIfsc: '',
-      bankName: '',
       documents: [],
     });
     setIsModalOpen(true);
@@ -180,13 +141,24 @@ export const StaffPage: React.FC = () => {
 
   const handleOpenEditModal = (staff: StaffMember) => {
     setEditingStaff(staff);
-    setFormData(staff);
+    setFormData({
+      ...staff,
+      name: staff.employee_name || staff.name || '',
+      biometricCode: staff.biometric_code || staff.biometricCode || '',
+      role: staff.designation || staff.role || 'Janitor',
+      siteName: staff.sites?.site_name || staff.site_name || staff.siteName || '',
+    });
     setIsModalOpen(true);
   };
 
-  const handleDeleteStaff = (id: string) => {
+  const handleDeleteStaff = async (id: string) => {
     if (confirm('Are you sure you want to remove this staff member?')) {
-      setStaffList((prev) => prev.filter((s) => s.id !== id));
+      const { error } = await supabase.from('staff').delete().eq('id', id);
+      if (error) {
+        alert(`Failed to delete staff: ${error.message}`);
+      } else {
+        setStaffList((prev) => prev.filter((s) => s.id !== id));
+      }
     }
   };
 
@@ -221,27 +193,31 @@ export const StaffPage: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
-  const handleSaveStaff = (e: React.FormEvent) => {
+  const handleSaveStaff = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.biometricCode) {
-      alert('Employee Name and Biometric Code are required.');
+    const empName = (formData.employee_name || formData.name || '').trim();
+    if (!empName) {
+      alert('Employee Name is required.');
       return;
     }
 
     if (editingStaff) {
-      setStaffList((prev) =>
-        prev.map((s) => (s.id === editingStaff.id ? ({ ...s, ...formData } as StaffMember) : s))
-      );
-    } else {
-      const newStaff: StaffMember = {
-        ...(formData as StaffMember),
-        id: `staff-${Date.now()}`,
-        documents: formData.documents || [],
+      const payload = {
+        employee_name: empName,
+        biometric_code: (formData.biometric_code || formData.biometricCode || '').trim(),
+        phone: (formData.phone || '').trim(),
+        designation: formData.designation || formData.role || 'Janitor',
+        status: formData.status || 'Active',
       };
-      setStaffList((prev) => [newStaff, ...prev]);
-    }
 
-    setIsModalOpen(false);
+      const { error } = await supabase.from('staff').update(payload).eq('id', editingStaff.id);
+      if (error) {
+        alert(`Failed to update staff: ${error.message}`);
+      } else {
+        setRefreshKey((prev) => prev + 1);
+        setIsModalOpen(false);
+      }
+    }
   };
 
   return (
@@ -264,13 +240,19 @@ export const StaffPage: React.FC = () => {
 
         <button
           type="button"
-          onClick={handleOpenAddModal}
+          onClick={() => setShowAddModal(true)}
           className="px-4 py-2.5 rounded-lg bg-[#20B2AA] hover:bg-[#1ca19a] text-white text-xs font-semibold shadow-sm flex items-center gap-2 transition-all self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" />
           <span>Add New Staff</span>
         </button>
       </div>
+
+      <AddStaffModal
+        isOpen={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        onSuccess={() => setRefreshKey((prev) => prev + 1)}
+      />
 
       {/* Main Staff Container (Extended Full Height & Search) */}
       <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-sm space-y-6">
@@ -343,112 +325,125 @@ export const StaffPage: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                filteredStaff.map((staff) => (
-                  <tr key={staff.id} className="hover:bg-slate-50/80 transition-colors">
-                    {/* Employee Profile */}
-                    <td className="py-4 px-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-100 border border-gray-200 flex-shrink-0">
-                          {staff.photoUrl ? (
-                            <img
-                              src={staff.photoUrl}
-                              alt={staff.name}
-                              className="w-full h-full object-cover"
-                            />
-                          ) : (
-                            <div className="w-full h-full bg-[#20B2AA]/10 text-[#20B2AA] flex items-center justify-center font-bold text-sm">
-                              {staff.name.slice(0, 2).toUpperCase()}
+                filteredStaff.map((staff) => {
+                  const empName = staff.employee_name || staff.name || 'Unnamed Employee';
+                  const bioCode = staff.biometric_code || staff.biometricCode || '-';
+                  const roleName = staff.designation || staff.role || 'Staff';
+                  const siteDisplay = staff.sites?.companies?.name
+                    ? `${staff.sites.companies.name} - ${staff.sites.code_name || staff.sites.site_name || 'Unassigned'}`
+                    : (staff.sites?.code_name || staff.sites?.site_name || staff.site_name || staff.siteName || 'Unassigned');
+                  const phoneNo = staff.phone || 'N/A';
+                  const joinDate = staff.created_at
+                    ? new Date(staff.created_at).toLocaleDateString()
+                    : (staff.joiningDate || 'N/A');
+
+                  return (
+                    <tr key={staff.id} className="hover:bg-slate-50/80 transition-colors">
+                      {/* Employee Profile */}
+                      <td className="py-4 px-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-full overflow-hidden bg-gray-100 border border-gray-200 flex-shrink-0">
+                            {staff.photoUrl ? (
+                              <img
+                                src={staff.photoUrl}
+                                alt={empName}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full bg-[#20B2AA]/10 text-[#20B2AA] flex items-center justify-center font-bold text-sm">
+                                {empName.slice(0, 2).toUpperCase()}
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <div className="font-bold text-gray-900 text-sm">{empName}</div>
+                            <div className="text-xs text-gray-400 font-mono">
+                              Joined: {joinDate}
                             </div>
-                          )}
-                        </div>
-                        <div>
-                          <div className="font-bold text-gray-900 text-sm">{staff.name}</div>
-                          <div className="text-xs text-gray-400 font-mono">
-                            Joined: {staff.joiningDate}
                           </div>
                         </div>
-                      </div>
-                    </td>
+                      </td>
 
-                    {/* Biometric Code */}
-                    <td className="py-4 px-4 text-center">
-                      <span className="px-2.5 py-1 rounded-md bg-gray-100 border border-gray-200 font-mono font-bold text-xs text-gray-800">
-                        {staff.biometricCode}
-                      </span>
-                    </td>
-
-                    {/* Role & Site */}
-                    <td className="py-4 px-4">
-                      <div className="font-semibold text-gray-800 text-xs">{staff.role}</div>
-                      <div className="text-xs text-gray-500 font-medium">{staff.siteName}</div>
-                    </td>
-
-                    {/* Phone */}
-                    <td className="py-4 px-4 font-mono text-xs text-gray-700">
-                      {staff.phone || 'N/A'}
-                    </td>
-
-                    {/* KYC Documents Badge */}
-                    <td className="py-4 px-4 text-center">
-                      <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                        {staff.aadharNo ? (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-green-50 text-green-700 border border-green-200">
-                            Aadhar ✓
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-gray-50 text-gray-400 border border-gray-200">
-                            No Aadhar
-                          </span>
-                        )}
-                        {staff.panNo ? (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                            PAN ✓
-                          </span>
-                        ) : null}
-                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-purple-50 text-purple-700 border border-purple-200">
-                          {staff.documents?.length || 0} Docs
+                      {/* Biometric Code */}
+                      <td className="py-4 px-4 text-center">
+                        <span className="px-2.5 py-1 rounded-md bg-gray-100 border border-gray-200 font-mono font-bold text-xs text-gray-800">
+                          {bioCode}
                         </span>
-                      </div>
-                    </td>
+                      </td>
 
-                    {/* Status */}
-                    <td className="py-4 px-4 text-center">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                          staff.status === 'Active'
-                            ? 'bg-green-100 text-green-700 border border-green-200'
-                            : 'bg-amber-100 text-amber-700 border border-amber-200'
-                        }`}
-                      >
-                        {staff.status}
-                      </span>
-                    </td>
+                      {/* Role & Site */}
+                      <td className="py-4 px-4">
+                        <div className="font-semibold text-gray-800 text-xs">{roleName}</div>
+                        <div className="text-xs text-gray-500 font-medium">{siteDisplay}</div>
+                      </td>
 
-                    {/* Actions */}
-                    <td className="py-4 px-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEditModal(staff)}
-                          className="px-3 py-1.5 text-xs font-semibold text-[#20B2AA] bg-teal-50 hover:bg-teal-100 border border-[#20B2AA]/30 rounded-lg flex items-center gap-1 transition-colors"
-                          title="Edit Staff & Documents"
+                      {/* Phone */}
+                      <td className="py-4 px-4 font-mono text-xs text-gray-700">
+                        {phoneNo}
+                      </td>
+
+                      {/* KYC Documents Badge */}
+                      <td className="py-4 px-4 text-center">
+                        <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                          {staff.aadharNo ? (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-green-50 text-green-700 border border-green-200">
+                              Aadhar ✓
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-gray-50 text-gray-400 border border-gray-200">
+                              No Aadhar
+                            </span>
+                          )}
+                          {staff.panNo ? (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                              PAN ✓
+                            </span>
+                          ) : null}
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-purple-50 text-purple-700 border border-purple-200">
+                            {staff.documents?.length || 0} Docs
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* Status */}
+                      <td className="py-4 px-4 text-center">
+                        <span
+                          className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                            staff.status === 'Active'
+                              ? 'bg-green-100 text-green-700 border border-green-200'
+                              : 'bg-amber-100 text-amber-700 border border-amber-200'
+                          }`}
                         >
-                          <Edit2 className="w-3.5 h-3.5" />
-                          <span>Edit / KYC</span>
-                        </button>
+                          {staff.status || 'Active'}
+                        </span>
+                      </td>
 
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteStaff(staff.id)}
-                          className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded-lg transition-colors"
-                          title="Delete Staff Record"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                      {/* Actions */}
+                      <td className="py-4 px-4 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditModal(staff)}
+                            className="px-3 py-1.5 text-xs font-semibold text-[#20B2AA] bg-teal-50 hover:bg-teal-100 border border-[#20B2AA]/30 rounded-lg flex items-center gap-1 transition-colors"
+                            title="Edit Staff & Documents"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                            <span>Edit / KYC</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteStaff(staff.id)}
+                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded-lg transition-colors"
+                            title="Delete Staff Record"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -466,7 +461,7 @@ export const StaffPage: React.FC = () => {
                   <User className="w-5 h-5" />
                 </div>
                 <h2 className="font-bold text-base">
-                  {editingStaff ? `Edit Staff: ${editingStaff.name}` : 'Add New Staff Member'}
+                  {editingStaff ? `Edit Staff: ${editingStaff.employee_name || editingStaff.name || ''}` : 'Add New Staff Member'}
                 </h2>
               </div>
               <button

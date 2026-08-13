@@ -4,6 +4,7 @@ import excelRoutes from './excelRoutes';
 import invoiceRoutes from './invoiceRoutes';
 import siteRoutes from './siteRoutes';
 import materialRoutes from './materialRoutes';
+import documentRoutes from './documentRoutes';
 
 const router = Router();
 
@@ -16,6 +17,7 @@ router.use('/excel', excelRoutes);
 router.use('/invoices', invoiceRoutes);
 router.use('/sites', siteRoutes);
 router.use('/materials', materialRoutes);
+router.use('/documents', documentRoutes);
 
 export default router;
 

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   CalendarDays,
   Filter,
@@ -21,64 +21,35 @@ import {
   EmployeeAttendanceData,
 } from '../types/attendance';
 import { AttendanceTemplate } from '@/features/invoices/components/AttendanceTemplate';
+import { mapDbToAttendanceTemplate, getWeeklyOffDayNum } from '../utils/attendanceMapper';
+import { supabase } from '@/lib/supabase';
+import { AddStaffModal } from './AddStaffModal';
 
 interface AttendanceTabProps {
   initialEmployees?: EmployeeAttendanceData[];
   initialRecords?: AttendanceRecord[];
-  sites?: { id: string; name: string; attendanceGridName?: string }[];
+  sites?: { id: string; name: string; attendanceGridName?: string; approvedManpower?: number }[];
   onAddStaff?: () => void;
   onEditDeductions?: (emp: EmployeeAttendanceData) => void;
 }
 
-const MOCK_SITES = [
-  { id: 'site-1', name: 'Acme Metal Industries Pvt Ltd', attendanceGridName: 'Acme Metal Industries Pvt Ltd' },
-  { id: 'site-2', name: 'Ajmera', attendanceGridName: 'Ajmera' },
-  { id: 'site-3', name: 'Ajmera-keyman', attendanceGridName: 'Ajmera-keyman' },
-  { id: 'site-4', name: 'Ambe Service- Office', attendanceGridName: 'Ambe Service- Office' },
-  { id: 'site-5', name: 'Ceejay', attendanceGridName: 'Ceejay' },
-  { id: 'site-6', name: 'Lokhandwala Minerva CHS LTD', attendanceGridName: 'Lokhandwala Minerva CHS LTD (Prop.)' },
-];
-
-const MOCK_EMPLOYEES: EmployeeAttendanceData[] = [
-  {
-    id: 'emp-101',
-    name: 'Alok',
-    biometricCode: '1234',
-    phone: '9082089316',
-    role: 'Janitor',
-    shift: 'KEYMAN',
-    siteId: 'site-3',
-    siteName: 'Ajmera-keyman',
-    weeklyOff: 'FRI',
-    status: 'Active',
-  },
-  {
-    id: 'emp-102',
-    name: 'Feroj',
-    biometricCode: '1234',
-    phone: '8594258810',
-    role: 'Janitor',
-    shift: 'KEYMAN',
-    siteId: 'site-3',
-    siteName: 'Ajmera-keyman',
-    weeklyOff: 'MON',
-    status: 'Active',
-  },
-];
-
 export const AttendanceTab: React.FC<AttendanceTabProps> = ({
-  initialEmployees = MOCK_EMPLOYEES,
+  initialEmployees = [],
   initialRecords = [],
-  sites = MOCK_SITES,
+  sites = [],
   onAddStaff,
   onEditDeductions,
 }) => {
-  const [employees] = useState<EmployeeAttendanceData[]>(initialEmployees);
+  const [employees, setEmployees] = useState<EmployeeAttendanceData[]>(initialEmployees);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(initialRecords);
+  const [siteList, setSiteList] = useState<{ id: string; name: string; attendanceGridName?: string; approvedManpower?: number }[]>(sites);
   const [selectedMonth, setSelectedMonth] = useState<number>(8); // Aug
   const [selectedYear, setSelectedYear] = useState<number>(2026);
-  const [selectedSiteFilter, setSelectedSiteFilter] = useState<string>('site-3'); // Ajmera-keyman
+  const [selectedSiteFilter, setSelectedSiteFilter] = useState<string>('all');
   const [searchTerm] = useState<string>('');
+
+  const [showAddStaffModal, setShowAddStaffModal] = useState<boolean>(false);
+  const [refreshKey, setRefreshKey] = useState<number>(0);
 
   // Modals & Controls
   const [showAutoInvoiceDropdown, setShowAutoInvoiceDropdown] = useState<boolean>(false);
@@ -130,7 +101,7 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
       const empAttendance = attendanceByEmployee.get(emp.id);
       if (empAttendance) {
         for (const [dateStr, record] of empAttendance.entries()) {
-          const [rYear, rMonth, rDay] = dateStr.split('-').map(Number);
+          const [rYear, rMonth] = dateStr.split('-').map(Number);
           if (rMonth === selectedMonth && rYear === selectedYear) {
             if (record.status === 'P') totalWorkingScore += 1;
             else if (record.status === 'W/O') totalWorkingScore += 1;
@@ -149,18 +120,6 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
   }, [filteredEmployees, attendanceByEmployee, selectedMonth, selectedYear]);
 
   const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
-
-  const getWeeklyOffDayNum = (wOffStr: string = '') => {
-    const s = wOffStr.toUpperCase().trim();
-    if (s.startsWith('SUN')) return 0;
-    if (s.startsWith('MON')) return 1;
-    if (s.startsWith('TUE')) return 2;
-    if (s.startsWith('WED')) return 3;
-    if (s.startsWith('THU')) return 4;
-    if (s.startsWith('FRI')) return 5;
-    if (s.startsWith('SAT')) return 6;
-    return -1;
-  };
 
   const handleSaveStatus = (status: AttendanceStatus | null) => {
     if (!editingCell) return;
@@ -197,97 +156,170 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
       return filtered;
     });
 
+    // Save directly to Supabase attendance_records table
+    try {
+      const recordPayload = {
+        staff_id: empId,
+        site_id: selectedSiteFilter === 'all' ? null : selectedSiteFilter,
+        date,
+        status: targetStatus,
+        overtime_status: overtimeVal || null,
+        remarks: targetStatus === 'WOP' ? 'Present on Weekly Off' : 'Added by Admin',
+        updated_at: new Date().toISOString(),
+      };
+      supabase
+        .from('attendance_records')
+        .upsert([recordPayload], { onConflict: 'staff_id,date' })
+        .then(({ error }) => {
+          if (error) console.warn('⚠️ Error upserting attendance_record to Supabase:', error.message);
+        });
+    } catch (e) {
+      console.warn('⚠️ Could not upsert attendance_record:', e);
+    }
+
     setEditingCell(null);
   };
 
+  // True relational fetch sequence: sites -> staff -> attendance_records
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadRelationalData() {
+      try {
+        // 1. Fetch Sites from Supabase sites table
+        const { data: dbSites, error: sitesErr } = await supabase
+          .from('sites')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (!sitesErr && dbSites && dbSites.length > 0) {
+          const mappedSites = dbSites.map((s: any) => ({
+            id: s.id,
+            name: s.site_name || s.siteName || s.name || '',
+            attendanceGridName: s.site_name || s.siteName || s.name || '',
+            approvedManpower: Number(s.approved_manpower || s.approvedManpower || s.contracted_manpower || 5),
+          }));
+          if (isMounted) {
+            setSiteList(mappedSites);
+            if (selectedSiteFilter === 'all' && mappedSites.length > 0) {
+              setSelectedSiteFilter(mappedSites[0].id);
+            }
+          }
+        }
+
+        // 2. Query 1: Fetch staff for selected site
+        let staffQuery = supabase.from('staff').select('*');
+        if (selectedSiteFilter && selectedSiteFilter !== 'all') {
+          staffQuery = staffQuery.eq('site_id', selectedSiteFilter);
+        }
+
+        const { data: dbStaff, error: staffErr } = await staffQuery;
+
+        if (!staffErr && dbStaff) {
+          const mappedStaff: EmployeeAttendanceData[] = dbStaff.map((st: any) => ({
+            id: st.id,
+            name: st.name || st.employee_name || st.employeeName || '',
+            biometricCode: st.biometric_code || st.biometricCode || '',
+            phone: st.phone || st.contact_no || '',
+            role: st.role || st.designation || 'Janitor',
+            shift: st.shift || st.role || 'KEYMAN',
+            siteId: st.site_id || st.siteId || '',
+            siteName: st.site_name || st.siteName || '',
+            weeklyOff: (st.weekly_off || st.weeklyOff || 'SUN').toUpperCase(),
+            status: st.status || 'Active',
+          }));
+
+          if (isMounted) {
+            setEmployees(mappedStaff);
+          }
+        }
+
+        // 3. Query 2: Fetch attendance_records for selected month & year
+        const startDateStr = `${selectedYear}-${selectedMonth.toString().padStart(2, '0')}-01`;
+        const lastDay = new Date(selectedYear, selectedMonth, 0).getDate();
+        const endDateStr = `${selectedYear}-${selectedMonth.toString().padStart(2, '0')}-${lastDay.toString().padStart(2, '0')}`;
+
+        let recQuery = supabase
+          .from('attendance_records')
+          .select('*')
+          .gte('date', startDateStr)
+          .lte('date', endDateStr);
+
+        if (selectedSiteFilter && selectedSiteFilter !== 'all') {
+          recQuery = recQuery.eq('site_id', selectedSiteFilter);
+        }
+
+        const { data: dbRecords, error: recErr } = await recQuery;
+
+        if (!recErr && dbRecords) {
+          const mappedRecords: AttendanceRecord[] = dbRecords.map((r: any) => ({
+            id: r.id,
+            employeeId: r.staff_id || r.employee_id || r.employeeId || r.staffId || '',
+            date: r.date,
+            status: r.status,
+            overtimeStatus: r.overtime_status || r.overtimeStatus || '',
+            remarks: r.remarks,
+          }));
+
+          if (isMounted) {
+            setAttendanceRecords(mappedRecords);
+          }
+        }
+      } catch (err) {
+        console.warn('⚠️ Relational data fetch warning:', err);
+      }
+    }
+
+    loadRelationalData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedSiteFilter, selectedMonth, selectedYear, refreshKey]);
+
+  // Derived live printable template data via mapper
+  const templateData = useMemo(() => {
+    const selectedSiteObj = siteList.find((s) => s.id === selectedSiteFilter);
+    const siteName = selectedSiteObj?.name || (selectedSiteFilter === 'all' ? 'All Sites' : selectedSiteFilter);
+    const approvedManpower = selectedSiteObj?.approvedManpower || 5;
+
+    return mapDbToAttendanceTemplate(
+      filteredEmployees,
+      attendanceRecords,
+      siteName,
+      selectedMonth,
+      selectedYear,
+      approvedManpower
+    );
+  }, [filteredEmployees, attendanceRecords, siteList, selectedSiteFilter, selectedMonth, selectedYear]);
+
   return (
     <div className="space-y-6 font-sans text-gray-800 bg-white p-6 rounded-2xl shadow-xs border border-gray-100">
+      {/* Add Staff Modal */}
+      {showAddStaffModal && (
+        <AddStaffModal
+          isOpen={showAddStaffModal}
+          onClose={() => setShowAddStaffModal(false)}
+          onSuccess={() => {
+            setRefreshKey((prev) => prev + 1);
+            setShowAddStaffModal(false);
+          }}
+          sites={siteList}
+        />
+      )}
+
       {/* Printable Template (hidden on screen, visible during window.print()) */}
       <div className="attendance-print-area">
-        <AttendanceTemplate
-          data={{
-            siteName: sites.find((s) => s.id === selectedSiteFilter)?.name || (selectedSiteFilter === 'all' ? 'All Sites' : selectedSiteFilter),
-            month: new Date(selectedYear, selectedMonth - 1, 1).toLocaleString('default', { month: 'long' }),
-            year: selectedYear,
-            daysCount: daysInMonth,
-            employees: filteredEmployees.map((emp, idx) => {
-              const empRecordsMap = attendanceByEmployee.get(emp.id) || new Map();
-
-              // Calculate lastActiveIndex (highest day index where emp has a recorded status)
-              let lastActiveIndex = -1;
-              for (let i = 0; i < daysInMonth; i++) {
-                const d = i + 1;
-                const dateStr = `${selectedYear}-${selectedMonth.toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}`;
-                const rec = empRecordsMap.get(dateStr);
-                if (rec && rec.status) {
-                  lastActiveIndex = Math.max(lastActiveIndex, i);
-                }
-              }
-
-              // If current month & year, cap at today's date
-              const now = new Date();
-              if (now.getFullYear() === selectedYear && now.getMonth() + 1 === selectedMonth) {
-                lastActiveIndex = Math.max(lastActiveIndex, now.getDate() - 1);
-              }
-
-              const empWeeklyOffDay = getWeeklyOffDayNum(emp.weeklyOff);
-
-              const regularShifts = Array.from({ length: daysInMonth }, (_, i) => {
-                const d = i + 1;
-                const dateStr = `${selectedYear}-${selectedMonth.toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}`;
-                const rec = empRecordsMap.get(dateStr);
-
-                if (rec) {
-                  if (rec.status === 'WOP') return 'W/O';
-                  return rec.status;
-                }
-
-                // Auto-fill W/O ONLY if index <= lastActiveIndex and matches weeklyOff day
-                const dateObj = new Date(selectedYear, selectedMonth - 1, d);
-                if (i <= lastActiveIndex && empWeeklyOffDay !== -1 && dateObj.getDay() === empWeeklyOffDay) {
-                  return 'W/O';
-                }
-
-                return '';
-              });
-
-              const overtimeShifts = Array.from({ length: daysInMonth }, (_, i) => {
-                const d = i + 1;
-                const dateStr = `${selectedYear}-${selectedMonth.toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}`;
-                const rec = empRecordsMap.get(dateStr);
-
-                if (rec && (rec.status === 'WOP' || rec.overtimeStatus === 'P')) {
-                  return 'P';
-                }
-                return '';
-              });
-
-              return {
-                id: emp.id,
-                srNo: idx + 1,
-                biometricCode: emp.biometricCode || '',
-                employeeName: emp.name || '',
-                weeklyOff: emp.weeklyOff || 'SUN',
-                designation: emp.role,
-                shifts: {
-                  regular: regularShifts,
-                  overtime: overtimeShifts,
-                },
-              };
-            }),
-          }}
-        />
+        <AttendanceTemplate data={templateData} />
       </div>
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
         {/* Left Title & Live Badges */}
         <div className="flex items-center gap-3">
           <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Attendance Grid</h2>
           <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 text-xs text-emerald-600 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full">
-              <span className="h-2 w-2 bg-emerald-500 rounded-full animate-pulse" />
-              Live
+            <span className="bg-emerald-50 text-emerald-700 font-bold px-2.5 py-1 rounded-full text-xs border border-emerald-200">
+              ● LIVE DATA
             </span>
-            <span className="text-[11px] text-gray-400 font-medium">Updated 41s ago</span>
           </div>
         </div>
 
@@ -297,7 +329,10 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
-              onClick={onAddStaff}
+              onClick={() => {
+                if (onAddStaff) onAddStaff();
+                else setShowAddStaffModal(true);
+              }}
               className="bg-[#20B2AA] hover:bg-teal-600 text-white px-4 py-2 rounded-lg flex items-center gap-1.5 shadow-xs text-xs font-bold transition-all"
             >
               <Plus size={16} />
@@ -340,7 +375,7 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
                 className="bg-transparent outline-none cursor-pointer font-semibold max-w-[180px] truncate"
               >
                 <option value="all">All Sites</option>
-                {sites.map((s) => (
+                {siteList.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.attendanceGridName || s.name}
                   </option>

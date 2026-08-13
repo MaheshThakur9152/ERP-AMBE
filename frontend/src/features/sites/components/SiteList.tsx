@@ -19,10 +19,13 @@ export const SiteList: React.FC<SiteListProps> = ({
   const [statusFilter, setStatusFilter] = useState<'All' | 'Active' | 'Inactive'>('All');
 
   const filteredSites = sites.filter((site) => {
+    const siteName = (site as any).siteName || (site as any).site_name || '';
+    const clientName = (site as any).clientName || (site as any).client_name || '';
+    const gstin = site.gstin || '';
     const matchesSearch =
-      site.siteName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      site.clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (site.gstin || '').toLowerCase().includes(searchTerm.toLowerCase());
+      siteName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      gstin.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'All' || site.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
