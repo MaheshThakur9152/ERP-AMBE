@@ -15,6 +15,7 @@ export const env = {
   GCP_BUCKET_NAME: process.env.GCP_BUCKET_NAME || 'ambe-erp-documents',
   GCP_PROJECT_ID: process.env.GCP_PROJECT_ID || 'ambeservicecloud',
   DRIVE_EMPLOYEE_FOLDER_ID: process.env.DRIVE_EMPLOYEE_FOLDER_ID || '',
+  DRIVE_INVOICE_FOLDER_ID: process.env.DRIVE_INVOICE_FOLDER_ID || '',
   GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || '',
   GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET || '',
   GOOGLE_REFRESH_TOKEN: process.env.GOOGLE_REFRESH_TOKEN || '',

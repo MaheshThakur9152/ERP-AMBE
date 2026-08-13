@@ -56,6 +56,16 @@ export interface UploadDriveFileParams {
   designation?: string;
 }
 
+export interface UploadCompanyDriveFileParams {
+  fileBuffer: Buffer;
+  originalName: string;
+  mimeType: string;
+  generatedName?: string;
+  entity: string;
+  year: string;
+  month: string;
+}
+
 export class GoogleDriveService {
   public static async uploadEmployeeDocument({
     fileBuffer,
@@ -107,6 +117,58 @@ export class GoogleDriveService {
     return {
       id: fileId || '',
       name: response.data.name || cleanFileName,
+      webViewLink: response.data.webViewLink || '',
+    };
+  }
+
+  public static async uploadCompanyDocument({
+    fileBuffer,
+    originalName,
+    mimeType,
+    generatedName,
+    entity,
+    year,
+    month,
+  }: UploadCompanyDriveFileParams): Promise<{ id: string; name: string; webViewLink: string }> {
+    const fileName = generatedName || originalName;
+    const rootFolderId =
+      env.DRIVE_INVOICE_FOLDER_ID ||
+      process.env.DRIVE_INVOICE_FOLDER_ID ||
+      env.DRIVE_EMPLOYEE_FOLDER_ID ||
+      process.env.DRIVE_EMPLOYEE_FOLDER_ID ||
+      '';
+
+    let targetFolderId = rootFolderId;
+
+    if (rootFolderId) {
+      if (entity && entity.trim()) {
+        targetFolderId = await getOrCreateDriveFolder(entity, rootFolderId);
+      }
+      if (year && year.trim()) {
+        targetFolderId = await getOrCreateDriveFolder(year, targetFolderId);
+      }
+      if (month && month.trim()) {
+        targetFolderId = await getOrCreateDriveFolder(month, targetFolderId);
+      }
+    }
+
+    const stream = Readable.from(fileBuffer);
+
+    const response = await drive.files.create({
+      requestBody: {
+        name: fileName,
+        parents: targetFolderId ? [targetFolderId] : undefined,
+      },
+      media: {
+        mimeType,
+        body: stream,
+      },
+      fields: 'id, name, webViewLink',
+    });
+
+    return {
+      id: response.data.id || '',
+      name: response.data.name || fileName,
       webViewLink: response.data.webViewLink || '',
     };
   }

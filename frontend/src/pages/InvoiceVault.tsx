@@ -2,119 +2,104 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   FileText,
   Upload,
-  FileCheck,
-  User,
-  Trash2,
-  ExternalLink,
-  RefreshCw,
+  Building,
+  Calendar,
   Search,
+  RefreshCw,
+  Eye,
+  Trash2,
+  CloudUpload,
   CheckCircle,
   AlertCircle,
-  CloudUpload,
-  Eye,
+  FileCheck,
+  Tag,
+  Hash,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
-interface StaffOption {
+interface CompanyDocument {
   id: string;
-  name: string;
-  biometricCode?: string;
-  role?: string;
-  siteName?: string;
-}
-
-interface EmployeeDocument {
-  id: string;
-  staff_id: string;
-  document_type: string;
+  entity: string;
+  doc_type: string;
+  month: string;
+  year: string;
+  site_name: string;
   file_name: string;
   gcp_file_url: string;
-  uploaded_at: string;
-  staff?: {
-    employee_name?: string;
-    designation?: string;
-  };
+  created_at: string;
 }
 
-const DOCUMENT_TYPES = [
-  'ID Proof',
-  'Address Proof',
-  'Bank Details',
-  'Certificates',
-  'Aadhar Card',
-  'PAN Card',
-  'Other',
-];
+const ENTITIES = ['Ambe', 'ASF'];
+const DOCUMENT_TYPES = ['Tax Invoice', 'Proforma Invoice', 'Certified Attendance'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const YEARS = ['2026', '2025', '2024', '2023'];
 
-export const EmployeeDocuments: React.FC = () => {
-  const [staffList, setStaffList] = useState<StaffOption[]>([]);
-  const [selectedStaffId, setSelectedStaffId] = useState<string>('');
-  const [documentType, setDocumentType] = useState<string>('ID Proof');
+export const InvoiceVault: React.FC = () => {
+  const [entity, setEntity] = useState<string>('Ambe');
+  const [documentType, setDocumentType] = useState<string>('Tax Invoice');
+  const [month, setMonth] = useState<string>('Jan');
+  const [year, setYear] = useState<string>('2026');
+  const [siteName, setSiteName] = useState<string>('');
+  const [billNumber, setBillNumber] = useState<string>('');
 
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [uploading, setUploading] = useState<boolean>(false);
   const [uploadMessage, setUploadMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const [documents, setDocuments] = useState<EmployeeDocument[]>([]);
+  const [siteOptions, setSiteOptions] = useState<string[]>([]);
+  const [documents, setDocuments] = useState<CompanyDocument[]>([]);
   const [loadingDocs, setLoadingDocs] = useState<boolean>(true);
-  const [filterStaffId, setFilterStaffId] = useState<string>('All');
+
+  // Filters
+  const [filterEntity, setFilterEntity] = useState<string>('All');
   const [filterDocType, setFilterDocType] = useState<string>('All');
+  const [filterYear, setFilterYear] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const fetchStaff = async () => {
+  const fetchSites = async () => {
     try {
-      const { data, error } = await supabase
-        .from('staff')
-        .select('id, employee_name, biometric_code, designation, site_id, sites:site_id(site_name)');
-
-      if (error) {
-        console.error('Failed to fetch staff list:', error);
-      } else if (data) {
-        const mapped: StaffOption[] = (data as any[])
-          .map((item) => ({
-            id: item.id,
-            name: item.employee_name || 'Unnamed Employee',
-            biometricCode: item.biometric_code || '',
-            role: item.designation || '',
-            siteName: item.sites?.site_name || '',
-          }))
-          .sort((a, b) => a.name.localeCompare(b.name));
-        setStaffList(mapped);
-        if (mapped.length > 0 && !selectedStaffId) {
-          setSelectedStaffId(mapped[0].id);
+      const { data, error } = await supabase.from('sites').select('site_name, code_name');
+      if (data) {
+        const names = data
+          .map((s) => s.code_name || s.site_name)
+          .filter(Boolean)
+          .sort();
+        setSiteOptions(Array.from(new Set(names)));
+        if (names.length > 0 && !siteName) {
+          setSiteName(names[0]);
         }
       }
     } catch (err) {
-      console.error('Failed to fetch staff list:', err);
+      console.error('Error fetching sites:', err);
     }
   };
 
-  const fetchDocuments = async () => {
+  const fetchCompanyDocuments = async () => {
     setLoadingDocs(true);
     try {
       const { data, error } = await supabase
-        .from('employee_documents')
-        .select('*, staff:staff_id(employee_name, designation)')
-        .order('uploaded_at', { ascending: false });
+        .from('company_documents')
+        .select('*')
+        .order('created_at', { ascending: false });
 
       if (error) {
-        console.error('Error fetching employee documents:', error);
+        console.error('Error fetching company documents:', error);
       } else if (data) {
-        setDocuments(data as EmployeeDocument[]);
+        setDocuments(data as CompanyDocument[]);
       }
     } catch (err) {
-      console.error('Unexpected error fetching documents:', err);
+      console.error('Unexpected error fetching company documents:', err);
     } finally {
       setLoadingDocs(false);
     }
   };
 
   useEffect(() => {
-    fetchStaff();
-    fetchDocuments();
+    fetchSites();
+    fetchCompanyDocuments();
   }, []);
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -144,19 +129,14 @@ export const EmployeeDocuments: React.FC = () => {
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (uploading) return; // prevent double submit
+    if (uploading) return;
 
     if (!selectedFile) {
-      setUploadMessage({ type: 'error', text: 'Please select a file to upload.' });
+      setUploadMessage({ type: 'error', text: 'Please select a document file to upload.' });
       return;
     }
-    if (!selectedStaffId) {
-      setUploadMessage({ type: 'error', text: 'Please select an employee.' });
-      return;
-    }
-
-    if (selectedFile.size > 2 * 1024 * 1024) {
-      setUploadMessage({ type: 'error', text: 'File size exceeds strict 2MB limit.' });
+    if (!siteName) {
+      setUploadMessage({ type: 'error', text: 'Please select or enter a site name.' });
       return;
     }
 
@@ -164,21 +144,26 @@ export const EmployeeDocuments: React.FC = () => {
     setUploadMessage(null);
 
     try {
-      const selectedEmployee = staffList.find((s) => s.id === selectedStaffId);
-      const employeeName = selectedEmployee?.name || '';
-      const siteName = selectedEmployee?.siteName || '';
-      const designation = selectedEmployee?.role || '';
+      // Auto-naming logic
+      const cleanSite = siteName.replace(/[^a-zA-Z0-9]/g, '_');
+      const extension = selectedFile.name.split('.').pop() || 'pdf';
+      const generatedName = `${entity}_${documentType}_${month}_${year}_${cleanSite}_${
+        billNumber ? 'Bill-' + billNumber : ''
+      }.${extension}`.replace(/\s+/g, '');
 
       const formData = new FormData();
       formData.append('file', selectedFile);
-      formData.append('staff_id', selectedStaffId);
-      formData.append('employeeName', employeeName);
+      formData.append('file_name', generatedName);
+      formData.append('generatedName', generatedName);
+      formData.append('entity', entity);
       formData.append('docType', documentType);
       formData.append('document_type', documentType);
+      formData.append('month', month);
+      formData.append('year', year);
       formData.append('siteName', siteName);
-      formData.append('designation', designation);
+      formData.append('site_name', siteName);
 
-      const response = await fetch('/api/documents/upload', {
+      const response = await fetch('/api/invoices/upload', {
         method: 'POST',
         body: formData,
       });
@@ -191,27 +176,25 @@ export const EmployeeDocuments: React.FC = () => {
         throw new Error(errorDetails);
       }
 
-      const uploadResult = await response.json();
-
-      if (!uploadResult.gcp_file_url) {
-        throw new Error('Backend did not return a valid file URL.');
-      }
+      const result = await response.json();
 
       setSelectedFile(null);
+      setBillNumber('');
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
+
       setUploadMessage({
         type: 'success',
-        text: `Document "${uploadResult.file_name || selectedFile.name}" successfully uploaded to Google Drive!`,
+        text: `Document "${result.file_name || generatedName}" successfully uploaded to Google Drive Vault!`,
       });
 
-      await fetchDocuments();
+      await fetchCompanyDocuments();
     } catch (err: any) {
-      console.error('Upload Error:', err);
+      console.error('Invoice Vault Upload Error:', err);
       setUploadMessage({
         type: 'error',
-        text: err.message || 'Failed to upload document. Please check console.',
+        text: err.message || 'Failed to upload invoice document. Please check console.',
       });
     } finally {
       setUploading(false);
@@ -222,30 +205,33 @@ export const EmployeeDocuments: React.FC = () => {
     if (!confirm(`Are you sure you want to delete "${fileName}"?`)) return;
 
     try {
-      const { error } = await supabase.from('employee_documents').delete().eq('id', id);
+      const { error } = await supabase.from('company_documents').delete().eq('id', id);
       if (error) {
         alert(`Failed to delete document: ${error.message}`);
       } else {
         setDocuments((prev) => prev.filter((doc) => doc.id !== id));
       }
     } catch (err) {
-      console.error('Delete document error:', err);
+      console.error('Delete company document error:', err);
     }
   };
 
   const filteredDocuments = documents.filter((doc) => {
-    const matchesStaff = filterStaffId === 'All' || doc.staff_id === filterStaffId;
-    const matchesDocType = filterDocType === 'All' || doc.document_type === filterDocType;
-    const staffName = doc.staff?.employee_name?.toLowerCase() || '';
-    const fileName = doc.file_name.toLowerCase();
-    const query = searchQuery.toLowerCase();
-    const matchesSearch = !query || staffName.includes(query) || fileName.includes(query);
+    const matchesEntity = filterEntity === 'All' || doc.entity === filterEntity;
+    const matchesDocType = filterDocType === 'All' || doc.doc_type === filterDocType;
+    const matchesYear = filterYear === 'All' || doc.year === filterYear;
 
-    return matchesStaff && matchesDocType && matchesSearch;
+    const query = searchQuery.toLowerCase();
+    const site = (doc.site_name || '').toLowerCase();
+    const fileName = (doc.file_name || '').toLowerCase();
+    const matchesSearch = !query || site.includes(query) || fileName.includes(query);
+
+    return matchesEntity && matchesDocType && matchesYear && matchesSearch;
   });
 
   return (
     <div className="p-6 space-y-6 bg-slate-50 min-h-screen font-sans">
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 pb-5">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-teal-50 text-[#20B2AA] border border-[#20B2AA]/30 flex items-center justify-center">
@@ -253,10 +239,10 @@ export const EmployeeDocuments: React.FC = () => {
           </div>
           <div>
             <h1 className="text-xl font-bold text-gray-900 tracking-tight">
-              Employee Documents Vault
+              Company Invoice &amp; Attendance Vault
             </h1>
             <p className="text-xs text-gray-500 mt-0.5">
-              Securely upload, manage, and view employee KYC &amp; compliance files in Google Cloud Storage.
+              Automated file naming &amp; structured Google Drive archiving for Tax Invoices, Proforma &amp; Certified Attendance.
             </p>
           </div>
         </div>
@@ -264,20 +250,21 @@ export const EmployeeDocuments: React.FC = () => {
         <button
           type="button"
           onClick={() => {
-            fetchStaff();
-            fetchDocuments();
+            fetchSites();
+            fetchCompanyDocuments();
           }}
           className="px-3.5 py-2 rounded-lg bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 text-xs font-semibold shadow-xs flex items-center gap-2 transition-all"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loadingDocs ? 'animate-spin' : ''}`} />
-          <span>Refresh List</span>
+          <span>Refresh Vault</span>
         </button>
       </div>
 
+      {/* Upload Form Section */}
       <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-xs space-y-5">
         <h2 className="font-bold text-sm uppercase tracking-wider text-[#20B2AA] flex items-center gap-2 border-b border-gray-100 pb-3">
           <CloudUpload className="w-4 h-4" />
-          <span>Upload New Employee Document</span>
+          <span>Upload &amp; Auto-Name New Document</span>
         </h2>
 
         {uploadMessage && (
@@ -298,30 +285,28 @@ export const EmployeeDocuments: React.FC = () => {
         )}
 
         <form onSubmit={handleUpload} className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* Entity Dropdown */}
             <div>
               <label className="block text-xs font-bold text-gray-700 mb-1.5 flex items-center gap-1">
-                <User className="w-3.5 h-3.5 text-gray-400" />
-                Select Employee <span className="text-red-500">*</span>
+                <Building className="w-3.5 h-3.5 text-gray-400" />
+                Entity <span className="text-red-500">*</span>
               </label>
               <select
-                value={selectedStaffId}
-                onChange={(e) => setSelectedStaffId(e.target.value)}
+                value={entity}
+                onChange={(e) => setEntity(e.target.value)}
                 className="w-full bg-white border border-gray-200 rounded-lg px-3.5 py-2 text-xs text-gray-800 font-semibold focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA] shadow-xs"
                 required
               >
-                {staffList.length === 0 ? (
-                  <option value="">No employees found</option>
-                ) : (
-                  staffList.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} {s.biometricCode ? `(Bio: ${s.biometricCode})` : ''} {s.role ? `- ${s.role}` : ''}
-                    </option>
-                  ))
-                )}
+                {ENTITIES.map((ent) => (
+                  <option key={ent} value={ent}>
+                    {ent}
+                  </option>
+                ))}
               </select>
             </div>
 
+            {/* Document Type Dropdown */}
             <div>
               <label className="block text-xs font-bold text-gray-700 mb-1.5 flex items-center gap-1">
                 <FileCheck className="w-3.5 h-3.5 text-gray-400" />
@@ -333,18 +318,106 @@ export const EmployeeDocuments: React.FC = () => {
                 className="w-full bg-white border border-gray-200 rounded-lg px-3.5 py-2 text-xs text-gray-800 font-semibold focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA] shadow-xs"
                 required
               >
-                {DOCUMENT_TYPES.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
+                {DOCUMENT_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
                   </option>
                 ))}
               </select>
             </div>
+
+            {/* Month Dropdown */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5 flex items-center gap-1">
+                <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                Month <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={month}
+                onChange={(e) => setMonth(e.target.value)}
+                className="w-full bg-white border border-gray-200 rounded-lg px-3.5 py-2 text-xs text-gray-800 font-semibold focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA] shadow-xs"
+                required
+              >
+                {MONTHS.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Year Dropdown */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5 flex items-center gap-1">
+                <Tag className="w-3.5 h-3.5 text-gray-400" />
+                Year <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={year}
+                onChange={(e) => setYear(e.target.value)}
+                className="w-full bg-white border border-gray-200 rounded-lg px-3.5 py-2 text-xs text-gray-800 font-semibold focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA] shadow-xs"
+                required
+              >
+                {YEARS.map((y) => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Site Name Input / Dropdown */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5 flex items-center gap-1">
+                <Building className="w-3.5 h-3.5 text-gray-400" />
+                Site Name <span className="text-red-500">*</span>
+              </label>
+              {siteOptions.length > 0 ? (
+                <select
+                  value={siteName}
+                  onChange={(e) => setSiteName(e.target.value)}
+                  className="w-full bg-white border border-gray-200 rounded-lg px-3.5 py-2 text-xs text-gray-800 font-semibold focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA] shadow-xs"
+                  required
+                >
+                  <option value="">Select a Site</option>
+                  {siteOptions.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  placeholder="e.g. Phoenix_Mall"
+                  value={siteName}
+                  onChange={(e) => setSiteName(e.target.value)}
+                  className="w-full bg-white border border-gray-200 rounded-lg px-3.5 py-2 text-xs text-gray-800 font-semibold focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA] shadow-xs"
+                  required
+                />
+              )}
+            </div>
+
+            {/* Bill Number (Optional) */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5 flex items-center gap-1">
+                <Hash className="w-3.5 h-3.5 text-gray-400" />
+                Bill Number <span className="text-gray-400 font-normal">(Optional)</span>
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. 1042"
+                value={billNumber}
+                onChange={(e) => setBillNumber(e.target.value)}
+                className="w-full bg-white border border-gray-200 rounded-lg px-3.5 py-2 text-xs text-gray-800 font-semibold focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA] shadow-xs"
+              />
+            </div>
           </div>
 
+          {/* File Upload Dropzone */}
           <div>
             <label className="block text-xs font-bold text-gray-700 mb-1.5">
-              Select Document File (PDF, Image, Doc) <span className="text-red-500">*</span>
+              Select Document File (PDF, Image) <span className="text-red-500">*</span>
             </label>
             <div
               onDragOver={handleDragOver}
@@ -366,15 +439,12 @@ export const EmployeeDocuments: React.FC = () => {
                 type="file"
                 className="hidden"
                 onChange={handleFileChange}
-                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                accept=".pdf,.jpg,.jpeg,.png"
                 disabled={uploading}
               />
               {uploading ? (
                 <div className="flex flex-col items-center justify-center py-6 space-y-4">
-                  {/* Spinning Loader */}
                   <div className="w-10 h-10 border-4 border-teal-200 border-t-teal-600 rounded-full animate-spin"></div>
-
-                  {/* Loading Text */}
                   <div className="text-center">
                     <p className="text-sm font-semibold text-gray-700 animate-pulse">
                       Processing Document...
@@ -402,7 +472,7 @@ export const EmployeeDocuments: React.FC = () => {
                       <span className="text-xs font-bold text-gray-700 block">
                         Drag &amp; drop file here, or <span className="text-[#20B2AA] underline">browse</span>
                       </span>
-                      <span className="text-[10px] text-gray-400">Supports PDF, PNG, JPG, DOCX (Max 2MB)</span>
+                      <span className="text-[10px] text-gray-400">Supports PDF, PNG, JPG</span>
                     </div>
                   )}
                 </div>
@@ -413,7 +483,7 @@ export const EmployeeDocuments: React.FC = () => {
           <div className="flex justify-end pt-2">
             <button
               type="submit"
-              disabled={uploading || !selectedFile || !selectedStaffId}
+              disabled={uploading || !selectedFile || !siteName}
               className="px-6 py-2.5 rounded-lg bg-[#20B2AA] hover:bg-[#1ca19a] text-white text-xs font-bold shadow-md flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <CloudUpload className={`w-4 h-4 ${uploading ? 'animate-bounce' : ''}`} />
@@ -423,10 +493,11 @@ export const EmployeeDocuments: React.FC = () => {
         </form>
       </div>
 
+      {/* Data Grid Table */}
       <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-xs space-y-5">
         <div className="flex flex-col md:flex-row items-center justify-between gap-4 border-b border-gray-100 pb-4">
           <div className="flex items-center gap-2">
-            <h2 className="font-bold text-sm text-gray-900 tracking-tight">Uploaded Document Repository</h2>
+            <h2 className="font-bold text-sm text-gray-900 tracking-tight">Invoice &amp; Attendance Repository</h2>
             <span className="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold bg-teal-50 text-[#20B2AA] border border-[#20B2AA]/20">
               {filteredDocuments.length} Documents
             </span>
@@ -437,7 +508,7 @@ export const EmployeeDocuments: React.FC = () => {
               <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Search file or staff name..."
+                placeholder="Search site or file..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full bg-slate-50 border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
@@ -445,14 +516,14 @@ export const EmployeeDocuments: React.FC = () => {
             </div>
 
             <select
-              value={filterStaffId}
-              onChange={(e) => setFilterStaffId(e.target.value)}
+              value={filterEntity}
+              onChange={(e) => setFilterEntity(e.target.value)}
               className="bg-slate-50 border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20"
             >
-              <option value="All">All Employees</option>
-              {staffList.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
+              <option value="All">All Entities</option>
+              {ENTITIES.map((ent) => (
+                <option key={ent} value={ent}>
+                  {ent}
                 </option>
               ))}
             </select>
@@ -469,6 +540,19 @@ export const EmployeeDocuments: React.FC = () => {
                 </option>
               ))}
             </select>
+
+            <select
+              value={filterYear}
+              onChange={(e) => setFilterYear(e.target.value)}
+              className="bg-slate-50 border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-700 font-medium focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20"
+            >
+              <option value="All">All Years</option>
+              {YEARS.map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
@@ -476,47 +560,42 @@ export const EmployeeDocuments: React.FC = () => {
           <table className="w-full text-left text-xs text-gray-700 min-w-[700px]">
             <thead className="bg-gray-50 text-gray-700 uppercase font-bold text-[11px] tracking-wider border-b border-gray-200">
               <tr>
-                <th className="py-3 px-4">Employee</th>
+                <th className="py-3 px-4">Entity</th>
                 <th className="py-3 px-4">Document Type</th>
+                <th className="py-3 px-4">Period</th>
+                <th className="py-3 px-4">Site Name</th>
                 <th className="py-3 px-4">File Name</th>
-                <th className="py-3 px-4">Uploaded At</th>
                 <th className="py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 font-medium">
               {loadingDocs ? (
                 <tr>
-                  <td colSpan={5} className="py-10 text-center text-gray-400">
-                    Loading employee documents...
+                  <td colSpan={6} className="py-10 text-center text-gray-400">
+                    Loading company documents...
                   </td>
                 </tr>
               ) : filteredDocuments.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-10 text-center text-gray-400">
-                    No employee documents found.
+                  <td colSpan={6} className="py-10 text-center text-gray-400">
+                    No documents found in vault.
                   </td>
                 </tr>
               ) : (
                 filteredDocuments.map((doc) => (
                   <tr key={doc.id} className="hover:bg-slate-50 transition-colors">
-                    <td className="py-3 px-4">
-                      <div className="font-bold text-gray-900">{doc.staff?.employee_name || 'Unknown Staff'}</div>
-                      {doc.staff?.designation && (
-                        <div className="text-[10px] text-gray-400 font-mono">
-                          {doc.staff.designation}
-                        </div>
-                      )}
-                    </td>
+                    <td className="py-3 px-4 font-bold text-gray-900">{doc.entity}</td>
                     <td className="py-3 px-4">
                       <span className="px-2.5 py-1 rounded-md text-[10px] font-bold bg-teal-50 text-[#20B2AA] border border-[#20B2AA]/20 inline-block">
-                        {doc.document_type}
+                        {doc.doc_type}
                       </span>
                     </td>
-                    <td className="py-3 px-4 font-mono text-gray-800 truncate max-w-xs">
-                      {doc.file_name}
+                    <td className="py-3 px-4 font-mono text-gray-600">
+                      {doc.month} {doc.year}
                     </td>
-                    <td className="py-3 px-4 text-gray-500 font-mono">
-                      {new Date(doc.uploaded_at).toLocaleString()}
+                    <td className="py-3 px-4 font-semibold text-gray-800">{doc.site_name}</td>
+                    <td className="py-3 px-4 font-mono text-gray-800 truncate max-w-xs" title={doc.file_name}>
+                      {doc.file_name}
                     </td>
                     <td className="py-3 px-4 text-right">
                       <div className="flex items-center justify-end gap-2">
@@ -550,4 +629,4 @@ export const EmployeeDocuments: React.FC = () => {
   );
 };
 
-export default EmployeeDocuments;
+export default InvoiceVault;

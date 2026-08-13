@@ -16,6 +16,8 @@ import {
   Briefcase,
   Calendar,
   CreditCard,
+  Eye,
+  RefreshCw,
 } from 'lucide-react';
 import { AddStaffModal } from '@/features/attendance/components/AddStaffModal';
 import { supabase } from '@/lib/supabase';
@@ -57,6 +59,7 @@ interface StaffMember {
   bankIfsc?: string;
   bankName?: string;
   documents?: StaffDocument[];
+  employee_documents?: { id: string }[];
 }
 
 export const StaffPage: React.FC = () => {
@@ -71,6 +74,13 @@ export const StaffPage: React.FC = () => {
   // Modal State for edit
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
+  const [staffDocs, setStaffDocs] = useState<any[]>([]);
+  const [uploadingType, setUploadingType] = useState<string | null>(null);
+
+  // Dedicated Document Viewer Modal State
+  const [isViewerOpen, setIsViewerOpen] = useState(false);
+  const [viewerDocs, setViewerDocs] = useState<any[]>([]);
+  const [viewerStaffName, setViewerStaffName] = useState('');
 
   // Form state
   const [formData, setFormData] = useState<Partial<StaffMember>>({
@@ -83,12 +93,31 @@ export const StaffPage: React.FC = () => {
     documents: [],
   });
 
+  const fetchDocsForStaff = async (staffId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('employee_documents')
+        .select('*')
+        .eq('staff_id', staffId)
+        .order('uploaded_at', { ascending: false });
+
+      if (!error && data) {
+        setStaffDocs(data);
+      } else {
+        setStaffDocs([]);
+      }
+    } catch (err) {
+      console.error('Error fetching staff documents:', err);
+      setStaffDocs([]);
+    }
+  };
+
   // Fetch live staff data on mount & refresh
   useEffect(() => {
     const fetchStaff = async () => {
       const { data, error } = await supabase
         .from('staff')
-        .select('*, sites(site_name, code_name, companies(name))')
+        .select('*, sites(site_name, code_name, companies(name)), employee_documents(id)')
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -127,6 +156,7 @@ export const StaffPage: React.FC = () => {
 
   const handleOpenAddModal = () => {
     setEditingStaff(null);
+    setStaffDocs([]);
     setFormData({
       name: '',
       biometricCode: '',
@@ -148,6 +178,7 @@ export const StaffPage: React.FC = () => {
       role: staff.designation || staff.role || 'Janitor',
       siteName: staff.sites?.site_name || staff.site_name || staff.siteName || '',
     });
+    fetchDocsForStaff(staff.id);
     setIsModalOpen(true);
   };
 
@@ -162,24 +193,52 @@ export const StaffPage: React.FC = () => {
     }
   };
 
-  const handleFileUpload = (
+  const handleUploadStaffDoc = async (
     e: React.ChangeEvent<HTMLInputElement>,
-    docType: 'Aadhar' | 'PAN' | 'Bank Passbook' | 'Other'
+    docType: string
   ) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const newDoc: StaffDocument = {
-      name: file.name,
-      url: URL.createObjectURL(file),
-      type: docType,
-      uploadedAt: new Date().toISOString().split('T')[0],
-    };
+    if (!editingStaff) {
+      alert('Please save staff record first before uploading documents.');
+      return;
+    }
 
-    setFormData((prev) => ({
-      ...prev,
-      documents: [...(prev.documents || []), newDoc],
-    }));
+    setUploadingType(docType);
+    try {
+      const empName = editingStaff.employee_name || editingStaff.name || formData.name || 'Staff';
+      const site = editingStaff.sites?.site_name || editingStaff.site_name || formData.siteName || '';
+      const designation = editingStaff.designation || editingStaff.role || formData.role || '';
+
+      const uploadData = new FormData();
+      uploadData.append('file', file);
+      uploadData.append('staff_id', editingStaff.id);
+      uploadData.append('employeeName', empName);
+      uploadData.append('docType', docType);
+      uploadData.append('document_type', docType);
+      uploadData.append('siteName', site);
+      uploadData.append('designation', designation);
+
+      const response = await fetch('/api/documents/upload', {
+        method: 'POST',
+        body: uploadData,
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({ error: 'Upload failed' }));
+        throw new Error(errJson.error || `Upload failed with status ${response.status}`);
+      }
+
+      await fetchDocsForStaff(editingStaff.id);
+      setRefreshKey((prev) => prev + 1);
+    } catch (err: any) {
+      console.error('Document Upload Error:', err);
+      alert(err.message || 'Failed to upload document');
+    } finally {
+      setUploadingType(null);
+      e.target.value = '';
+    }
   };
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -399,9 +458,30 @@ export const StaffPage: React.FC = () => {
                               PAN ✓
                             </span>
                           ) : null}
-                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-purple-50 text-purple-700 border border-purple-200">
-                            {staff.documents?.length || 0} Docs
-                          </span>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const name = staff.employee_name || staff.name || 'Staff';
+                              setViewerStaffName(name);
+                              // Fetch latest documents for this staff member
+                              const { data } = await supabase
+                                .from('employee_documents')
+                                .select('*')
+                                .eq('staff_id', staff.id)
+                                .order('uploaded_at', { ascending: false });
+                              setViewerDocs(data || staff.employee_documents || []);
+                              setIsViewerOpen(true);
+                            }}
+                            className={`flex items-center gap-1 px-2 py-1 text-xs font-medium border rounded-md transition-colors cursor-pointer ${
+                              (staff.employee_documents?.length || staff.documents?.length || 0) > 0
+                                ? 'text-teal-700 bg-teal-50 border-teal-200 hover:bg-teal-100'
+                                : 'text-gray-500 bg-gray-50 border-gray-200 hover:bg-gray-100'
+                            }`}
+                            title="View Employee KYC Documents"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>{staff.employee_documents?.length || staff.documents?.length || 0} Docs</span>
+                          </button>
                         </div>
                       </td>
 
@@ -603,60 +683,228 @@ export const StaffPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Upload Buttons */}
+                {/* Upload / View / Replace Buttons */}
                 <div className="grid grid-cols-3 gap-3 pt-2">
-                  <label className="border border-dashed border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer hover:border-[#20B2AA] hover:bg-teal-50/50 transition-colors">
-                    <Upload className="w-5 h-5 text-[#20B2AA] mb-1" />
-                    <span className="text-[11px] font-bold text-gray-700">Upload Aadhar PDF</span>
-                    <input
-                      type="file"
-                      accept=".pdf,.png,.jpg"
-                      className="hidden"
-                      onChange={(e) => handleFileUpload(e, 'Aadhar')}
-                    />
-                  </label>
+                  {/* Aadhaar Card */}
+                  {(() => {
+                    const aadhaarDoc = staffDocs.find(
+                      (d) =>
+                        d.document_type === 'Aadhaar Card' ||
+                        d.document_type === 'Aadhaar' ||
+                        d.document_type === 'Aadhar'
+                    );
+                    if (aadhaarDoc) {
+                      return (
+                        <div className="flex items-center gap-2 p-2.5 border border-teal-200 rounded-xl bg-teal-50/50">
+                          <a
+                            href={aadhaarDoc.gcp_file_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex-1 text-center text-xs font-bold text-teal-700 hover:text-teal-900 truncate"
+                          >
+                            View Aadhaar
+                          </a>
+                          <label
+                            className="p-1 text-gray-500 hover:text-teal-600 cursor-pointer rounded transition-colors"
+                            title="Replace Document"
+                          >
+                            {uploadingType === 'Aadhaar Card' ? (
+                              <RefreshCw className="w-4 h-4 animate-spin text-teal-600" />
+                            ) : (
+                              <Upload className="w-4 h-4" />
+                            )}
+                            <input
+                              type="file"
+                              accept=".pdf,.png,.jpg,.jpeg"
+                              className="hidden"
+                              onChange={(e) => handleUploadStaffDoc(e, 'Aadhaar Card')}
+                              disabled={!editingStaff || !!uploadingType}
+                            />
+                          </label>
+                        </div>
+                      );
+                    }
+                    return (
+                      <label
+                        className={`border border-dashed border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center transition-colors ${
+                          editingStaff ? 'cursor-pointer hover:border-[#20B2AA] hover:bg-teal-50/50' : 'opacity-50 cursor-not-allowed'
+                        }`}
+                      >
+                        {uploadingType === 'Aadhaar Card' ? (
+                          <RefreshCw className="w-5 h-5 text-[#20B2AA] mb-1 animate-spin" />
+                        ) : (
+                          <Upload className="w-5 h-5 text-[#20B2AA] mb-1" />
+                        )}
+                        <span className="text-[11px] font-bold text-gray-700">
+                          {uploadingType === 'Aadhaar Card' ? 'Uploading...' : 'Upload Aadhaar PDF'}
+                        </span>
+                        <input
+                          type="file"
+                          accept=".pdf,.png,.jpg,.jpeg"
+                          className="hidden"
+                          onChange={(e) => handleUploadStaffDoc(e, 'Aadhaar Card')}
+                          disabled={!editingStaff || !!uploadingType}
+                        />
+                      </label>
+                    );
+                  })()}
 
-                  <label className="border border-dashed border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer hover:border-[#20B2AA] hover:bg-teal-50/50 transition-colors">
-                    <Upload className="w-5 h-5 text-indigo-600 mb-1" />
-                    <span className="text-[11px] font-bold text-gray-700">Upload PAN Image</span>
-                    <input
-                      type="file"
-                      accept=".pdf,.png,.jpg"
-                      className="hidden"
-                      onChange={(e) => handleFileUpload(e, 'PAN')}
-                    />
-                  </label>
+                  {/* PAN Card */}
+                  {(() => {
+                    const panDoc = staffDocs.find(
+                      (d) => d.document_type === 'PAN Card' || d.document_type === 'PAN'
+                    );
+                    if (panDoc) {
+                      return (
+                        <div className="flex items-center gap-2 p-2.5 border border-indigo-200 rounded-xl bg-indigo-50/50">
+                          <a
+                            href={panDoc.gcp_file_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex-1 text-center text-xs font-bold text-indigo-700 hover:text-indigo-900 truncate"
+                          >
+                            View PAN
+                          </a>
+                          <label
+                            className="p-1 text-gray-500 hover:text-indigo-600 cursor-pointer rounded transition-colors"
+                            title="Replace Document"
+                          >
+                            {uploadingType === 'PAN Card' ? (
+                              <RefreshCw className="w-4 h-4 animate-spin text-indigo-600" />
+                            ) : (
+                              <Upload className="w-4 h-4" />
+                            )}
+                            <input
+                              type="file"
+                              accept=".pdf,.png,.jpg,.jpeg"
+                              className="hidden"
+                              onChange={(e) => handleUploadStaffDoc(e, 'PAN Card')}
+                              disabled={!editingStaff || !!uploadingType}
+                            />
+                          </label>
+                        </div>
+                      );
+                    }
+                    return (
+                      <label
+                        className={`border border-dashed border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center transition-colors ${
+                          editingStaff ? 'cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/50' : 'opacity-50 cursor-not-allowed'
+                        }`}
+                      >
+                        {uploadingType === 'PAN Card' ? (
+                          <RefreshCw className="w-5 h-5 text-indigo-600 mb-1 animate-spin" />
+                        ) : (
+                          <Upload className="w-5 h-5 text-indigo-600 mb-1" />
+                        )}
+                        <span className="text-[11px] font-bold text-gray-700">
+                          {uploadingType === 'PAN Card' ? 'Uploading...' : 'Upload PAN Image'}
+                        </span>
+                        <input
+                          type="file"
+                          accept=".pdf,.png,.jpg,.jpeg"
+                          className="hidden"
+                          onChange={(e) => handleUploadStaffDoc(e, 'PAN Card')}
+                          disabled={!editingStaff || !!uploadingType}
+                        />
+                      </label>
+                    );
+                  })()}
 
-                  <label className="border border-dashed border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center cursor-pointer hover:border-[#20B2AA] hover:bg-teal-50/50 transition-colors">
-                    <Upload className="w-5 h-5 text-purple-600 mb-1" />
-                    <span className="text-[11px] font-bold text-gray-700">Upload Bank Passbook</span>
-                    <input
-                      type="file"
-                      accept=".pdf,.png,.jpg"
-                      className="hidden"
-                      onChange={(e) => handleFileUpload(e, 'Bank Passbook')}
-                    />
-                  </label>
+                  {/* Bank Passbook */}
+                  {(() => {
+                    const bankDoc = staffDocs.find(
+                      (d) =>
+                        d.document_type === 'Bank Details' ||
+                        d.document_type === 'Bank Passbook' ||
+                        d.document_type === 'Bank'
+                    );
+                    if (bankDoc) {
+                      return (
+                        <div className="flex items-center gap-2 p-2.5 border border-purple-200 rounded-xl bg-purple-50/50">
+                          <a
+                            href={bankDoc.gcp_file_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex-1 text-center text-xs font-bold text-purple-700 hover:text-purple-900 truncate"
+                          >
+                            View Passbook
+                          </a>
+                          <label
+                            className="p-1 text-gray-500 hover:text-purple-600 cursor-pointer rounded transition-colors"
+                            title="Replace Document"
+                          >
+                            {uploadingType === 'Bank Details' ? (
+                              <RefreshCw className="w-4 h-4 animate-spin text-purple-600" />
+                            ) : (
+                              <Upload className="w-4 h-4" />
+                            )}
+                            <input
+                              type="file"
+                              accept=".pdf,.png,.jpg,.jpeg"
+                              className="hidden"
+                              onChange={(e) => handleUploadStaffDoc(e, 'Bank Details')}
+                              disabled={!editingStaff || !!uploadingType}
+                            />
+                          </label>
+                        </div>
+                      );
+                    }
+                    return (
+                      <label
+                        className={`border border-dashed border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center transition-colors ${
+                          editingStaff ? 'cursor-pointer hover:border-purple-400 hover:bg-purple-50/50' : 'opacity-50 cursor-not-allowed'
+                        }`}
+                      >
+                        {uploadingType === 'Bank Details' ? (
+                          <RefreshCw className="w-5 h-5 text-purple-600 mb-1 animate-spin" />
+                        ) : (
+                          <Upload className="w-5 h-5 text-purple-600 mb-1" />
+                        )}
+                        <span className="text-[11px] font-bold text-gray-700">
+                          {uploadingType === 'Bank Details' ? 'Uploading...' : 'Upload Passbook'}
+                        </span>
+                        <input
+                          type="file"
+                          accept=".pdf,.png,.jpg,.jpeg"
+                          className="hidden"
+                          onChange={(e) => handleUploadStaffDoc(e, 'Bank Details')}
+                          disabled={!editingStaff || !!uploadingType}
+                        />
+                      </label>
+                    );
+                  })()}
                 </div>
 
-                {/* Uploaded Documents List */}
-                {formData.documents && formData.documents.length > 0 && (
+                {/* Uploaded Documents Repository List */}
+                {staffDocs && staffDocs.length > 0 && (
                   <div className="space-y-1.5 pt-2">
-                    <span className="text-[10px] font-bold text-gray-500 uppercase">Uploaded Files:</span>
+                    <span className="text-[10px] font-bold text-gray-500 uppercase">
+                      All Uploaded Documents ({staffDocs.length}):
+                    </span>
                     <div className="space-y-1">
-                      {formData.documents.map((doc, idx) => (
+                      {staffDocs.map((doc) => (
                         <div
-                          key={idx}
+                          key={doc.id}
                           className="flex items-center justify-between bg-slate-50 p-2 rounded-lg border border-gray-200 text-xs"
                         >
-                          <div className="flex items-center gap-2">
-                            <FileCheck className="w-4 h-4 text-[#20B2AA]" />
-                            <span className="font-semibold text-gray-800">{doc.name}</span>
-                            <span className="text-[10px] px-2 py-0.5 rounded bg-teal-50 text-[#20B2AA] font-mono">
-                              {doc.type}
+                          <div className="flex items-center gap-2 truncate">
+                            <FileCheck className="w-4 h-4 text-[#20B2AA] flex-shrink-0" />
+                            <span className="font-semibold text-gray-800 truncate" title={doc.file_name}>
+                              {doc.file_name}
+                            </span>
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-teal-50 text-[#20B2AA] font-mono flex-shrink-0">
+                              {doc.document_type}
                             </span>
                           </div>
-                          <span className="text-[10px] text-gray-400">{doc.uploadedAt}</span>
+                          <a
+                            href={doc.gcp_file_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[11px] font-bold text-teal-600 hover:text-teal-800 flex items-center gap-1 ml-2 flex-shrink-0"
+                          >
+                            <span>View</span>
+                            <Eye className="w-3 h-3" />
+                          </a>
                         </div>
                       ))}
                     </div>
@@ -681,6 +929,62 @@ export const StaffPage: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Dedicated Lightweight Document Viewer Modal */}
+      {isViewerOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden border border-gray-200 animate-in zoom-in-95 duration-150">
+            {/* Header */}
+            <div className="flex justify-between items-center px-5 py-4 border-b border-gray-200 bg-gray-50">
+              <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                <Eye className="w-4 h-4 text-[#20B2AA]" />
+                <span>KYC Documents: {viewerStaffName}</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsViewerOpen(false)}
+                className="text-gray-400 hover:text-red-500 font-bold text-sm transition-colors p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Document List */}
+            <div className="p-5 space-y-3">
+              {['Aadhaar Card', 'PAN Card', 'Bank Passbook'].map((docType) => {
+                const uploadedDoc = viewerDocs.find(
+                  (d) =>
+                    d.document_type === docType ||
+                    (docType === 'Aadhaar Card' && (d.document_type === 'Aadhaar' || d.document_type === 'Aadhar')) ||
+                    (docType === 'PAN Card' && d.document_type === 'PAN') ||
+                    (docType === 'Bank Passbook' && (d.document_type === 'Bank Details' || d.document_type === 'Bank'))
+                );
+
+                return (
+                  <div key={docType} className="flex justify-between items-center p-3 border border-gray-200 rounded-xl bg-slate-50">
+                    <span className="font-semibold text-xs text-gray-800">{docType}</span>
+
+                    {uploadedDoc ? (
+                      <a
+                        href={uploadedDoc.gcp_file_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1.5 text-xs font-bold text-teal-700 bg-teal-50 border border-teal-200 rounded-lg hover:bg-teal-100 flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <Eye className="w-3.5 h-3.5" /> View
+                      </a>
+                    ) : (
+                      <span className="px-3 py-1.5 text-xs font-medium text-gray-400 bg-gray-100 rounded-lg border border-gray-200">
+                        Not Uploaded
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
