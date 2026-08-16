@@ -8,6 +8,8 @@ import {
   MapPin,
   Camera,
   Building2,
+  Wallet,
+  Kanban,
   BookOpen,
   ShieldCheck,
   Phone,
@@ -59,14 +61,27 @@ export const Sidebar: React.FC = () => {
               <NavLink
                 to="/invoice-hub"
                 className={({ isActive }) =>
-                  `w-full flex gap-3 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                  `w-full flex gap-3 px-4 py-2 rounded-lg text-xs font-semibold transition-colors items-center ${
                     isActive
                       ? 'bg-[#20B2AA] text-white shadow-md'
                       : 'hover:bg-white/5 text-gray-300'
                   }`
                 }
               >
-                Invoice Hub
+                <FileText size={14} /> <span>Invoice Hub</span>
+              </NavLink>
+
+              <NavLink
+                to="/invoice-tracker"
+                className={({ isActive }) =>
+                  `w-full flex gap-3 px-4 py-2 rounded-lg text-xs font-semibold transition-colors items-center ${
+                    isActive
+                      ? 'bg-[#20B2AA] text-white shadow-md'
+                      : 'hover:bg-white/5 text-gray-300'
+                  }`
+                }
+              >
+                <Kanban size={14} /> <span>Invoice Tracker</span>
               </NavLink>
             </div>
           )}
@@ -141,14 +156,14 @@ export const Sidebar: React.FC = () => {
               <NavLink
                 to="/advances"
                 className={({ isActive }) =>
-                  `w-full flex gap-3 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                  `w-full flex gap-3 px-4 py-2 rounded-lg text-xs font-semibold transition-colors items-center ${
                     isActive
                       ? 'bg-[#20B2AA] text-white shadow-md'
                       : 'hover:bg-white/5 text-gray-300'
                   }`
                 }
               >
-                Advances
+                <Wallet size={14} /> <span>Advances</span>
               </NavLink>
               <NavLink
                 to="/deployments"

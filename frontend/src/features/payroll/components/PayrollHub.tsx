@@ -831,7 +831,7 @@ export const PayrollHub: React.FC = () => {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-gray-700 border-collapse min-w-[1550px]">
+            <table className="w-full text-left text-xs text-gray-700 border-collapse min-w-[1750px]">
               <thead className="bg-slate-100/80 border-b border-gray-200 font-bold uppercase text-[10px] text-gray-600 tracking-wider">
                 <tr>
                   <th className="p-3 w-12 text-center">
@@ -851,12 +851,12 @@ export const PayrollHub: React.FC = () => {
                       className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500 cursor-pointer"
                     />
                   </th>
-                  <th className="p-3">Employee</th>
-                  <th className="p-3">Designation / Site</th>
-                  <th className="p-3 text-center bg-blue-50/60 text-blue-900 border-x border-blue-100">
+                  <th className="p-3 min-w-[180px]">Employee</th>
+                  <th className="p-3 min-w-[150px]">Designation / Site</th>
+                  <th className="p-3 text-center bg-blue-50/60 text-blue-900 border-x border-blue-100 w-20">
                     PD (Present)*
                   </th>
-                  <th className="p-3 text-center bg-blue-50/60 text-blue-900 border-r border-blue-100">
+                  <th className="p-3 text-center bg-blue-50/60 text-blue-900 border-r border-blue-100 w-20">
                     WO (Weekly Off)*
                   </th>
                   <th className="p-3 text-center">Payable Days</th>
@@ -870,10 +870,10 @@ export const PayrollHub: React.FC = () => {
                   <th className="p-3 text-right text-amber-700">EPF (12%)</th>
                   <th className="p-3 text-right text-amber-700">ESIC (0.75%)</th>
                   <th className="p-3 text-right text-amber-700">PT</th>
-                  <th className="p-3 text-center bg-amber-50/50 text-amber-900 border-x border-amber-100">
+                  <th className="p-3 text-center bg-amber-50/50 text-amber-900 border-x border-amber-100 min-w-[140px]">
                     Advances Ledger
                   </th>
-                  <th className="p-3 text-right font-bold text-emerald-800 bg-emerald-50/60">
+                  <th className="p-3 text-right font-bold text-emerald-800 bg-emerald-50/60 min-w-[120px]">
                     Net Salary
                   </th>
                 </tr>

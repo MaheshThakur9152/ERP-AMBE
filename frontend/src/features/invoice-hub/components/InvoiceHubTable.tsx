@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { InvoiceRecord } from '../types';
-import { fetchInvoicesApi, deleteInvoiceApi } from '../api/invoiceApi';
+import { fetchInvoicesApi, deleteInvoiceApi, createInvoiceApi } from '../api/invoiceApi';
 import { toast, ToastContainer } from '@/components/ui/toast';
 import { supabase } from '@/lib/supabase';
 import {
@@ -20,6 +20,8 @@ import {
   Paperclip,
   UploadCloud,
   FileCheck,
+  GitMerge,
+  FileCode,
 } from 'lucide-react';
 import { formatCurrency, computeInvoiceCalculations } from '@/features/invoices/utils/invoiceCalculator';
 import { InvoiceData } from '@/features/invoices/types/invoice';
@@ -545,6 +547,145 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
     }
   };
 
+  // Action Handler: Create Revision for Proforma Invoice
+  const handleCreateRevision = async (inv: InvoiceRecord) => {
+    try {
+      const data = convertRecordToInvoiceData(inv);
+      // Generate revision number e.g. "AS/P/26-27/001-R1"
+      let baseNo = inv.invoiceNo;
+      let revNum = 1;
+      const match = baseNo.match(/^(.*)-R(\d+)$/);
+      if (match) {
+        baseNo = match[1];
+        revNum = Number(match[2]) + 1;
+      }
+      const newInvoiceNo = `${baseNo}-R${revNum}`;
+
+      const updatedMeta = { ...data.meta, invoiceNo: newInvoiceNo };
+      const updatedData = { ...data, meta: updatedMeta };
+
+      const payload = {
+        company_id: inv.company_id || inv.companyId,
+        site_id: inv.site_id || inv.siteId,
+        companyId: inv.company_id || inv.companyId,
+        siteId: inv.site_id || inv.siteId,
+        invoice_no: newInvoiceNo,
+        invoiceNo: newInvoiceNo,
+        date: inv.date,
+        invoice_date: inv.date,
+        monthYear: inv.monthYear || inv.billing_period,
+        billing_period: inv.monthYear || inv.billing_period,
+        client_name: inv.clientName,
+        clientName: inv.clientName,
+        site_name: inv.siteName,
+        siteName: inv.siteName,
+        amount: inv.amount,
+        grand_total: inv.amount,
+        sub_total: inv.sub_total || 0,
+        tax_total: inv.tax_total || 0,
+        line_items: inv.line_items || [],
+        type: 'Proforma Invoice' as const,
+        status: 'Draft' as const,
+        previous_version_id: inv.id,
+        previousVersionId: inv.id,
+        certified_doc_url: inv.certified_doc_url || (inv as any).certified_doc_url || null,
+        certified_attendance_url: inv.certified_attendance_url || (inv as any).certified_attendance_url || null,
+        payload: updatedData,
+      };
+
+      // 1. Create cloned revision invoice
+      await createInvoiceApi(payload as any);
+
+      // 2. Mark previous proforma as "Revised" in Supabase
+      const { error: updateErr } = await supabase
+        .from('invoices')
+        .update({ status: 'Revised' })
+        .eq('id', inv.id);
+
+      if (updateErr) {
+        console.warn('Failed to update old proforma status to Revised:', updateErr.message);
+      }
+
+      toast.success(`Created revision ${newInvoiceNo}`);
+      await loadInvoicesFromApi();
+    } catch (err: any) {
+      console.error('Create revision error:', err);
+      toast.error(err.message || 'Failed to create revision');
+    }
+  };
+
+  // Action Handler: Convert Proforma to Tax Invoice
+  const handleConvertToTax = async (inv: InvoiceRecord) => {
+    try {
+      const data = convertRecordToInvoiceData(inv);
+      // Fetch company to get tax prefix & sequence
+      const compId = inv.company_id || inv.companyId;
+      let taxSeq = 1;
+      let taxPrefix = 'AS/26-27/';
+
+      if (compId) {
+        const { data: comp } = await supabase.from('companies').select('tax_prefix, tax_sequence').eq('id', compId).maybeSingle();
+        if (comp) {
+          taxPrefix = comp.tax_prefix || 'AS/26-27/';
+          taxSeq = comp.tax_sequence ?? 1;
+        }
+      }
+
+      const formattedSeq = String(taxSeq).padStart(3, '0');
+      const newTaxInvoiceNo = `${taxPrefix}${formattedSeq}`;
+
+      const updatedMeta = { ...data.meta, invoiceNo: newTaxInvoiceNo, invoiceType: 'Tax Invoice' };
+      const updatedData = { ...data, meta: updatedMeta, type: 'Tax Invoice' };
+
+      const payload = {
+        company_id: inv.company_id || inv.companyId,
+        site_id: inv.site_id || inv.siteId,
+        companyId: inv.company_id || inv.companyId,
+        siteId: inv.site_id || inv.siteId,
+        invoice_no: newTaxInvoiceNo,
+        invoiceNo: newTaxInvoiceNo,
+        date: new Date().toISOString().split('T')[0],
+        invoice_date: new Date().toISOString().split('T')[0],
+        monthYear: inv.monthYear || inv.billing_period,
+        billing_period: inv.monthYear || inv.billing_period,
+        client_name: inv.clientName,
+        clientName: inv.clientName,
+        site_name: inv.siteName,
+        siteName: inv.siteName,
+        amount: inv.amount,
+        grand_total: inv.amount,
+        sub_total: inv.sub_total || 0,
+        tax_total: inv.tax_total || 0,
+        line_items: inv.line_items || [],
+        type: 'Tax Invoice' as const,
+        status: 'Pending' as const,
+        previous_version_id: inv.id,
+        previousVersionId: inv.id,
+        certified_doc_url: inv.certified_doc_url || (inv as any).certified_doc_url || null,
+        certified_attendance_url: inv.certified_attendance_url || (inv as any).certified_attendance_url || null,
+        payload: updatedData,
+      };
+
+      // 1. Create Tax Invoice record
+      await createInvoiceApi(payload as any);
+
+      // 2. Mark old Proforma status as "Approved"
+      await supabase.from('invoices').update({ status: 'Approved' }).eq('id', inv.id);
+
+      // 3. Increment company tax_sequence in database
+      if (compId) {
+        await supabase.from('companies').update({ tax_sequence: taxSeq + 1 }).eq('id', compId);
+      }
+
+      toast.success(`Converted to Tax Invoice ${newTaxInvoiceNo}`);
+      setActiveTab('Tax');
+      await loadInvoicesFromApi();
+    } catch (err: any) {
+      console.error('Convert to tax error:', err);
+      toast.error(err.message || 'Failed to convert to Tax Invoice');
+    }
+  };
+
   // Preview action handler
   const handlePreview = (inv: InvoiceRecord) => {
     const data = convertRecordToInvoiceData(inv);
@@ -916,7 +1057,30 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
 
                       {/* Actions Column */}
                       <td className="p-4 py-3.5 text-right">
-                        <div className="flex items-center justify-end gap-3 text-teal-600">
+                        <div className="flex items-center justify-end gap-2 text-teal-600">
+                          {/* Proforma Actions: Create Revision & Convert to Tax */}
+                          {inv.type === 'Proforma Invoice' && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleCreateRevision(inv)}
+                                className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-colors shadow-2xs cursor-pointer"
+                                title="Create Revision (Clone & Increment version)"
+                              >
+                                <GitMerge size={13} />
+                                <span>Revision</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleConvertToTax(inv)}
+                                className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-colors shadow-2xs cursor-pointer"
+                                title="Convert Proforma to Tax Invoice"
+                              >
+                                <FileCheck size={13} />
+                                <span>Convert</span>
+                              </button>
+                            </>
+                          )}
                           {/* Certified Invoice Attachment UI (Paperclip vs Eye) */}
                           {inv.certified_doc_url || (inv as any).certified_doc_url ? (
                             <a

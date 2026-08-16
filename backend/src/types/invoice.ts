@@ -45,6 +45,9 @@ export interface InvoiceRecord {
   payload?: any;
   certified_doc_url?: string | null;
   certifiedDocUrl?: string | null;
+  certified_attendance_url?: string | null;
+  certifiedAttendanceUrl?: string | null;
+  previous_version_id?: string | null;
   created_at?: string;
   updated_at?: string;
 }

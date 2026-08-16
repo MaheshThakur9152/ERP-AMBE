@@ -23,6 +23,11 @@ export interface InvoiceRecord {
   is_material?: boolean;
   certified_doc_url?: string;
   certifiedDocUrl?: string;
+  certified_attendance_url?: string;
+  certifiedAttendanceUrl?: string;
+  previous_version_id?: string;
+  created_at?: string;
+  createdAt?: string;
   challan_no?: string;
 
   challan_date?: string;
