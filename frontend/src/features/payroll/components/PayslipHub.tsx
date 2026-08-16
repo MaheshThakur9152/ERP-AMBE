@@ -267,11 +267,12 @@ export const PayslipHub: React.FC = () => {
         ) : (
           <div className="grid gap-6 print:block print:w-full print:m-0 print:p-0">
             {records.map((record: any, index: number) => {
+              const advanceDeducted = Number(record.advances ?? record.in_this_mth ?? 0);
               const totalDeductions =
                 (record.epf || record.epf_deduction || 0) +
                 (record.esic || record.esic_deduction || 0) +
                 (record.pt || record.pt_deduction || 0) +
-                (record.advances || 0);
+                advanceDeducted;
 
               const staff = record.staff || {};
 
@@ -349,8 +350,8 @@ export const PayslipHub: React.FC = () => {
                           <div className="flex justify-between border-b border-dotted border-gray-200"><span>EPF</span><span>{(record.epf || record.epf_deduction || 0).toLocaleString('en-IN')}</span></div>
                           <div className="flex justify-between border-b border-dotted border-gray-200"><span>ESIC</span><span>{(record.esic || record.esic_deduction || 0).toLocaleString('en-IN')}</span></div>
                           <div className="flex justify-between border-b border-dotted border-gray-200"><span>PT</span><span>{(record.pt || record.pt_deduction || 0).toLocaleString('en-IN')}</span></div>
-                          {(record.advances || 0) > 0 && (
-                            <div className="flex justify-between border-b border-dotted border-gray-200"><span>Advances</span><span>{(record.advances || 0).toLocaleString('en-IN')}</span></div>
+                          {advanceDeducted > 0 && (
+                            <div className="flex justify-between border-b border-dotted border-gray-200"><span>Advances</span><span>{advanceDeducted.toLocaleString('en-IN')}</span></div>
                           )}
                           <div className="mt-1 pt-1 flex justify-between font-bold text-[9px] border-t border-gray-800">
                             <span>TOTAL DEDUCT.</span><span>₹{totalDeductions.toLocaleString('en-IN')}</span>
@@ -368,11 +369,11 @@ export const PayslipHub: React.FC = () => {
                         (Rupees {numberToWordsINR(record.net_salary || 0)} Only)
                       </span>
                     </div>
-                    <div className="flex justify-between items-end mt-1 pt-1 text-[8.5px] font-bold text-gray-700 font-sans">
-                      <div className="text-center w-32 border-t border-gray-800 pt-0.5">
+                    <div className="flex justify-between items-end mt-4 pt-2 text-[9px] font-bold text-gray-800 font-sans">
+                      <div className="text-center w-40 border-t border-gray-900 pt-1">
                         Employee Signature
                       </div>
-                      <div className="text-center w-32 border-t border-gray-800 pt-0.5">
+                      <div className="text-center w-40 border-t border-gray-900 pt-1">
                         Employer Signature
                       </div>
                     </div>
