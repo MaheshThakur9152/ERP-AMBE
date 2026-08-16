@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { InvoiceController } from '../controllers/invoiceController';
-import { uploadCompanyInvoiceDocument } from '../controllers/documentController';
+import { uploadCompanyInvoiceDocument, uploadInvoiceDirect } from '../controllers/documentController';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -15,6 +15,6 @@ const router = Router();
 router.get('/', InvoiceController.list);
 router.post('/', InvoiceController.create);
 router.delete('/:id', InvoiceController.delete);
-router.post('/upload', upload.single('file'), uploadCompanyInvoiceDocument);
+router.post('/upload', upload.single('file'), uploadInvoiceDirect);
 
 export default router;

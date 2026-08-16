@@ -1,11 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X, UserPlus, Building, Calendar, IdCard, Briefcase, Phone } from 'lucide-react';
+import { X, UserPlus, Building, Calendar, IdCard, Briefcase, Phone, CreditCard } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
-
-interface SiteOption {
-  id: string;
-  name: string;
-}
 
 interface AddStaffModalProps {
   isOpen: boolean;
@@ -27,7 +22,9 @@ export const AddStaffModal: React.FC<AddStaffModalProps> = ({
   const [designation, setDesignation] = useState('Janitor');
   const [weeklyOff, setWeeklyOff] = useState('Sunday');
   const [siteId, setSiteId] = useState(defaultSiteId);
+  const [rateCardId, setRateCardId] = useState('');
   const [availableSites, setAvailableSites] = useState<any[]>([]);
+  const [availableRateCards, setAvailableRateCards] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -56,6 +53,42 @@ export const AddStaffModal: React.FC<AddStaffModalProps> = ({
     }
   }, [isOpen, defaultSiteId]);
 
+  // Fetch rate cards when siteId changes
+  useEffect(() => {
+    async function fetchRateCards() {
+      if (!siteId) {
+        setAvailableRateCards([]);
+        setRateCardId('');
+        return;
+      }
+      try {
+        const selectedSite = availableSites.find((s) => s.id === siteId);
+        const siteName = selectedSite?.site_name || '';
+
+        let query = supabase.from('rate_cards').select('*');
+        if (siteId && siteName) {
+          query = query.or(`site_id.eq.${siteId},site_name.eq.${siteName}`);
+        } else if (siteId) {
+          query = query.eq('site_id', siteId);
+        } else if (siteName) {
+          query = query.eq('site_name', siteName);
+        }
+
+        const { data, error } = await query;
+        if (!error && data) {
+          setAvailableRateCards(data);
+          if (data.length > 0) setRateCardId(data[0].id);
+        } else {
+          setAvailableRateCards([]);
+        }
+      } catch (err) {
+        console.warn('Error fetching rate cards:', err);
+      }
+    }
+
+    fetchRateCards();
+  }, [siteId, availableSites]);
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -69,9 +102,9 @@ export const AddStaffModal: React.FC<AddStaffModalProps> = ({
     setErrorMsg('');
 
     try {
-      const selectedSiteObj = availableSites.find((s) => s.id === siteId);
       const payload = {
         site_id: siteId || null,
+        rate_card_id: rateCardId || null,
         employee_name: employeeName.trim(),
         biometric_code: biometricCode.trim(),
         phone: phone.trim(),
@@ -86,12 +119,12 @@ export const AddStaffModal: React.FC<AddStaffModalProps> = ({
         console.error('❌ Error inserting staff:', error);
         setErrorMsg(`Failed to add staff: ${error.message}`);
       } else {
-        // Reset form & trigger refresh
         setEmployeeName('');
         setBiometricCode('');
         setPhone('');
         setDesignation('Janitor');
         setWeeklyOff('Sunday');
+        setRateCardId('');
         onSuccess();
         onClose();
       }
@@ -195,28 +228,8 @@ export const AddStaffModal: React.FC<AddStaffModalProps> = ({
             </div>
           </div>
 
-          {/* Weekly Off & Site Assignment */}
+          {/* Site Assignment & Assigned Rate Card */}
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1 flex items-center gap-1">
-                <Calendar size={13} />
-                Weekly Off
-              </label>
-              <select
-                value={weeklyOff}
-                onChange={(e) => setWeeklyOff(e.target.value)}
-                className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#FF5722] outline-none font-medium bg-white"
-              >
-                <option value="Sunday">Sunday</option>
-                <option value="Monday">Monday</option>
-                <option value="Tuesday">Tuesday</option>
-                <option value="Wednesday">Wednesday</option>
-                <option value="Thursday">Thursday</option>
-                <option value="Friday">Friday</option>
-                <option value="Saturday">Saturday</option>
-              </select>
-            </div>
-
             <div>
               <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1 flex items-center gap-1">
                 <Building size={13} />
@@ -230,13 +243,31 @@ export const AddStaffModal: React.FC<AddStaffModalProps> = ({
                 <option value="">Select a Site...</option>
                 {availableSites.map((site) => {
                   const displayName = site.code_name || site.codeName || site.site_name;
-
                   return (
                     <option key={site.id} value={site.id}>
                       {displayName}
                     </option>
                   );
                 })}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1 flex items-center gap-1">
+                <CreditCard size={13} />
+                Assigned Rate Card
+              </label>
+              <select
+                value={rateCardId}
+                onChange={(e) => setRateCardId(e.target.value)}
+                className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#FF5722] outline-none font-medium bg-white truncate"
+              >
+                <option value="">Select Rate Card...</option>
+                {availableRateCards.map((card) => (
+                  <option key={card.id} value={card.id}>
+                    {card.post_name} (₹{card.gross_salary})
+                  </option>
+                ))}
               </select>
             </div>
           </div>

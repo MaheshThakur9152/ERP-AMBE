@@ -804,15 +804,22 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
         </div>
 
         {/* Calculation Summary Footer */}
-        <div className="pt-4 border-t border-gray-200 grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-          <div className="space-y-1 text-xs text-gray-600">
-            <div>
-              <strong className="text-gray-900">Amount in Words:</strong> {calc.amountInWords}
+        <div className="flex flex-col md:flex-row justify-between gap-6 mt-6 border-t border-gray-200 pt-6">
+          {/* Left Side: Summary Info */}
+          <div className="flex-1 bg-gray-50 p-5 rounded-lg border border-gray-200 flex flex-col justify-center">
+            <p className="text-sm text-gray-700 leading-relaxed">
+              <span className="font-semibold text-gray-900 block mb-1">Amount in Words:</span>
+              {calc.amountInWords}
+            </p>
+            <div className="mt-4 pt-4 border-t border-gray-200">
+              <p className="text-xs text-gray-500 font-medium">
+                Breakdown Notes: Management charges @ {dynamicMgmtPercent}% | CGST @ 9% | SGST @ 9%
+              </p>
             </div>
-            <div>Management charges @ {dynamicMgmtPercent}% | CGST @ 9% | SGST @ 9%</div>
           </div>
 
-          <div className="bg-slate-50/80 p-5 rounded-xl border border-slate-200/80 shadow-sm space-y-2 text-xs">
+          {/* Right Side: Totals */}
+          <div className="w-full md:w-[350px] bg-slate-50/80 p-5 rounded-xl border border-slate-200/80 shadow-sm space-y-2 text-xs">
             <div className="flex justify-between items-center py-1 text-slate-600 border-b border-slate-100">
               <span className="font-medium">Sub Total</span>
               <span className="font-mono font-semibold text-slate-900 text-sm">₹{formatCurrency(calc.subTotal)}</span>
@@ -857,7 +864,7 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
         </div>
 
         {/* Submit Generator Button */}
-        <div className="pt-4 flex justify-end">
+        <div className="flex justify-end mt-6">
           <button
             type="button"
             disabled={isSubmitting}

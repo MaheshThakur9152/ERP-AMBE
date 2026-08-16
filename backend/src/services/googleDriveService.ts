@@ -173,6 +173,43 @@ export class GoogleDriveService {
     };
   }
 
+  public static async uploadSingleFolderFile({
+    fileBuffer,
+    fileName,
+    mimeType,
+  }: {
+    fileBuffer: Buffer;
+    fileName: string;
+    mimeType: string;
+  }): Promise<{ id: string; name: string; webViewLink: string }> {
+    const rootFolderId =
+      env.DRIVE_INVOICE_FOLDER_ID ||
+      process.env.DRIVE_INVOICE_FOLDER_ID ||
+      env.DRIVE_EMPLOYEE_FOLDER_ID ||
+      process.env.DRIVE_EMPLOYEE_FOLDER_ID ||
+      '';
+
+    const stream = Readable.from(fileBuffer);
+
+    const response = await drive.files.create({
+      requestBody: {
+        name: fileName,
+        parents: rootFolderId ? [rootFolderId] : undefined,
+      },
+      media: {
+        mimeType,
+        body: stream,
+      },
+      fields: 'id, name, webViewLink',
+    });
+
+    return {
+      id: response.data.id || '',
+      name: response.data.name || fileName,
+      webViewLink: response.data.webViewLink || '',
+    };
+  }
+
   public static async getMimeType(fileId: string): Promise<string> {
     const meta = await drive.files.get({ fileId, fields: 'mimeType' });
     return meta.data.mimeType || 'application/octet-stream';

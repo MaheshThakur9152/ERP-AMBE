@@ -38,9 +38,13 @@ interface StaffMember {
   phone?: string;
   designation?: string;
   role?: string;
+  gender?: string;
+  monthly_incentive?: number;
   site_id?: string;
   site_name?: string;
   siteName?: string;
+  rate_card_id?: string;
+  rate_cards?: any;
   sites?: {
     site_name?: string;
     code_name?: string;
@@ -76,6 +80,8 @@ export const StaffPage: React.FC = () => {
   const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
   const [staffDocs, setStaffDocs] = useState<any[]>([]);
   const [uploadingType, setUploadingType] = useState<string | null>(null);
+  const [sitesList, setSitesList] = useState<any[]>([]);
+  const [rateCardsOptions, setRateCardsOptions] = useState<any[]>([]);
 
   // Dedicated Document Viewer Modal State
   const [isViewerOpen, setIsViewerOpen] = useState(false);
@@ -89,9 +95,46 @@ export const StaffPage: React.FC = () => {
     phone: '',
     role: 'Janitor',
     siteName: '',
+    site_id: '',
+    rate_card_id: '',
     status: 'Active',
     documents: [],
   });
+
+  // Fetch sites for dropdown
+  useEffect(() => {
+    async function loadSites() {
+      const { data } = await supabase.from('sites').select('id, site_name, code_name').order('site_name');
+      if (data) setSitesList(data);
+    }
+    loadSites();
+  }, []);
+
+  const fetchRateCardsForSite = async (sId?: string, sName?: string) => {
+    if (!sId && !sName) {
+      setRateCardsOptions([]);
+      return;
+    }
+    try {
+      let query = supabase.from('rate_cards').select('*');
+      if (sId && sName) {
+        query = query.or(`site_id.eq.${sId},site_name.eq.${sName}`);
+      } else if (sId) {
+        query = query.eq('site_id', sId);
+      } else if (sName) {
+        query = query.eq('site_name', sName);
+      }
+      const { data, error } = await query;
+      if (!error && data) {
+        setRateCardsOptions(data);
+      } else {
+        setRateCardsOptions([]);
+      }
+    } catch (e) {
+      console.warn('Error fetching rate cards for staff modal:', e);
+      setRateCardsOptions([]);
+    }
+  };
 
   const fetchDocsForStaff = async (staffId: string) => {
     try {
@@ -117,7 +160,7 @@ export const StaffPage: React.FC = () => {
     const fetchStaff = async () => {
       const { data, error } = await supabase
         .from('staff')
-        .select('*, sites(site_name, code_name, companies(name)), employee_documents(id)')
+        .select('*, sites(site_name, code_name, companies(name)), rate_cards(*), employee_documents(id)')
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -163,6 +206,8 @@ export const StaffPage: React.FC = () => {
       phone: '',
       role: 'Janitor',
       siteName: '',
+      site_id: '',
+      rate_card_id: '',
       status: 'Active',
       documents: [],
     });
@@ -171,14 +216,21 @@ export const StaffPage: React.FC = () => {
 
   const handleOpenEditModal = (staff: StaffMember) => {
     setEditingStaff(staff);
+    const sId = staff.site_id || '';
+    const sName = staff.sites?.site_name || staff.site_name || staff.siteName || '';
     setFormData({
       ...staff,
       name: staff.employee_name || staff.name || '',
       biometricCode: staff.biometric_code || staff.biometricCode || '',
       role: staff.designation || staff.role || 'Janitor',
-      siteName: staff.sites?.site_name || staff.site_name || staff.siteName || '',
+      gender: staff.gender || 'Male',
+      monthly_incentive: staff.monthly_incentive || 0,
+      site_id: sId,
+      siteName: sName,
+      rate_card_id: staff.rate_card_id || '',
     });
     fetchDocsForStaff(staff.id);
+    fetchRateCardsForSite(sId, sName);
     setIsModalOpen(true);
   };
 
@@ -266,7 +318,11 @@ export const StaffPage: React.FC = () => {
         biometric_code: (formData.biometric_code || formData.biometricCode || '').trim(),
         phone: (formData.phone || '').trim(),
         designation: formData.designation || formData.role || 'Janitor',
+        gender: formData.gender || 'Male',
+        monthly_incentive: Number(formData.monthly_incentive) || 0,
         status: formData.status || 'Active',
+        site_id: formData.site_id || null,
+        rate_card_id: formData.rate_card_id || null,
       };
 
       const { error } = await supabase.from('staff').update(payload).eq('id', editingStaff.id);
@@ -627,6 +683,18 @@ export const StaffPage: React.FC = () => {
                   </div>
 
                   <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">Gender</label>
+                    <select
+                      value={formData.gender || 'Male'}
+                      onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
+                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-medium"
+                    >
+                      <option value="Male">Male (M)</option>
+                      <option value="Female">Female (F)</option>
+                    </select>
+                  </div>
+
+                  <div>
                     <label className="block text-[11px] font-bold text-gray-700 mb-1">Role / Designation</label>
                     <select
                       value={formData.role || 'Janitor'}
@@ -639,14 +707,55 @@ export const StaffPage: React.FC = () => {
                       <option value="Security Guard">Security Guard</option>
                     </select>
                   </div>
+                </div>
 
+                <div className="grid grid-cols-3 gap-3">
                   <div>
                     <label className="block text-[11px] font-bold text-gray-700 mb-1">Assigned Site</label>
+                    <select
+                      value={formData.site_id || ''}
+                      onChange={(e) => {
+                        const sId = e.target.value;
+                        const sObj = sitesList.find((s) => s.id === sId);
+                        const sName = sObj?.site_name || '';
+                        setFormData({ ...formData, site_id: sId, siteName: sName, rate_card_id: '' });
+                        fetchRateCardsForSite(sId, sName);
+                      }}
+                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-medium truncate"
+                    >
+                      <option value="">Select a Site...</option>
+                      {sitesList.map((site) => (
+                        <option key={site.id} value={site.id}>
+                          {site.code_name || site.site_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">Assigned Rate Card *</label>
+                    <select
+                      value={formData.rate_card_id || ''}
+                      onChange={(e) => setFormData({ ...formData, rate_card_id: e.target.value })}
+                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-medium truncate"
+                    >
+                      <option value="">Select Rate Card...</option>
+                      {rateCardsOptions.map((card) => (
+                        <option key={card.id} value={card.id}>
+                          {card.post_name} (₹{card.gross_salary}){card.is_flat_wage ? ' [Flat]' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">Monthly Incentive (₹)</label>
                     <input
-                      type="text"
-                      value={formData.siteName || ''}
-                      onChange={(e) => setFormData({ ...formData, siteName: e.target.value })}
-                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800"
+                      type="number"
+                      placeholder="0"
+                      value={formData.monthly_incentive || 0}
+                      onChange={(e) => setFormData({ ...formData, monthly_incentive: Number(e.target.value) })}
+                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-mono font-bold"
                     />
                   </div>
                 </div>

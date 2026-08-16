@@ -168,3 +168,48 @@ export const uploadCompanyInvoiceDocument = async (req: Request, res: Response):
     res.status(500).json({ error: 'Failed to upload invoice document', details: error.message });
   }
 };
+
+export const uploadInvoiceDirect = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const file = req.file;
+    const fileName = req.body.fileName || req.body.file_name || file?.originalname;
+    const invoiceId = req.body.invoiceId || req.body.id;
+
+    if (!file) {
+      res.status(400).json({ error: 'No file uploaded' });
+      return;
+    }
+
+    // Direct single-folder upload for max speed using process.env.DRIVE_INVOICE_FOLDER_ID
+    const driveResult = await GoogleDriveService.uploadSingleFolderFile({
+      fileBuffer: file.buffer,
+      fileName,
+      mimeType: file.mimetype,
+    });
+
+    const webViewLink = driveResult.webViewLink;
+
+    // Save link to Supabase if invoiceId provided
+    if (invoiceId && supabaseAdmin) {
+      const { error: dbError } = await supabaseAdmin
+        .from('invoices')
+        .update({ certified_doc_url: webViewLink })
+        .eq('id', invoiceId);
+
+      if (dbError) {
+        console.error('Supabase certified_doc_url update error:', dbError);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      webViewLink,
+      file_name: driveResult.name,
+      gcp_file_url: webViewLink,
+      certified_doc_url: webViewLink,
+    });
+  } catch (error: any) {
+    console.error('Direct Invoice Upload Error:', error.response?.data || error.message || error);
+    res.status(500).json({ error: 'Failed to upload invoice attachment', details: error.message });
+  }
+};

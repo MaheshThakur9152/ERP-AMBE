@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { InvoiceRecord } from '../types';
 import { fetchInvoicesApi, deleteInvoiceApi } from '../api/invoiceApi';
 import { toast, ToastContainer } from '@/components/ui/toast';
+import { supabase } from '@/lib/supabase';
 import {
   RotateCcw,
   Plus,
@@ -16,6 +17,9 @@ import {
   Square,
   Loader2,
   AlertTriangle,
+  Paperclip,
+  UploadCloud,
+  FileCheck,
 } from 'lucide-react';
 import { formatCurrency, computeInvoiceCalculations } from '@/features/invoices/utils/invoiceCalculator';
 import { InvoiceData } from '@/features/invoices/types/invoice';
@@ -226,6 +230,199 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
   // Inline Edit / Create Modal state
   const [isEditModalOpen, setIsEditModalOpen] = useState<boolean>(false);
   const [editingRecord, setEditingRecord] = useState<InvoiceRecord | null>(null);
+
+  // Inline Attachment Upload state
+  const [selectedInvoiceForAttachment, setSelectedInvoiceForAttachment] = useState<InvoiceRecord | null>(null);
+  const [uploadingAttachmentId, setUploadingAttachmentId] = useState<string | null>(null);
+  const attachmentInputRef = React.useRef<HTMLInputElement>(null);
+
+  // Log Legacy Bill Modal State
+  const [isLegacyModalOpen, setIsLegacyModalOpen] = useState(false);
+  const [legacyInvoiceType, setLegacyInvoiceType] = useState<'Tax Invoice' | 'Proforma Invoice'>('Tax Invoice');
+  const [legacyEntity, setLegacyEntity] = useState<'Ambe' | 'ASF'>('Ambe');
+  const [legacySiteName, setLegacySiteName] = useState<string>('');
+  const [legacyMonth, setLegacyMonth] = useState<string>('June');
+  const [legacyYear, setLegacyYear] = useState<string>('2026');
+  const [legacyBillNumber, setLegacyBillNumber] = useState<string>('');
+  const [legacyAmount, setLegacyAmount] = useState<string>('');
+  const [legacyFile, setLegacyFile] = useState<File | null>(null);
+  const [isSubmittingLegacy, setIsSubmittingLegacy] = useState(false);
+  const legacyFileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleAttachmentClick = (inv: InvoiceRecord) => {
+    setSelectedInvoiceForAttachment(inv);
+    setTimeout(() => {
+      attachmentInputRef.current?.click();
+    }, 50);
+  };
+
+  const handleAttachmentFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !selectedInvoiceForAttachment) return;
+
+    const inv = selectedInvoiceForAttachment;
+    setUploadingAttachmentId(inv.id);
+
+    try {
+      const entity = inv.companies?.name?.includes('ASF') ? 'ASF' : (inv.companies?.name ? inv.companies.name.replace(/[^a-zA-Z0-9]/g, '') : 'Ambe');
+      const type = inv.type === 'Proforma Invoice' ? 'ProformaInvoice' : 'TaxInvoice';
+      const siteRaw = inv.sites?.site_name || inv.siteName || (inv as any).site_name || 'Site';
+      const cleanSite = siteRaw.replace(/[^a-zA-Z0-9]/g, '');
+      const rawPeriod = inv.monthYear || inv.billing_period || (inv as any).month_year || 'June2026';
+      const monthYear = rawPeriod.replace(/\s+/g, '');
+      const billNo = inv.invoiceNo || inv.id;
+      const ext = file.name.split('.').pop() || 'pdf';
+
+      const generatedName = `${entity}_${type}_${cleanSite}_${monthYear}_Bill-${billNo}.${ext}`;
+
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('fileName', generatedName);
+      formData.append('invoiceId', inv.id);
+
+      const response = await fetch('/api/invoices/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({ error: 'Upload failed' }));
+        throw new Error(errJson.error || `Upload failed with status ${response.status}`);
+      }
+
+      const result = await response.json();
+      const docUrl = result.webViewLink || result.gcp_file_url || result.certified_doc_url;
+
+      // Execute Supabase update query to save URL into certified_doc_url column
+      const { error: dbError } = await supabase
+        .from('invoices')
+        .update({ certified_doc_url: docUrl })
+        .eq('id', inv.id);
+
+      if (dbError) {
+        console.error('Supabase certified_doc_url update error:', dbError);
+      }
+
+      // Refresh table data
+      await loadInvoicesFromApi();
+      toast.success('Certified attachment uploaded & linked successfully!');
+    } catch (err: any) {
+      console.error('Attachment upload error:', err);
+      toast.error(err.message || 'Failed to upload attachment');
+    } finally {
+      setUploadingAttachmentId(null);
+      setSelectedInvoiceForAttachment(null);
+      e.target.value = '';
+    }
+  };
+
+  const handleSaveLegacyBill = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!legacyFile) {
+      toast.error('Please select a PDF document file to upload');
+      return;
+    }
+    if (!legacySiteName) {
+      toast.error('Please select or enter a site name');
+      return;
+    }
+    if (!legacyBillNumber) {
+      toast.error('Please enter a bill number');
+      return;
+    }
+
+    setIsSubmittingLegacy(true);
+
+    try {
+      const legacyMonthYear = `${legacyMonth} ${legacyYear}`;
+      const cleanSite = legacySiteName.replace(/[^a-zA-Z0-9]/g, '');
+      const cleanMonthYear = legacyMonthYear.replace(/\s+/g, '');
+      const typeLabel = legacyInvoiceType === 'Proforma Invoice' ? 'ProformaInvoice' : 'TaxInvoice';
+      const ext = legacyFile.name.split('.').pop() || 'pdf';
+      const generatedName = `${legacyEntity}_${typeLabel}_${cleanSite}_${cleanMonthYear}_Bill-${legacyBillNumber}.${ext}`;
+
+      // 1. Upload file to Google Drive using /api/invoices/upload
+      const formData = new FormData();
+      formData.append('file', legacyFile);
+      formData.append('fileName', generatedName);
+
+      const uploadRes = await fetch('/api/invoices/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!uploadRes.ok) {
+        const errJson = await uploadRes.json().catch(() => ({ error: 'Upload failed' }));
+        throw new Error(errJson.error || 'Failed to upload document to Google Drive');
+      }
+
+      const uploadResult = await uploadRes.json();
+      const driveUrl = uploadResult.webViewLink || uploadResult.gcp_file_url || uploadResult.certified_doc_url;
+
+      // 2. Insert into Supabase (invoices table)
+      const numericAmount = Number(legacyAmount) || 0;
+      const payloadData = {
+        entity: legacyEntity,
+        meta: {
+          invoiceNo: legacyBillNumber,
+          invoiceDate: new Date().toISOString().split('T')[0],
+          billingPeriod: legacyMonthYear,
+          invoiceType: legacyInvoiceType,
+        },
+        party: {
+          name: legacySiteName,
+          siteName: legacySiteName,
+        },
+        items: [
+          {
+            id: 'item-1',
+            srNo: 1,
+            description: `Historical Legacy ${legacyInvoiceType}`,
+            rate: numericAmount,
+            amount: numericAmount,
+          },
+        ],
+      };
+
+      const { error: dbError } = await supabase.from('invoices').insert([
+        {
+          invoiceNo: legacyBillNumber,
+          type: legacyInvoiceType,
+          siteName: legacySiteName,
+          clientName: legacySiteName,
+          monthYear: legacyMonthYear,
+          amount: numericAmount,
+          grand_total: numericAmount,
+          status: 'Unpaid',
+          certified_doc_url: driveUrl,
+          payload: payloadData,
+        },
+      ]);
+
+      if (dbError) {
+        console.error('Supabase insert error for legacy bill:', dbError);
+        toast.error(`Database record error: ${dbError.message}`);
+      } else {
+        toast.success(`Legacy Bill #${legacyBillNumber} logged successfully!`);
+      }
+
+      // 3. UI Cleanup
+      setIsLegacyModalOpen(false);
+      setLegacyBillNumber('');
+      setLegacyAmount('');
+      setLegacyFile(null);
+      if (legacyFileInputRef.current) {
+        legacyFileInputRef.current.value = '';
+      }
+      await loadInvoicesFromApi();
+    } catch (err: any) {
+      console.error('Save legacy bill error:', err);
+      toast.error(err.message || 'Failed to save legacy bill');
+    } finally {
+      setIsSubmittingLegacy(false);
+    }
+  };
 
   // Load invoices on mount directly from database endpoint
   const loadInvoicesFromApi = async () => {
@@ -507,6 +704,15 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
               <RotateCcw size={15} className={isLoading ? 'animate-spin' : ''} /> <span>Refresh</span>
             </button>
 
+            {/* + Log Legacy Bill Button */}
+            <button
+              type="button"
+              onClick={() => setIsLegacyModalOpen(true)}
+              className="bg-slate-800 hover:bg-slate-900 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all transform hover:-translate-y-0.5"
+            >
+              <Plus size={15} /> <span>+ Log Legacy Bill</span>
+            </button>
+
             {/* + Add Invoices Button */}
             <button
               type="button"
@@ -547,6 +753,15 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
             </div>
           </div>
         )}
+
+        {/* Hidden File Input for Certified Invoice Attachment */}
+        <input
+          ref={attachmentInputRef}
+          type="file"
+          className="hidden"
+          accept=".pdf,.png,.jpg,.jpeg"
+          onChange={handleAttachmentFileSelected}
+        />
 
         {/* Main Data Table Container */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-300 overflow-hidden">
@@ -694,6 +909,32 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                       {/* Actions Column */}
                       <td className="p-4 py-3.5 text-right">
                         <div className="flex items-center justify-end gap-3 text-teal-600">
+                          {/* Certified Invoice Attachment UI (Paperclip vs Eye) */}
+                          {inv.certified_doc_url || (inv as any).certified_doc_url ? (
+                            <a
+                              href={inv.certified_doc_url || (inv as any).certified_doc_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-teal-600 hover:text-teal-800 transition-colors p-1"
+                              title="View Certified Invoice Attachment"
+                            >
+                              <Eye size={17} />
+                            </a>
+                          ) : uploadingAttachmentId === inv.id ? (
+                            <span className="p-1" title="Uploading Attachment...">
+                              <Loader2 size={17} className="animate-spin text-teal-600" />
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleAttachmentClick(inv)}
+                              className="text-gray-400 hover:text-teal-600 transition-colors p-1"
+                              title="Upload Certified Invoice Attachment"
+                            >
+                              <Paperclip size={17} />
+                            </button>
+                          )}
+
                           <button
                             type="button"
                             onClick={() => handlePreview(inv)}
@@ -858,6 +1099,214 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
           {stealthPrintData.isMaterial
             ? <MaterialInvoiceTemplate data={stealthPrintData} colorMode="color" />
             : <InvoiceTemplate data={stealthPrintData} colorMode="color" />}
+        </div>
+      )}
+
+      {/* Log Legacy Bill Modal */}
+      {isLegacyModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden border border-gray-200 animate-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="bg-[#34495E] px-6 py-4 text-white flex justify-between items-center">
+              <h3 className="font-bold text-base flex items-center gap-2">
+                <Plus className="w-5 h-5 text-[#20B2AA]" />
+                <span>Log Legacy Historical Bill</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsLegacyModalOpen(false)}
+                className="text-gray-300 hover:text-white transition-colors p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form onSubmit={handleSaveLegacyBill} className="p-6 space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-700 mb-1">Invoice Type *</label>
+                  <select
+                    value={legacyInvoiceType}
+                    onChange={(e) => setLegacyInvoiceType(e.target.value as any)}
+                    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-semibold"
+                  >
+                    <option value="Tax Invoice">Tax Invoice</option>
+                    <option value="Proforma Invoice">Proforma Invoice</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-700 mb-1">Entity *</label>
+                  <select
+                    value={legacyEntity}
+                    onChange={(e) => setLegacyEntity(e.target.value as any)}
+                    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-semibold"
+                  >
+                    <option value="Ambe">Ambe</option>
+                    <option value="ASF">ASF</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-700 mb-1">Site Name *</label>
+                  {siteList.length > 0 ? (
+                    <select
+                      value={legacySiteName}
+                      onChange={(e) => setLegacySiteName(e.target.value)}
+                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-semibold"
+                      required
+                    >
+                      <option value="">Select a Site</option>
+                      {siteList.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      placeholder="e.g. Phoenix Mall"
+                      value={legacySiteName}
+                      onChange={(e) => setLegacySiteName(e.target.value)}
+                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-semibold"
+                      required
+                    />
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-700 mb-1">Month &amp; Year *</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      value={legacyMonth}
+                      onChange={(e) => setLegacyMonth(e.target.value)}
+                      className="w-full bg-white border border-gray-200 rounded-lg px-2 py-2 text-xs text-gray-800 font-semibold"
+                      required
+                    >
+                      {[
+                        'January',
+                        'February',
+                        'March',
+                        'April',
+                        'May',
+                        'June',
+                        'July',
+                        'August',
+                        'September',
+                        'October',
+                        'November',
+                        'December',
+                      ].map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      value={legacyYear}
+                      onChange={(e) => setLegacyYear(e.target.value)}
+                      className="w-full bg-white border border-gray-200 rounded-lg px-2 py-2 text-xs text-gray-800 font-semibold"
+                      required
+                    >
+                      {['2027', '2026', '2025', '2024', '2023', '2022'].map((y) => (
+                        <option key={y} value={y}>
+                          {y}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-700 mb-1">Bill Number *</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 1052"
+                    value={legacyBillNumber}
+                    onChange={(e) => setLegacyBillNumber(e.target.value)}
+                    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono text-gray-800"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-700 mb-1">Total Amount (₹) *</label>
+                  <input
+                    type="number"
+                    placeholder="e.g. 45000"
+                    value={legacyAmount}
+                    onChange={(e) => setLegacyAmount(e.target.value)}
+                    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono text-gray-800"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Dashed Drag & Drop File Upload Zone */}
+              <div>
+                <label className="block text-[11px] font-bold text-gray-700 mb-1">Upload Bill PDF Document *</label>
+                <div
+                  onClick={() => legacyFileInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-colors ${
+                    legacyFile ? 'border-green-400 bg-green-50/40' : 'border-gray-300 bg-slate-50 hover:border-[#20B2AA]'
+                  }`}
+                >
+                  <input
+                    ref={legacyFileInputRef}
+                    type="file"
+                    accept=".pdf,.png,.jpg,.jpeg"
+                    className="hidden"
+                    onChange={(e) => e.target.files?.[0] && setLegacyFile(e.target.files[0])}
+                  />
+                  {legacyFile ? (
+                    <div className="flex flex-col items-center gap-1">
+                      <FileCheck className="w-6 h-6 text-green-600" />
+                      <span className="font-bold text-gray-800 text-xs">{legacyFile.name}</span>
+                      <span className="text-[10px] text-gray-500 font-mono">
+                        {(legacyFile.size / 1024).toFixed(1)} KB • Click to change
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-1">
+                      <UploadCloud className="w-6 h-6 text-[#20B2AA]" />
+                      <span className="text-xs font-bold text-gray-700">Drag &amp; drop PDF or browse</span>
+                      <span className="text-[10px] text-gray-400">PDF, PNG, JPG (Max 10MB)</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsLegacyModalOpen(false)}
+                  className="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingLegacy || !legacyFile}
+                  className="px-5 py-2 rounded-lg bg-[#20B2AA] hover:bg-[#1ca19a] text-white font-bold transition-all shadow-sm disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isSubmittingLegacy ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Uploading &amp; Saving...</span>
+                    </>
+                  ) : (
+                    <span>Save &amp; Upload</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </>

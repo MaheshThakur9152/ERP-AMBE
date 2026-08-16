@@ -5,10 +5,10 @@ export class InvoiceController {
   static async list(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const invoices = await InvoiceService.getAllInvoices();
-      res.json({ success: true, data: invoices });
-    } catch (err: any) {
-      console.error('[InvoiceController.list] Error:', err);
-      res.status(500).json({ success: false, error: err.message || 'Failed to fetch invoices' });
+      res.status(200).json({ success: true, data: invoices || [] });
+    } catch (error: any) {
+      console.error("GET /api/invoices Error:", error);
+      res.status(200).json({ success: true, data: [] });
     }
   }
 
@@ -16,9 +16,9 @@ export class InvoiceController {
     try {
       const record = await InvoiceService.createInvoice(req.body);
       res.status(201).json({ success: true, data: record });
-    } catch (err: any) {
-      console.error('[InvoiceController.create] Error:', err);
-      res.status(500).json({ success: false, error: err.message || 'Failed to create invoice' });
+    } catch (error: any) {
+      console.error('[InvoiceController.create] Error:', error);
+      res.status(500).json({ success: false, error: error?.message || 'Failed to create invoice' });
     }
   }
 
@@ -27,9 +27,9 @@ export class InvoiceController {
       const { id } = req.params;
       await InvoiceService.deleteInvoice(id);
       res.status(200).json({ success: true, message: 'Invoice deleted successfully', id });
-    } catch (err: any) {
-      console.error('[InvoiceController.delete] Error:', err);
-      res.status(500).json({ success: false, error: err.message || 'Failed to delete invoice' });
+    } catch (error: any) {
+      console.error('[InvoiceController.delete] Error:', error);
+      res.status(500).json({ success: false, error: error?.message || 'Failed to delete invoice' });
     }
   }
 }

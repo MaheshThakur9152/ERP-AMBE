@@ -37,6 +37,8 @@ export interface InvoiceRecord {
     legal_name?: string;
   };
   payload?: any;
+  certified_doc_url?: string | null;
+  certifiedDocUrl?: string | null;
   created_at?: string;
   updated_at?: string;
 }

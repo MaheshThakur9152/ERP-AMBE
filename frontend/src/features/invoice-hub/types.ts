@@ -21,6 +21,8 @@ export interface InvoiceRecord {
   line_items?: any[];
   isMaterial?: boolean;
   is_material?: boolean;
+  certified_doc_url?: string;
+  certifiedDocUrl?: string;
   challan_no?: string;
 
   challan_date?: string;

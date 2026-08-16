@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Site } from '../types';
-import { Search, Plus, Building, Edit2, Trash2, ShieldCheck, MapPin, FileText } from 'lucide-react';
+import { Search, Plus, Building, Edit2, Trash2, ShieldCheck, MapPin, FileText, CreditCard } from 'lucide-react';
+import { RateCardManager } from './RateCardManager';
 
 interface SiteListProps {
   sites: Site[];
@@ -17,6 +18,7 @@ export const SiteList: React.FC<SiteListProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | 'Active' | 'Inactive'>('All');
+  const [managingRateCardSite, setManagingRateCardSite] = useState<{ id: string; name: string } | null>(null);
 
   const filteredSites = sites.filter((site) => {
     const siteName = (site as any).siteName || (site as any).site_name || '';
@@ -141,69 +143,88 @@ export const SiteList: React.FC<SiteListProps> = ({
                   </td>
                 </tr>
               ) : (
-                filteredSites.map((site) => (
-                  <tr key={site.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="py-3.5 px-4 font-semibold text-gray-900">
-                      <div className="flex items-center gap-2">
-                        <MapPin className="w-4 h-4 text-[#20B2AA] flex-shrink-0" />
+                filteredSites.map((site) => {
+                  const name = (site as any).siteName || (site as any).site_name || 'Site';
+                  return (
+                    <tr key={site.id} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="py-3.5 px-4 font-semibold text-gray-900">
                         <div className="flex items-center gap-2">
-                          <span>{site.siteName}</span>
-                          {(site.codeName || site.code_name) && (
-                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-teal-50 text-[#20B2AA] border border-teal-200 font-semibold">
-                              {site.codeName || site.code_name}
-                            </span>
-                          )}
+                          <MapPin className="w-4 h-4 text-[#20B2AA] flex-shrink-0" />
+                          <div className="flex items-center gap-2">
+                            <span>{name}</span>
+                            {(site.codeName || site.code_name) && (
+                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-teal-50 text-[#20B2AA] border border-teal-200 font-semibold">
+                                {site.codeName || site.code_name}
+                              </span>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                    <td className="py-3.5 px-4 text-gray-800 font-medium">{site.clientName}</td>
-                    <td className="py-3.5 px-4 font-mono text-gray-600 text-xs">{site.gstin}</td>
-                    <td className="py-3.5 px-4 font-mono text-xs text-indigo-700">
-                      {site.workOrderRefNo}
-                    </td>
-                    <td className="py-3.5 px-4 text-center">
-                      <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                        {site.rateCards?.length || 0} Roles
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-4 text-center">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                          site.status === 'Active'
-                            ? 'bg-green-100 text-green-700 border border-green-200'
-                            : 'bg-gray-100 text-gray-600 border border-gray-200'
-                        }`}
-                      >
-                        {site.status}
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
+                      </td>
+                      <td className="py-3.5 px-4 text-gray-800 font-medium">{site.clientName}</td>
+                      <td className="py-3.5 px-4 font-mono text-gray-600 text-xs">{site.gstin}</td>
+                      <td className="py-3.5 px-4 font-mono text-xs text-indigo-700">
+                        {site.workOrderRefNo}
+                      </td>
+                      <td className="py-3.5 px-4 text-center">
                         <button
                           type="button"
-                          onClick={() => onEditSite(site)}
-                          className="p-1.5 text-gray-500 hover:text-[#20B2AA] hover:bg-gray-100 rounded-lg transition-colors"
-                          title="Edit Site"
+                          onClick={() => setManagingRateCardSite({ id: site.id, name })}
+                          className="px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 flex items-center gap-1 mx-auto transition-colors"
                         >
-                          <Edit2 className="w-4 h-4" />
+                          <CreditCard className="w-3 h-3" />
+                          <span>Manage Rate Cards</span>
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => onDeleteSite(site.id)}
-                          className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-gray-100 rounded-lg transition-colors"
-                          title="Delete Site"
+                      </td>
+                      <td className="py-3.5 px-4 text-center">
+                        <span
+                          className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                            site.status === 'Active'
+                              ? 'bg-green-100 text-green-700 border border-green-200'
+                              : 'bg-gray-100 text-gray-600 border border-gray-200'
+                          }`}
                         >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                          {site.status}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => onEditSite(site)}
+                            className="p-1.5 text-gray-500 hover:text-[#20B2AA] hover:bg-gray-100 rounded-lg transition-colors"
+                            title="Edit Site"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onDeleteSite(site.id)}
+                            className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-gray-100 rounded-lg transition-colors"
+                            title="Delete Site"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* Rate Card Manager Modal */}
+      {managingRateCardSite && (
+        <RateCardManager
+          isOpen={!!managingRateCardSite}
+          onClose={() => setManagingRateCardSite(null)}
+          siteId={managingRateCardSite.id}
+          siteName={managingRateCardSite.name}
+        />
+      )}
     </div>
   );
 };
+

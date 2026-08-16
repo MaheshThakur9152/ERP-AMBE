@@ -133,6 +133,8 @@ function mapRowToInvoiceRecord(row: any): InvoiceRecord {
     sites: row.sites,
     companies: row.companies,
     is_material: row.is_material || row.payload?.isMaterial || false,
+    certified_doc_url: row.certified_doc_url || row.certifiedDocUrl || row.payload?.certified_doc_url || row.payload?.certifiedDocUrl || null,
+    certifiedDocUrl: row.certified_doc_url || row.certifiedDocUrl || row.payload?.certified_doc_url || row.payload?.certifiedDocUrl || null,
     payload: fullPayload,
     created_at: row.created_at || row.createdAt,
     updated_at: row.updated_at,
@@ -144,26 +146,38 @@ export class InvoiceService {
    * Fetch all invoices from DB joining sites and companies tables
    */
   static async getAllInvoices(): Promise<InvoiceRecord[]> {
-    let { data, error } = await supabaseAdmin
-      .from('invoices')
-      .select('*, sites(*), companies(*)')
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      console.warn('⚠️ Supabase join query failed, falling back to simple select:', error.message);
-      const fallbackRes = await supabaseAdmin
+    try {
+      let { data, error } = await supabaseAdmin
         .from('invoices')
-        .select('*')
+        .select('*, sites(*), companies(*)')
         .order('created_at', { ascending: false });
 
-      if (fallbackRes.error) {
-        console.error('❌ Database error fetching invoices:', fallbackRes.error.message);
-        throw new Error(`Database query failed: ${fallbackRes.error.message}`);
-      }
-      data = fallbackRes.data;
-    }
+      if (error) {
+        console.warn('⚠️ Supabase join query failed, falling back to simple select:', error.message);
+        const fallbackRes = await supabaseAdmin
+          .from('invoices')
+          .select('*')
+          .order('created_at', { ascending: false });
 
-    return (data || []).map(mapRowToInvoiceRecord);
+        if (fallbackRes.error) {
+          console.error('❌ Database error fetching invoices:', fallbackRes.error.message);
+          return [];
+        }
+        data = fallbackRes.data;
+      }
+
+      return (data || []).map((row: any) => {
+        try {
+          return mapRowToInvoiceRecord(row);
+        } catch (e) {
+          console.error('Error mapping row to InvoiceRecord:', e);
+          return null;
+        }
+      }).filter(Boolean) as InvoiceRecord[];
+    } catch (err: any) {
+      console.error('getAllInvoices Error:', err);
+      return [];
+    }
   }
 
   /**
