@@ -60,7 +60,7 @@ export async function exportComplianceExcel({
   workbook.created = new Date();
 
   const worksheet = workbook.addWorksheet(`Compliance ${month} ${year}`, {
-    views: [{ showGridLines: true }],
+    views: [{ state: 'frozen', xSplit: 3, ySplit: 5, activeCell: 'D6' }],
   });
 
   // 1. Column Architecture (57 Explicit Columns Cols A - BE)
@@ -133,8 +133,8 @@ export async function exportComplianceExcel({
     { header: 'NET COMP HEAD', key: 'net_compliance_head', width: 16 }
   ];
 
-  // Insert Index Row ((1), (2), (3)...) directly below headers (Row 2)
-  const indexRowValues = Array.from({ length: 57 }, (_, i) => `(${i + 1})`);
+  // Insert Pure Numeric Index Row (Row 2)
+  const indexRowValues = Array.from({ length: 57 }, (_, i) => i + 1);
   worksheet.spliceRows(2, 0, indexRowValues);
 
   const borderStyle: Partial<ExcelJS.Borders> = {
@@ -144,15 +144,6 @@ export async function exportComplianceExcel({
     right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
   };
 
-  const netHighlightFill: ExcelJS.Fill = {
-    type: 'pattern',
-    pattern: 'solid',
-    fgColor: { argb: 'FFDCFCE7' }, // Soft Green #DCFCE7
-  };
-
-  const textCols = new Set(['employee_name', 'post_name', 'compliance_name', 'payee_name', 'in_account_of', 'other_ded_remark']);
-  const codeDateCols = new Set(['emp_id', 'gender', 'doj', 'work_status', 'pf_no', 'esic_no', 'adv_date', 'paid_date']);
-  const attendanceCols = new Set(['pd', 'wo', 'woe', 'hd', 'hde', 'second_shift', 'last_month', 'payable_days']);
   const highlightCols = new Set(['net_salary', 'employee_total', 'net_compliance_head']);
 
   // Add Employee Data Rows
@@ -223,41 +214,13 @@ export async function exportComplianceExcel({
       net_compliance_head: totalEarnedGross + employerTotal,
     };
 
-    const dataRow = worksheet.addRow(rowData);
-    dataRow.height = 22;
-
-    worksheet.columns.forEach((col, colIdx) => {
-      const cell = dataRow.getCell(colIdx + 1);
-      const key = col.key;
-      cell.border = borderStyle;
-
-      if (key && textCols.has(key)) {
-        cell.font = { name: 'Calibri', size: 9.5 };
-        cell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
-      } else if (key && codeDateCols.has(key)) {
-        cell.font = { name: 'Calibri', size: 9.5 };
-        cell.alignment = { vertical: 'middle', horizontal: 'center' };
-      } else if (key && attendanceCols.has(key)) {
-        const isBold = key === 'payable_days' || key === 'pd' || key === 'wo';
-        cell.font = { name: 'Calibri', size: 9.5, bold: isBold };
-        cell.alignment = { vertical: 'middle', horizontal: 'center' };
-      } else {
-        cell.font = { name: 'Calibri', size: 9.5 };
-        cell.alignment = { vertical: 'middle', horizontal: 'right' };
-        cell.numFmt = '₹#,##0';
-      }
-
-      if (key && highlightCols.has(key)) {
-        cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF15803D' } };
-        cell.fill = netHighlightFill;
-      }
-    });
+    worksheet.addRow(rowData);
   });
 
   // Push everything down by inserting 3 blank rows at top (Rows 1, 2, 3)
   worksheet.spliceRows(1, 0, [], [], []);
 
-  // Row 1: Title
+  // Row 1: Title Block
   const titleRow = worksheet.getRow(1);
   titleRow.height = 30;
   titleRow.getCell('A').value = `AMBE ENTERPRISES - PAYROLL COMPLIANCE SHEET (${month.toUpperCase()} ${year}) - SITE: ${siteName.toUpperCase()}`;
@@ -289,7 +252,7 @@ export async function exportComplianceExcel({
     cell.border = borderStyle;
   });
 
-  // Row 4: Slate Headers (Specific Column Names)
+  // Row 4: Slate Specific Headers
   const subHeaderRow = worksheet.getRow(4);
   subHeaderRow.height = 28;
   subHeaderRow.eachCell((cell) => {
@@ -299,14 +262,63 @@ export async function exportComplianceExcel({
     cell.border = borderStyle;
   });
 
-  // Row 5: Index Row ((1), (2), (3)...)
+  // Row 5: Clean Index Row
   const indexRow = worksheet.getRow(5);
   indexRow.height = 20;
+  worksheet.columns.forEach((_col, index) => {
+    indexRow.getCell(index + 1).value = index + 1; // Pure number
+  });
   indexRow.eachCell((cell) => {
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
-    cell.font = { name: 'Calibri', size: 9, color: { argb: 'FF475569' } };
+    cell.font = { name: 'Calibri', size: 9, color: { argb: 'FF94A3B8' } };
     cell.alignment = { horizontal: 'center', vertical: 'middle' };
-    cell.border = borderStyle;
+    cell.border = {
+      top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+      bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+    };
+  });
+
+  // Data Rows Formatting (Row 6 and below)
+  worksheet.eachRow((row, rowNumber) => {
+    if (rowNumber > 5) {
+      row.height = 25; // Give data room to breathe
+      const isEven = (rowNumber - 5) % 2 === 0;
+      const rowColor = isEven ? 'FFFFFFFF' : 'FFF8FAFC';
+
+      row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+        // 1. Background & Borders
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rowColor } };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+          left: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+          bottom: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+          right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
+        };
+
+        // 2. Strict Contextual Alignment
+        if (colNumber <= 9) {
+          if (colNumber === 1 || colNumber === 4 || colNumber === 5 || colNumber === 8 || colNumber === 9) {
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          } else {
+            cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+          }
+        } else if (colNumber >= 10 && colNumber <= 18) {
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        } else {
+          cell.alignment = { horizontal: 'right', vertical: 'middle' };
+          if (typeof cell.value === 'number') {
+            cell.numFmt = '₹#,##0';
+          }
+        }
+
+        // Highlight Net Payout columns
+        const colKey = worksheet.columns[colNumber - 1]?.key;
+        if (colKey && highlightCols.has(colKey)) {
+          cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: 'FF15803D' } };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } };
+        }
+      });
+    }
   });
 
   // Write Excel file buffer & Save
@@ -316,5 +328,127 @@ export async function exportComplianceExcel({
   });
 
   const filename = `Payroll_Compliance_${siteName.replace(/[^a-zA-Z0-9]/g, '_')}_${month}_${year}.xlsx`;
+  saveAs(blob, filename);
+}
+
+export interface AxisExportRecord {
+  empId: string;
+  name: string;
+  payeeName?: string;
+  bankAccountNo?: string;
+  bankIfscCode?: string;
+  netSalary: number;
+}
+
+export interface ExportAxisPayoutOptions {
+  month: string;
+  year: number;
+  siteName: string;
+  records: AxisExportRecord[];
+}
+
+export async function exportAxisPayoutExcel({
+  month,
+  year,
+  siteName,
+  records,
+}: ExportAxisPayoutOptions): Promise<void> {
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet('Axis Payout');
+
+  const headers = [
+    'Debit Account Number  \n(Mandatory)',
+    'Transaction Amount  \n(Mandatory)',
+    'Transaction Currency \n(Non-Mandatory)',
+    'Beneficiary Name  \n(Mandatory)',
+    'Beneficiary Account Number  \n(Mandatory)',
+    'Beneficiary IFSC Code  \n(Mandatory)',
+    'Transaction Date  \n(Mandatory)',
+    'Payment Mode  \n(Mandatory)',
+    'Customer Reference Number  \n(Mandatory)',
+    'Beneficiary Nickname/Code  \n(Mandatory)',
+    'Bank Account Type \n(Non-Mandatory)',
+    'Debit Narration \n(Non-Mandatory)',
+    'Credit Narration \n(Non-Mandatory)',
+    'Beneficiary Address 1 \n(Non-Mandatory)',
+    'Beneficiary Address 2 \n(Non-Mandatory)',
+    'Beneficiary Address 3 \n(Non-Mandatory)',
+    'Beneficiary City \n(Non-Mandatory)',
+    'Beneficiary State \n(Non-Mandatory)',
+    'Beneficiary Pin Code \n(Non-Mandatory)',
+    'Beneficiary Bank Name \n(Non-Mandatory)',
+    'Beneficiary Email address 1 \n(Non-Mandatory)',
+    'Beneficiary Email address 2 \n(Non-Mandatory)',
+    'Beneficiary Mobile Number \n(Non-Mandatory)',
+    'Add Info1 \n(Non-Mandatory)',
+    'Add Info2 \n(Non-Mandatory)',
+    'Add Info3 \n(Non-Mandatory)',
+    'Add Info4 \n(Non-Mandatory)',
+    'Add Info5 \n(Non-Mandatory)',
+    'Add Info6 \n(Non-Mandatory)'
+  ];
+
+  worksheet.addRow(headers);
+
+  // Format Header Row (Row 1)
+  const headerRow = worksheet.getRow(1);
+  headerRow.height = 40;
+  headerRow.eachCell((cell) => {
+    cell.alignment = {
+      wrapText: true,
+      horizontal: 'center',
+      vertical: 'middle',
+    };
+    cell.font = { name: 'Calibri', bold: true, size: 9.5 };
+  });
+
+  // Set uniform column widths for all 29 columns
+  worksheet.columns.forEach((column) => {
+    column.width = 25;
+  });
+
+  const txnDate = new Date().toLocaleDateString('en-GB');
+
+  records.forEach((record, index) => {
+    const benName = record.payeeName || record.name;
+    const cleanName = record.name.replace(/\s+/g, '').toUpperCase().substring(0, 10);
+    const monthSub = month.substring(0, 3).toUpperCase();
+    const nickname = `${cleanName}${monthSub}SAL`;
+    const customerRef = 801 + index;
+
+    const row = [
+      '924020001871570',
+      record.netSalary,
+      '',
+      benName,
+      record.bankAccountNo || '',
+      record.bankIfscCode || '',
+      txnDate,
+      'N',
+      customerRef,
+      nickname,
+      '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''
+    ];
+
+    worksheet.addRow(row);
+  });
+
+  // Format Data Rows
+  worksheet.eachRow((row, rowNumber) => {
+    if (rowNumber > 1) {
+      row.height = 22;
+      row.eachCell({ includeEmpty: true }, (cell) => {
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.font = { name: 'Calibri', size: 9.5 };
+      });
+    }
+  });
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+
+  const filename = `Axis_Payout_${siteName.replace(/\s+/g, '_')}_${month}_${year}.xlsx`;
   saveAs(blob, filename);
 }

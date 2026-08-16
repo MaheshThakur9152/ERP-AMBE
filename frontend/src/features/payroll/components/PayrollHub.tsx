@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { calculatePayroll, RateCard, PayrollCalculationResult } from '../utils/payrollCalculator';
-import { exportComplianceExcel, PayrollExportRecord } from '../utils/payrollExporter';
+import { exportComplianceExcel, PayrollExportRecord, exportAxisPayoutExcel, AxisExportRecord } from '../utils/payrollExporter';
 
 export interface EmployeePayrollRow {
   id: string;
@@ -27,6 +27,7 @@ export interface EmployeePayrollRow {
   advances: number;
   calc: PayrollCalculationResult | null;
   isSaved?: boolean;
+  isPaid: boolean;
 }
 
 export interface SiteOption {
@@ -55,6 +56,7 @@ export const PayrollHub: React.FC = () => {
   });
   const [sites, setSites] = useState<SiteOption[]>([]);
   const [rows, setRows] = useState<EmployeePayrollRow[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isExporting, setIsExporting] = useState<boolean>(false);
@@ -98,6 +100,7 @@ export const PayrollHub: React.FC = () => {
   const loadPayrollData = async () => {
     setIsLoading(true);
     setStatusMessage(null);
+    setSelectedIds(new Set());
     try {
       // 1. Fetch Staff assigned to site joined with rate_cards
       let staffQuery = supabase.from('staff').select('*, rate_cards(*), sites(site_name, code_name)');
@@ -137,6 +140,7 @@ export const PayrollHub: React.FC = () => {
         const pd = saved?.pd ?? saved?.present_days ?? 26;
         const wo = saved?.wo ?? saved?.weekly_offs ?? 4;
         const advances = saved?.advances ?? 0;
+        const isPaid = saved?.is_paid ?? false;
 
         const rateCard: RateCard | null = emp.rate_cards || null;
         const calc = calculatePayroll(rateCard, emp, pd, wo, daysInMonth, advances);
@@ -155,6 +159,7 @@ export const PayrollHub: React.FC = () => {
           advances,
           calc,
           isSaved: !!saved,
+          isPaid,
         };
       });
 
@@ -205,6 +210,7 @@ export const PayrollHub: React.FC = () => {
 
         advances: row.advances,
         net_salary: row.calc.netSalary,
+        is_paid: row.isPaid,
         updated_at: new Date().toISOString(),
       };
 
@@ -221,6 +227,121 @@ export const PayrollHub: React.FC = () => {
     } catch (err: any) {
       console.error('Auto-save error:', err);
       alert(`Auto-save error: ${err.message}`);
+    }
+  };
+
+  // Bulk Mark Selected Employees as PAID
+  const handleMarkSelectedAsPaid = async () => {
+    const selectedRows = rows.filter((r) => selectedIds.has(r.id) && r.calc !== null);
+    if (!selectedRows.length) return;
+
+    try {
+      const recordsToSave = selectedRows.map((r) => ({
+        month_year: `${selectedMonth} ${selectedYear}`,
+        site_id: r.siteId,
+        site_name: r.siteName,
+        staff_id: r.id,
+        emp_id: r.empId,
+        employee_name: r.name,
+        pd: r.pd,
+        wo: r.wo,
+        payable_days: r.calc!.payableDays,
+        earned_basic: r.calc!.earnedBasic,
+        earned_hra: r.calc!.earnedHRA,
+        earned_other: r.calc!.earnedOther,
+        earned_conveyance: r.calc!.earnedConveyance,
+        earned_incentive: r.calc!.earnedIncentive,
+        earned_bonus: r.calc!.earnedBonus,
+        earned_gross: r.calc!.earnedGross,
+        epf_deduction: r.calc!.epf,
+        esic_deduction: r.calc!.esic,
+        pt_deduction: r.calc!.pt,
+        epf: r.calc!.epf,
+        esic: r.calc!.esic,
+        pt: r.calc!.pt,
+        advances: r.advances,
+        net_salary: r.calc!.netSalary,
+        is_paid: true,
+        updated_at: new Date().toISOString(),
+      }));
+
+      const { error } = await supabase.from('payroll_records').upsert(recordsToSave, {
+        onConflict: 'month_year,staff_id',
+      });
+
+      if (error) {
+        console.error('Bulk Paid Upsert Error:', error);
+        alert(`Failed to mark paid: ${error.message}`);
+      } else {
+        setRows((prev) =>
+          prev.map((r) => (selectedIds.has(r.id) ? { ...r, isPaid: true, isSaved: true } : r))
+        );
+        setSelectedIds(new Set());
+        setStatusMessage({
+          type: 'success',
+          text: `Successfully marked ${selectedRows.length} employees as PAID!`,
+        });
+      }
+    } catch (err: any) {
+      console.error('Bulk paid error:', err);
+      alert(`Error marking paid: ${err.message}`);
+    }
+  };
+
+  // Export Axis Payout Excel for selected employees
+  const handleExportAxis = async () => {
+    const selectedRows = rows.filter((r) => selectedIds.has(r.id) && r.calc !== null);
+    if (!selectedRows.length) return;
+
+    const missingBank = selectedRows.filter(
+      (r) =>
+        !(
+          r.empRaw?.bank_account_no ||
+          r.empRaw?.bank_account_number ||
+          r.empRaw?.bank_account ||
+          r.empRaw?.account_no
+        ) ||
+        !(
+          r.empRaw?.bank_ifsc_code ||
+          r.empRaw?.ifsc_code ||
+          r.empRaw?.ifsc
+        )
+    );
+
+    if (missingBank.length) {
+      const names = missingBank.map((r) => r.name).join(', ');
+      alert(`Warning: ${missingBank.length} employee(s) missing bank details (Account No / IFSC): ${names}. Exporting with empty fields for missing values.`);
+    }
+
+    try {
+      const activeSiteName =
+        selectedSiteId === 'all'
+          ? 'All_Sites'
+          : sites.find((s) => s.id === selectedSiteId)?.site_name || 'Site';
+
+      const axisRecords: AxisExportRecord[] = selectedRows.map((r) => {
+        const emp = r.empRaw || {};
+        return {
+          empId: r.empId,
+          name: r.name,
+          payeeName: emp.payee_name || r.name,
+          bankAccountNo: emp.bank_account_no || emp.bank_account_number || emp.bank_account || emp.account_no || '',
+          bankIfscCode: emp.bank_ifsc_code || emp.ifsc_code || emp.ifsc || '',
+          netSalary: r.calc!.netSalary,
+        };
+      });
+
+      await exportAxisPayoutExcel({
+        month: selectedMonth,
+        year: selectedYear,
+        siteName: activeSiteName,
+        records: axisRecords,
+      });
+
+      setStatusMessage({ type: 'success', text: `Axis Payout file exported for ${selectedRows.length} employees!` });
+    } catch (err: any) {
+      console.error('Axis export error:', err);
+      alert(`Axis export error: ${err.message}`);
     }
   };
 
@@ -358,9 +479,9 @@ export const PayrollHub: React.FC = () => {
   return (
     <div className="p-6 space-y-6 bg-slate-50 min-h-screen font-sans">
       {/* Top Header Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-gray-200 shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-teal-50 text-[#20B2AA] border border-[#20B2AA]/30 flex items-center justify-center">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-gray-200 shadow-sm">
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-teal-50 text-[#20B2AA] border border-[#20B2AA]/30 flex items-center justify-center flex-shrink-0">
             <DollarSign className="w-5 h-5" />
           </div>
           <div>
@@ -372,7 +493,30 @@ export const PayrollHub: React.FC = () => {
         </div>
 
         {/* Action Controls & Filters */}
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
+          {/* Bulk Selection Action Buttons */}
+          {selectedIds.size > 0 && (
+            <div className="flex items-center gap-1.5 bg-slate-100/80 p-1 rounded-2xl border border-gray-200 animate-in fade-in duration-200">
+              <button
+                type="button"
+                onClick={handleMarkSelectedAsPaid}
+                className="bg-teal-600 hover:bg-teal-700 text-white px-3.5 py-1.5 rounded-xl text-xs font-semibold shadow-xs flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer"
+              >
+                <CheckCircle className="w-3.5 h-3.5" />
+                <span>Mark Paid ({selectedIds.size})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleExportAxis}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-1.5 rounded-xl text-xs font-semibold shadow-xs flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Axis Payout ({selectedIds.size})</span>
+              </button>
+            </div>
+          )}
+
           {/* Month Dropdown */}
           <div className="flex items-center border border-gray-300 rounded-xl px-3 py-2 bg-white text-xs font-semibold text-gray-800 shadow-xs gap-2">
             <Calendar className="w-3.5 h-3.5 text-gray-400" />
@@ -403,7 +547,7 @@ export const PayrollHub: React.FC = () => {
             <select
               value={selectedSiteId}
               onChange={(e) => setSelectedSiteId(e.target.value)}
-              className="bg-transparent outline-none cursor-pointer max-w-[200px] truncate"
+              className="bg-transparent outline-none cursor-pointer max-w-[180px] truncate"
             >
               <option value="all">All Sites</option>
               {sites.map((s) => (
@@ -419,9 +563,9 @@ export const PayrollHub: React.FC = () => {
             type="button"
             onClick={handleDownloadExcel}
             disabled={isExporting || !rows.length}
-            className="bg-[#10B981] hover:bg-emerald-600 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow-sm flex items-center gap-2 transition-all cursor-pointer"
+            className="bg-[#10B981] hover:bg-emerald-600 disabled:opacity-50 text-white px-3.5 py-2 rounded-xl text-xs font-semibold shadow-xs flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer"
           >
-            {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            {isExporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
             <span>Download Compliance Excel</span>
           </button>
         </div>
@@ -463,7 +607,23 @@ export const PayrollHub: React.FC = () => {
             <table className="w-full text-left text-xs text-gray-700 border-collapse min-w-[1200px]">
               <thead className="bg-slate-100/80 border-b border-gray-200 font-bold uppercase text-[10px] text-gray-600 tracking-wider">
                 <tr>
-                  <th className="p-3 w-12 text-center">#</th>
+                  <th className="p-3 w-12 text-center">
+                    <input
+                      type="checkbox"
+                      checked={
+                        rows.filter((r) => r.calc !== null).length > 0 &&
+                        selectedIds.size === rows.filter((r) => r.calc !== null).length
+                      }
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedIds(new Set(rows.filter((r) => r.calc !== null).map((r) => r.id)));
+                        } else {
+                          setSelectedIds(new Set());
+                        }
+                      }}
+                      className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500 cursor-pointer"
+                    />
+                  </th>
                   <th className="p-3">Employee</th>
                   <th className="p-3">Designation / Site</th>
                   <th className="p-3 text-center bg-blue-50/60 text-blue-900 border-x border-blue-100">
@@ -492,16 +652,42 @@ export const PayrollHub: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 font-mono text-[11px]">
-                {rows.map((row, idx) => (
-                  <tr key={row.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="p-3 text-center font-sans text-gray-400">{idx + 1}</td>
+                {rows.map((row) => (
+                  <tr
+                    key={row.id}
+                    className={`transition-colors ${
+                      row.isPaid ? 'bg-emerald-50/30 hover:bg-emerald-50/60' : 'hover:bg-slate-50/80'
+                    }`}
+                  >
+                    <td className="p-3 text-center">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(row.id)}
+                        disabled={!row.calc}
+                        onChange={(e) => {
+                          const newSet = new Set(selectedIds);
+                          if (e.target.checked) {
+                            newSet.add(row.id);
+                          } else {
+                            newSet.delete(row.id);
+                          }
+                          setSelectedIds(newSet);
+                        }}
+                        className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500 cursor-pointer disabled:opacity-30"
+                      />
+                    </td>
 
                     <td className="p-3 font-sans">
-                      <div className="font-bold text-gray-900 flex items-center gap-1.5">
+                      <div className="font-bold text-gray-900 flex items-center gap-1.5 flex-wrap">
                         <span>{row.name}</span>
                         {row.rateCard?.is_flat_wage && (
                           <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
                             Flat
+                          </span>
+                        )}
+                        {row.isPaid && (
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 uppercase tracking-wider ml-2">
+                            Paid
                           </span>
                         )}
                       </div>
