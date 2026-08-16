@@ -31,8 +31,11 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
       fetchCompanies()
         .then((data) => {
           setCompanies(data);
-          if (data.length > 0) {
-            setSelectedCompanyId(data[0].id);
+          const targetCompId = editingSite?.company_id || editingSite?.companyId;
+          if (targetCompId && data.some((c) => c.id === targetCompId)) {
+            setSelectedCompanyId(targetCompId);
+          } else if (data.length > 0) {
+            setSelectedCompanyId((prev) => (prev ? prev : data[0].id));
           }
         })
         .catch((err) => {
@@ -42,7 +45,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
           setIsLoadingCompanies(false);
         });
     }
-  }, [isOpen]);
+  }, [isOpen, editingSite]);
 
   const {
     register,
@@ -65,6 +68,10 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
       mgmtPercent: 5,
       defaultMachineryCharges: 0,
       defaultMaterialCharges: 0,
+      defaultAdditionalCharges: [
+        { name: 'Machinery Charges', amount: 0 },
+        { name: 'Material Charges', amount: 0 },
+      ],
       status: 'Active',
       rateCards: [
         { roleName: '', monthlyRate: 0, workingDays: 31, hsnCode: '9985', persons: 1 },
@@ -77,11 +84,44 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
     name: 'rateCards',
   });
 
+  const {
+    fields: additionalChargeFields,
+    append: appendAdditionalCharge,
+    remove: removeAdditionalCharge,
+  } = useFieldArray({
+    control,
+    name: 'defaultAdditionalCharges',
+  });
+
   useEffect(() => {
     if (editingSite) {
       if (editingSite.company_id || editingSite.companyId) {
         setSelectedCompanyId(editingSite.company_id || editingSite.companyId || '');
       }
+
+      const existingAdditional = editingSite.defaultAdditionalCharges || editingSite.default_additional_charges || (editingSite as any).additional_charges;
+
+      // Check if there are actual legacy monetary values we need to preserve
+      const legacyMachinery = Number(editingSite.defaultMachineryCharges ?? editingSite.default_machinery_charges ?? 0);
+      const legacyMaterial = Number(editingSite.defaultMaterialCharges ?? editingSite.default_material_charges ?? 0);
+      const hasLegacyValues = legacyMachinery > 0 || legacyMaterial > 0;
+
+      let finalAdditional: { name: string; amount: number }[];
+
+      if (existingAdditional && existingAdditional.length > 0) {
+        // 1. We have a populated dynamic array, use it.
+        finalAdditional = existingAdditional;
+      } else if (hasLegacyValues && (!existingAdditional || existingAdditional.length === 0)) {
+        // 2. The array is empty, BUT they have older legacy charges > 0. Preserve them.
+        finalAdditional = [
+          { name: 'Machinery Charges', amount: legacyMachinery },
+          { name: 'Material Charges', amount: legacyMaterial },
+        ];
+      } else {
+        // 3. The array is empty, and they have no legacy charges > 0. Respect the user's deletion!
+        finalAdditional = [];
+      }
+
       reset({
         siteName: editingSite.siteName || '',
         codeName: editingSite.codeName || editingSite.code_name || '',
@@ -95,6 +135,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
         mgmtPercent: editingSite.mgmtPercent ?? editingSite.management_fee_percent ?? 5,
         defaultMachineryCharges: editingSite.defaultMachineryCharges ?? editingSite.default_machinery_charges ?? 0,
         defaultMaterialCharges: editingSite.defaultMaterialCharges ?? editingSite.default_material_charges ?? 0,
+        defaultAdditionalCharges: finalAdditional,
         status: editingSite.status || 'Active',
         rateCards: editingSite.rateCards || [],
       });
@@ -112,6 +153,10 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
         mgmtPercent: 5,
         defaultMachineryCharges: 0,
         defaultMaterialCharges: 0,
+        defaultAdditionalCharges: [
+          { name: 'Machinery Charges', amount: 0 },
+          { name: 'Material Charges', amount: 0 },
+        ],
         status: 'Active',
         rateCards: [
           { roleName: '', monthlyRate: 0, workingDays: 31, hsnCode: '9985', persons: 1 },
@@ -133,6 +178,9 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
       management_fee_percent: Number(data.mgmtPercent) ?? 5,
       default_machinery_charges: Number(data.defaultMachineryCharges) || 0,
       default_material_charges: Number(data.defaultMaterialCharges) || 0,
+      additional_charges: data.defaultAdditionalCharges || [],
+      default_additional_charges: data.defaultAdditionalCharges || [],
+      defaultAdditionalCharges: data.defaultAdditionalCharges || [],
     };
 
     try {
@@ -348,28 +396,43 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Default Machinery Charges (₹)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  placeholder="0"
-                  {...register('defaultMachineryCharges', { valueAsNumber: true })}
-                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
-                />
+            <div className="space-y-3 pt-2 border-t border-gray-100">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-semibold text-gray-700">Default Additional Charges (₹)</label>
+                <button
+                  type="button"
+                  onClick={() => appendAdditionalCharge({ name: '', amount: 0 })}
+                  className="text-xs text-[#20B2AA] hover:text-[#188B85] font-semibold flex items-center gap-1"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add Charge Field
+                </button>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Default Material Charges (₹)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  placeholder="0"
-                  {...register('defaultMaterialCharges', { valueAsNumber: true })}
-                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
-                />
-              </div>
+              {additionalChargeFields.map((field, idx) => (
+                <div key={field.id} className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="Charge Name (e.g. Machinery Charges)"
+                    {...register(`defaultAdditionalCharges.${idx}.name` as const)}
+                    className="flex-1 bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
+                  />
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="0"
+                    {...register(`defaultAdditionalCharges.${idx}.amount` as const, { valueAsNumber: true })}
+                    className="w-32 bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeAdditionalCharge(idx)}
+                    className="text-gray-400 hover:text-red-500 p-2 rounded-lg hover:bg-red-50 transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
             </div>
           </div>
 

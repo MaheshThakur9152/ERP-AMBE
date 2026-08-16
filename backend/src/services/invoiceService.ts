@@ -87,6 +87,10 @@ function mapRowToInvoiceRecord(row: any): InvoiceRecord {
         mgmtPercent: Number(row.payload.mgmtPercent ?? row.mgmt_percent ?? row.mgmtPercent ?? row.management_fee_percent ?? site?.management_fee_percent ?? site?.mgmt_percent ?? 5),
         machineryCharges: Number(row.payload.machineryCharges ?? row.machinery_charges ?? row.machineryCharges ?? 0),
         materialCharges: Number(row.payload.materialCharges ?? row.material_charges ?? row.materialCharges ?? 0),
+        additionalCharges: row.payload.additionalCharges || row.payload.additional_charges || row.additional_charges || row.additionalCharges || [
+          { name: 'Machinery Charges', amount: Number(row.payload.machineryCharges ?? row.machinery_charges ?? 0) },
+          { name: 'Material Charges', amount: Number(row.payload.materialCharges ?? row.material_charges ?? 0) },
+        ],
       }
     : {
         company: defaultCompany,
@@ -97,6 +101,10 @@ function mapRowToInvoiceRecord(row: any): InvoiceRecord {
         mgmtPercent: Number(row.mgmt_percent ?? row.mgmtPercent ?? row.management_fee_percent ?? site?.management_fee_percent ?? site?.mgmt_percent ?? 5),
         machineryCharges: Number(row.machinery_charges ?? row.machineryCharges ?? 0),
         materialCharges: Number(row.material_charges ?? row.materialCharges ?? 0),
+        additionalCharges: row.additional_charges || row.additionalCharges || [
+          { name: 'Machinery Charges', amount: Number(row.machinery_charges ?? row.machineryCharges ?? 0) },
+          { name: 'Material Charges', amount: Number(row.material_charges ?? row.materialCharges ?? 0) },
+        ],
         cgstPercent: 9,
         sgstPercent: 9,
         terms: formattedTerms,
@@ -119,6 +127,12 @@ function mapRowToInvoiceRecord(row: any): InvoiceRecord {
     sub_total: Number(row.sub_total || 0),
     tax_total: Number(row.tax_total || 0),
     grand_total: amount,
+    machinery_charges: Number(row.machinery_charges ?? row.machineryCharges ?? row.payload?.machineryCharges ?? 0),
+    machineryCharges: Number(row.machinery_charges ?? row.machineryCharges ?? row.payload?.machineryCharges ?? 0),
+    material_charges: Number(row.material_charges ?? row.materialCharges ?? row.payload?.materialCharges ?? 0),
+    materialCharges: Number(row.material_charges ?? row.materialCharges ?? row.payload?.materialCharges ?? 0),
+    additional_charges: row.additional_charges || row.additionalCharges || row.payload?.additionalCharges || [],
+    additionalCharges: row.additional_charges || row.additionalCharges || row.payload?.additionalCharges || [],
     type: row.type || 'Tax Invoice',
     status: row.status || 'Pending',
     itemsCount: Number(row.items_count || row.itemsCount || (row.line_items ? row.line_items.length : 0)),

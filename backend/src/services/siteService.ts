@@ -24,6 +24,14 @@ function mapRowToSite(row: any): Site {
     defaultMachineryCharges: Number(row.default_machinery_charges ?? row.defaultMachineryCharges ?? 0),
     default_material_charges: Number(row.default_material_charges ?? row.defaultMaterialCharges ?? 0),
     defaultMaterialCharges: Number(row.default_material_charges ?? row.defaultMaterialCharges ?? 0),
+    default_additional_charges: row.additional_charges || row.default_additional_charges || row.defaultAdditionalCharges || [
+      { name: 'Machinery Charges', amount: Number(row.default_machinery_charges ?? row.defaultMachineryCharges ?? 0) },
+      { name: 'Material Charges', amount: Number(row.default_material_charges ?? row.defaultMaterialCharges ?? 0) },
+    ],
+    defaultAdditionalCharges: row.additional_charges || row.default_additional_charges || row.defaultAdditionalCharges || [
+      { name: 'Machinery Charges', amount: Number(row.default_machinery_charges ?? row.defaultMachineryCharges ?? 0) },
+      { name: 'Material Charges', amount: Number(row.default_material_charges ?? row.defaultMaterialCharges ?? 0) },
+    ],
     rateCards: row.rate_cards || row.rateCards || [],
     createdAt: row.created_at || row.createdAt,
     created_at: row.created_at,
@@ -94,6 +102,7 @@ export class SiteService {
       management_fee_percent: payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? 5,
       default_machinery_charges: Number(payload.default_machinery_charges ?? payload.defaultMachineryCharges ?? 0),
       default_material_charges: Number(payload.default_material_charges ?? payload.defaultMaterialCharges ?? 0),
+      additional_charges: payload.additional_charges || payload.default_additional_charges || payload.defaultAdditionalCharges || payload.additionalCharges || [],
       rate_cards: payload.rate_cards || payload.rateCards || [],
       created_at: now,
     };
@@ -143,6 +152,9 @@ export class SiteService {
     }
     if (payload.default_material_charges !== undefined || payload.defaultMaterialCharges !== undefined) {
       updateData.default_material_charges = Number(payload.default_material_charges ?? payload.defaultMaterialCharges ?? 0);
+    }
+    if (payload.additional_charges !== undefined || payload.default_additional_charges !== undefined || payload.defaultAdditionalCharges !== undefined || payload.additionalCharges !== undefined) {
+      updateData.additional_charges = payload.additional_charges || payload.default_additional_charges || payload.defaultAdditionalCharges || payload.additionalCharges || [];
     }
     if (payload.address !== undefined) updateData.address = payload.address;
     if (payload.contactNo !== undefined || payload.contact_no !== undefined) {

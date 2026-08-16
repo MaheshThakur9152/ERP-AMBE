@@ -70,12 +70,17 @@ export interface BankDetails {
   branch: string;
 }
 
+export interface AdditionalChargeItem {
+  name: string;
+  amount: number;
+}
+
 export interface InvoiceCalculations {
   subTotal: number;
   mgmtChargesPercent: number;
   mgmtChargesAmount: number;
-  machineryCharges: number;
-  materialCharges: number;
+  additionalCharges: AdditionalChargeItem[];
+  totalAdditionalCharges: number;
   totalBeforeTax: number;
   cgstPercent: number;
   cgstAmount: number;
@@ -94,7 +99,10 @@ export interface InvoiceData {
   bank: BankDetails;
   items: InvoiceLineItem[];
   mgmtPercent?: number;
+  additionalCharges?: AdditionalChargeItem[];
+  /** @deprecated - kept for legacy invoice rendering */
   machineryCharges?: number;
+  /** @deprecated - kept for legacy invoice rendering */
   materialCharges?: number;
   cgstPercent?: number;
   sgstPercent?: number;

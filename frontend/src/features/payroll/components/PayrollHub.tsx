@@ -129,10 +129,31 @@ export const PayrollHub: React.FC = () => {
     setStatusMessage(null);
     setSelectedIds(new Set());
     try {
-      // 1. Fetch Staff assigned to site joined with rate_cards
+      // 1. Fetch Staff assigned to site joined with rate_cards & monthly site_deployments
+      let deployedStaffIds: string[] = [];
+      if (selectedSiteId !== 'all') {
+        try {
+          const monthYearStr = `${selectedMonth} ${selectedYear}`;
+          const { data: depData } = await supabase
+            .from('site_deployments')
+            .select('staff_id')
+            .eq('month_year', monthYearStr)
+            .eq('site_id', selectedSiteId);
+          if (depData && depData.length > 0) {
+            deployedStaffIds = depData.map((d: any) => d.staff_id);
+          }
+        } catch (depErr) {
+          console.warn('site_deployments check skipped:', depErr);
+        }
+      }
+
       let staffQuery = supabase.from('staff').select('*, rate_cards(*), sites(site_name, code_name)');
       if (selectedSiteId !== 'all') {
-        staffQuery = staffQuery.eq('site_id', selectedSiteId);
+        if (deployedStaffIds.length > 0) {
+          staffQuery = staffQuery.or(`site_id.eq.${selectedSiteId},id.in.(${deployedStaffIds.join(',')})`);
+        } else {
+          staffQuery = staffQuery.eq('site_id', selectedSiteId);
+        }
       }
       const { data: staffData, error: staffError } = await staffQuery;
 

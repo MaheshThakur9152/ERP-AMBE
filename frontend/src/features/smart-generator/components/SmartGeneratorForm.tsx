@@ -158,8 +158,7 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
 
   // Auto-populated line items & extra charges state
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([]);
-  const [machineryCharges, setMachineryCharges] = useState<number>(0);
-  const [materialCharges, setMaterialCharges] = useState<number>(0);
+  const [additionalCharges, setAdditionalCharges] = useState<{ name: string; amount: number }[]>([]);
   const [isEditLoaded, setIsEditLoaded] = useState<boolean>(false);
 
   // Handle Edit Mode initialRecord populate
@@ -208,42 +207,73 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
       setLineItems(loadedItems);
     }
 
-    let mach = Number(
-      initialRecord.payload?.machineryCharges ||
-      (initialRecord as any).machinery_charges ||
-      (initialRecord as any).machineryCharges ||
-      (initialRecord as any).payload?.machinery_charges ||
-      matchingSite?.default_machinery_charges ||
-      matchingSite?.defaultMachineryCharges ||
-      0
-    );
+    const existingAdd =
+      initialRecord.payload?.additionalCharges ||
+      (initialRecord as any).additionalCharges ||
+      (initialRecord as any).additional_charges ||
+      matchingSite?.defaultAdditionalCharges ||
+      matchingSite?.default_additional_charges;
 
-    let mat = Number(
-      initialRecord.payload?.materialCharges ||
-      (initialRecord as any).material_charges ||
-      (initialRecord as any).materialCharges ||
-      (initialRecord as any).payload?.material_charges ||
-      matchingSite?.default_material_charges ||
-      matchingSite?.defaultMaterialCharges ||
-      0
-    );
+    let finalAdditional: { name: string; amount: number }[] = [];
 
-    const recTargetAmount = Number(initialRecord.amount || (initialRecord as any).grand_total || initialRecord.payload?.meta?.amount || 0);
+    if (existingAdd && Array.isArray(existingAdd) && existingAdd.length > 0) {
+      finalAdditional = existingAdd;
+    } else {
+      let mach = Number(
+        initialRecord.payload?.machineryCharges ||
+        (initialRecord as any).machinery_charges ||
+        (initialRecord as any).machineryCharges ||
+        matchingSite?.default_machinery_charges ||
+        matchingSite?.defaultMachineryCharges ||
+        0
+      );
+      let mat = Number(
+        initialRecord.payload?.materialCharges ||
+        (initialRecord as any).material_charges ||
+        (initialRecord as any).materialCharges ||
+        matchingSite?.default_material_charges ||
+        matchingSite?.defaultMaterialCharges ||
+        0
+      );
 
-    if (mach === 0 && mat === 0 && recTargetAmount > 0 && loadedItems.length > 0) {
-      const recMgmt = matchingSite?.mgmtPercent ?? (matchingSite as any)?.management_fee_percent ?? 5;
-      const basicCalc = computeInvoiceCalculations(loadedItems, recMgmt, 9, 9, 0, 0);
-      const diff = recTargetAmount - basicCalc.grandTotal;
-      if (diff > 5) {
-        mat = Math.round(diff / 1.18);
-      }
+      finalAdditional = [
+        { name: 'Machinery Charges', amount: mach },
+        { name: 'Material Charges', amount: mat },
+      ];
     }
 
-    setMachineryCharges(mach);
-    setMaterialCharges(mat);
-
+    setAdditionalCharges(finalAdditional);
     setIsEditLoaded(true);
   }, [initialRecord, sites, companies]);
+
+  // Selected site object
+  const selectedSite = sites.find((s) => s.id === selectedSiteId);
+
+  // Auto-populate Additional Charges when selected site changes
+  useEffect(() => {
+    if (!selectedSite) return;
+    const defaultAdd =
+      selectedSite.defaultAdditionalCharges ||
+      selectedSite.default_additional_charges ||
+      (selectedSite as any).additionalCharges ||
+      (selectedSite as any).additional_charges;
+
+    if (defaultAdd && Array.isArray(defaultAdd) && defaultAdd.length > 0) {
+      setAdditionalCharges(
+        defaultAdd.map((c: any) => ({
+          name: c.name || 'Charge',
+          amount: Number(c.amount || 0),
+        }))
+      );
+    } else {
+      const mach = Number(selectedSite.defaultMachineryCharges ?? selectedSite.default_machinery_charges ?? 0);
+      const mat = Number(selectedSite.defaultMaterialCharges ?? selectedSite.default_material_charges ?? 0);
+      setAdditionalCharges([
+        { name: 'Machinery Charges', amount: mach },
+        { name: 'Material Charges', amount: mat },
+      ]);
+    }
+  }, [selectedSiteId, selectedSite, sites]);
 
   const handleMonthYearChange = (mIndex: number, yr: number) => {
     setSelectedMonth(mIndex);
@@ -265,9 +295,6 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
     );
   };
 
-  // Selected site object
-  const selectedSite = sites.find((s) => s.id === selectedSiteId);
-
   // Auto-sync Operating Company when selected site changes
   useEffect(() => {
     if (!selectedSite) return;
@@ -276,13 +303,6 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
       setSelectedCompanyId(siteCompId);
     }
   }, [selectedSiteId, selectedSite, companies]);
-
-  // Auto-populate Machinery & Material Charges when selected site changes
-  useEffect(() => {
-    if (!selectedSite || isEditLoaded) return;
-    setMachineryCharges(selectedSite.defaultMachineryCharges ?? selectedSite.default_machinery_charges ?? 0);
-    setMaterialCharges(selectedSite.defaultMaterialCharges ?? selectedSite.default_material_charges ?? 0);
-  }, [selectedSiteId, sites, isEditLoaded]);
 
   // Populate line items dynamically when selected site changes
   useEffect(() => {
@@ -356,8 +376,7 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
     dynamicMgmtPercent,
     9,
     9,
-    machineryCharges,
-    materialCharges
+    additionalCharges
   );
 
   const handleGenerateInvoice = async () => {
@@ -423,8 +442,7 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
           },
       items: lineItems,
       mgmtPercent: selectedSite?.mgmtPercent ?? (selectedSite as any)?.management_fee_percent ?? 5,
-      machineryCharges,
-      materialCharges,
+      additionalCharges,
       cgstPercent: 9,
       sgstPercent: 9,
       terms: Array.isArray(currentCompany?.terms_and_conditions || currentCompany?.default_terms)
@@ -468,10 +486,8 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
         mgmt_percent: dynamicMgmtPercent,
         mgmtPercent: dynamicMgmtPercent,
         management_fee_percent: dynamicMgmtPercent,
-        machinery_charges: machineryCharges,
-        machineryCharges,
-        material_charges: materialCharges,
-        materialCharges,
+        additional_charges: additionalCharges,
+        additionalCharges,
         type: isProforma ? ('Proforma Invoice' as const) : ('Tax Invoice' as const),
         status: isProforma ? ('Draft' as const) : ('Pending' as const),
         itemsCount: generatedInvoice.items.length,
@@ -480,8 +496,7 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
           company_id: currentCompany?.id,
           site_id: selectedSite?.id,
           mgmtPercent: dynamicMgmtPercent,
-          machineryCharges,
-          materialCharges,
+          additionalCharges,
           company: {
             ...generatedInvoice.company,
             id: currentCompany?.id,
@@ -828,27 +843,54 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
               <span className="font-medium">Mgmt Charges @ {dynamicMgmtPercent}%</span>
               <span className="font-mono font-semibold text-slate-900 text-sm">₹{formatCurrency(calc.mgmtChargesAmount)}</span>
             </div>
-            <div className="flex justify-between items-center py-1 text-slate-600 border-b border-slate-100 gap-3">
-              <span className="font-medium text-gray-700">Machinery Charges (₹)</span>
-              <input
-                type="number"
-                step="0.01"
-                value={machineryCharges === 0 ? '' : machineryCharges}
-                onChange={(e) => setMachineryCharges(e.target.value === '' ? 0 : Number(e.target.value))}
-                placeholder="0"
-                className="w-28 bg-white border border-gray-200 rounded px-2 py-1 text-right text-gray-800 font-mono text-xs focus:outline-none focus:border-teal-500 shadow-2xs"
-              />
-            </div>
-            <div className="flex justify-between items-center py-1 text-slate-600 border-b border-slate-100 gap-3">
-              <span className="font-medium text-gray-700">Material Charges (₹)</span>
-              <input
-                type="number"
-                step="0.01"
-                value={materialCharges === 0 ? '' : materialCharges}
-                onChange={(e) => setMaterialCharges(e.target.value === '' ? 0 : Number(e.target.value))}
-                placeholder="0"
-                className="w-28 bg-white border border-gray-200 rounded px-2 py-1 text-right text-gray-800 font-mono text-xs focus:outline-none focus:border-teal-500 shadow-2xs"
-              />
+            <div className="space-y-1.5 py-1 border-b border-slate-100">
+              <div className="flex justify-between items-center">
+                <span className="font-semibold text-slate-700">Additional Charges</span>
+                <button
+                  type="button"
+                  onClick={() => setAdditionalCharges([...additionalCharges, { name: '', amount: 0 }])}
+                  className="text-[11px] text-teal-600 hover:text-teal-800 font-bold"
+                >
+                  + Add Charge
+                </button>
+              </div>
+              {additionalCharges.map((ch, idx) => (
+                <div key={idx} className="flex justify-between items-center gap-1.5 py-0.5">
+                  <input
+                    type="text"
+                    value={ch.name}
+                    onChange={(e) => {
+                      const updated = [...additionalCharges];
+                      updated[idx] = { ...updated[idx], name: e.target.value };
+                      setAdditionalCharges(updated);
+                    }}
+                    placeholder="Charge Name"
+                    className="flex-1 bg-white border border-gray-200 rounded px-1.5 py-1 text-xs text-gray-800 focus:outline-none focus:border-teal-500"
+                  />
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={ch.amount === 0 ? '' : ch.amount}
+                    onChange={(e) => {
+                      const updated = [...additionalCharges];
+                      updated[idx] = { ...updated[idx], amount: e.target.value === '' ? 0 : Number(e.target.value) };
+                      setAdditionalCharges(updated);
+                    }}
+                    placeholder="0"
+                    className="w-24 bg-white border border-gray-200 rounded px-2 py-1 text-right text-gray-800 font-mono text-xs focus:outline-none focus:border-teal-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const updated = additionalCharges.filter((_, i) => i !== idx);
+                      setAdditionalCharges(updated);
+                    }}
+                    className="text-gray-400 hover:text-red-500 p-0.5"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
             </div>
             <div className="flex justify-between items-center py-1 text-slate-600 border-b border-slate-100">
               <span className="font-medium">Tax (CGST 9% + SGST 9%)</span>

@@ -36,6 +36,10 @@ const blankInvoice: InvoiceData = {
   },
   items: [],
   mgmtPercent: 5,
+  additionalCharges: [
+    { name: 'Machinery Charges', amount: 0 },
+    { name: 'Material Charges', amount: 0 },
+  ],
   cgstPercent: 9,
   sgstPercent: 9,
   terms: 'Payment can only be done in cheque/DD, NEFT, RTGS',

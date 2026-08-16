@@ -1,4 +1,4 @@
-import { InvoiceLineItem, InvoiceCalculations, InvoiceData } from '../types/invoice';
+import { InvoiceLineItem, InvoiceCalculations, AdditionalChargeItem } from '../types/invoice';
 import { numberToIndianWords } from './numberToWords';
 
 /**
@@ -24,8 +24,8 @@ export function computeInvoiceCalculations(
   mgmtPercent: number = 5,
   cgstPercent: number = 9,
   sgstPercent: number = 9,
-  machineryCharges: number = 0,
-  materialCharges: number = 0
+  additionalChargesInput: AdditionalChargeItem[] | number = [],
+  legacyMaterialCharges: number = 0
 ): InvoiceCalculations {
   // 1. Sub total from items
   const subTotalRaw = items.reduce((sum, item) => sum + (item.amount || 0), 0);
@@ -35,12 +35,28 @@ export function computeInvoiceCalculations(
   const mgmtChargesAmountRaw = (subTotal * mgmtPercent) / 100;
   const mgmtChargesAmount = Math.round(mgmtChargesAmountRaw * 100) / 100;
 
-  // 3. Machinery & Material charges
-  const machinery = Number(machineryCharges || 0);
-  const materials = Number(materialCharges || 0);
+  // 3. Additional charges resolution
+  let additionalCharges: AdditionalChargeItem[] = [];
+  if (Array.isArray(additionalChargesInput)) {
+    additionalCharges = additionalChargesInput;
+  } else {
+    // Backward compatibility for legacy positional number args
+    if (additionalChargesInput) {
+      additionalCharges.push({ name: 'Machinery Charges', amount: Number(additionalChargesInput) });
+    }
+    if (legacyMaterialCharges) {
+      additionalCharges.push({ name: 'Material Charges', amount: Number(legacyMaterialCharges) });
+    }
+  }
+
+  const totalAdditionalChargesRaw = additionalCharges.reduce(
+    (sum, ch) => sum + (Number(ch.amount) || 0),
+    0
+  );
+  const totalAdditionalCharges = Math.round(totalAdditionalChargesRaw * 100) / 100;
 
   // 4. Total before tax
-  const totalBeforeTax = Math.round((subTotal + mgmtChargesAmount + machinery + materials) * 100) / 100;
+  const totalBeforeTax = Math.round((subTotal + mgmtChargesAmount + totalAdditionalCharges) * 100) / 100;
 
   // 5. CGST & SGST
   const cgstAmountRaw = (totalBeforeTax * cgstPercent) / 100;
@@ -65,8 +81,8 @@ export function computeInvoiceCalculations(
     subTotal,
     mgmtChargesPercent: mgmtPercent,
     mgmtChargesAmount,
-    machineryCharges: machinery,
-    materialCharges: materials,
+    additionalCharges,
+    totalAdditionalCharges,
     totalBeforeTax,
     cgstPercent,
     cgstAmount,

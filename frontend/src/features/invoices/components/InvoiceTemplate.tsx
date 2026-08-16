@@ -17,8 +17,7 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
     data.mgmtPercent ?? 5,
     data.cgstPercent ?? 9,
     data.sgstPercent ?? 9,
-    data.machineryCharges || 0,
-    data.materialCharges || 0
+    data.additionalCharges || []
   );
 
   const MIN_ROWS = 8;
@@ -266,14 +265,33 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
                   <span>Management charges @ {calc.mgmtChargesPercent}%</span>
                   <span>{formatCurrency(calc.mgmtChargesAmount)}</span>
                 </div>
-                <div className="flex justify-between p-1">
-                  <span>Machinery Charges</span>
-                  <span>{formatCurrency(Number(data.machineryCharges ?? calc.machineryCharges ?? 0))}</span>
-                </div>
-                <div className="flex justify-between p-1">
-                  <span>Material Charges</span>
-                  <span>{formatCurrency(Number(data.materialCharges ?? calc.materialCharges ?? 0))}</span>
-                </div>
+                {/* 1. Render Dynamic Additional Charges (if any exist) */}
+                {data.additionalCharges && data.additionalCharges.length > 0 && (
+                  data.additionalCharges.map((charge, index) => (
+                    <div key={`dynamic-charge-${index}`} className="flex justify-between p-1">
+                      <span>{charge.name}</span>
+                      <span>{formatCurrency(Number(charge.amount ?? 0))}</span>
+                    </div>
+                  ))
+                )}
+
+                {/* 2. Legacy Fallback: ONLY render if dynamic array is empty AND the legacy monetary value is strictly greater than 0 */}
+                {(!data.additionalCharges || data.additionalCharges.length === 0) && (
+                  <>
+                    {Number(data.machineryCharges) > 0 && (
+                      <div className="flex justify-between p-1">
+                        <span>Machinery Charges</span>
+                        <span>{formatCurrency(Number(data.machineryCharges))}</span>
+                      </div>
+                    )}
+                    {Number(data.materialCharges) > 0 && (
+                      <div className="flex justify-between p-1">
+                        <span>Material Charges</span>
+                        <span>{formatCurrency(Number(data.materialCharges))}</span>
+                      </div>
+                    )}
+                  </>
+                )}
 
                 <div className="flex justify-between p-1 font-normal">
                   <span>Total</span>

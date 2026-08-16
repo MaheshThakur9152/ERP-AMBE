@@ -78,6 +78,11 @@ const convertRecordToInvoiceData = (inv: InvoiceRecord): InvoiceData => {
     }
   }
 
+  const additionalCharges = inv.payload?.additionalCharges || (inv as any).additionalCharges || (inv as any).additional_charges || [
+    { name: 'Machinery Charges', amount: machineryCharges },
+    { name: 'Material Charges', amount: materialCharges },
+  ];
+
   if (inv.payload && inv.payload.company && inv.payload.company.name) {
     return {
       ...inv.payload,
@@ -88,8 +93,9 @@ const convertRecordToInvoiceData = (inv: InvoiceRecord): InvoiceData => {
       },
       isMaterial: inv.is_material || inv.payload?.isMaterial || false,
       mgmtPercent,
-      machineryCharges,
-      materialCharges,
+      additionalCharges,
+      machineryCharges: inv.payload.machineryCharges ?? (inv as any).machinery_charges ?? (inv as any).machineryCharges ?? machineryCharges,
+      materialCharges: inv.payload.materialCharges ?? (inv as any).material_charges ?? (inv as any).materialCharges ?? materialCharges,
       delivery: inv.payload?.delivery || {},
     };
   }
@@ -102,8 +108,9 @@ const convertRecordToInvoiceData = (inv: InvoiceRecord): InvoiceData => {
           ...parsed,
           isMaterial: inv.is_material || parsed.isMaterial || false,
           mgmtPercent: Number(parsed.mgmtPercent ?? mgmtPercent),
-          machineryCharges: Number(parsed.machineryCharges || machineryCharges),
-          materialCharges: Number(parsed.materialCharges || materialCharges),
+          additionalCharges: parsed.additionalCharges || additionalCharges,
+          machineryCharges: Number(parsed.machineryCharges ?? machineryCharges),
+          materialCharges: Number(parsed.materialCharges ?? materialCharges),
           delivery: parsed.delivery || {},
         };
       }
@@ -192,8 +199,9 @@ const convertRecordToInvoiceData = (inv: InvoiceRecord): InvoiceData => {
       },
     ],
     mgmtPercent: Number((inv as any).mgmt_percent ?? (inv as any).mgmtPercent ?? (inv as any).management_fee_percent ?? site?.management_fee_percent ?? site?.mgmt_percent ?? 5),
-    machineryCharges: Number((inv as any).machinery_charges ?? (inv as any).machineryCharges ?? 0),
-    materialCharges: Number((inv as any).material_charges ?? (inv as any).materialCharges ?? 0),
+    additionalCharges,
+    machineryCharges,
+    materialCharges,
     cgstPercent: 9,
     sgstPercent: 9,
     terms: formattedTerms,

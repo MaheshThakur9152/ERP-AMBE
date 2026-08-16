@@ -305,6 +305,63 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           />
         </div>
       </div>
+
+      {/* Dynamic Additional Charges */}
+      <div className="pt-3 border-t border-gray-200 text-xs space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="block text-[11px] text-gray-700 font-semibold">Additional Charges</label>
+          <button
+            type="button"
+            onClick={() => {
+              const current = data.additionalCharges || [];
+              onChange({
+                ...data,
+                additionalCharges: [...current, { name: '', amount: 0 }],
+              });
+            }}
+            className="text-[11px] text-teal-600 hover:text-teal-800 font-bold"
+          >
+            + Add Charge Field
+          </button>
+        </div>
+        {(data.additionalCharges || []).map((ch, idx) => (
+          <div key={idx} className="flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="Charge Name (e.g. Machinery Charges)"
+              value={ch.name}
+              onChange={(e) => {
+                const current = [...(data.additionalCharges || [])];
+                current[idx] = { ...current[idx], name: e.target.value };
+                onChange({ ...data, additionalCharges: current });
+              }}
+              className="flex-1 bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900"
+            />
+            <input
+              type="number"
+              step="0.01"
+              placeholder="0"
+              value={ch.amount === 0 ? '' : ch.amount}
+              onChange={(e) => {
+                const current = [...(data.additionalCharges || [])];
+                current[idx] = { ...current[idx], amount: e.target.value === '' ? 0 : Number(e.target.value) };
+                onChange({ ...data, additionalCharges: current });
+              }}
+              className="w-28 bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 font-mono text-right"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const current = (data.additionalCharges || []).filter((_, i) => i !== idx);
+                onChange({ ...data, additionalCharges: current });
+              }}
+              className="text-gray-400 hover:text-red-600 p-1"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };

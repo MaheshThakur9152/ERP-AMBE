@@ -97,8 +97,7 @@ export const pdfService = {
       invoiceData.mgmtPercent ?? 5,
       invoiceData.cgstPercent ?? 9,
       invoiceData.sgstPercent ?? 9,
-      invoiceData.machineryCharges || 0,
-      invoiceData.materialCharges || 0
+      invoiceData.additionalCharges || []
     );
 
     const isBw = colorMode === 'bw';
@@ -264,14 +263,15 @@ export const pdfService = {
                   <span>Management charges @ ${calc.mgmtChargesPercent}%</span>
                   <span>${formatCurrency(calc.mgmtChargesAmount)}</span>
                 </div>
+                ${(calc.additionalCharges || [])
+                  .map(
+                    (charge) => `
                 <div style="display: flex; justify-content: space-between; padding: 4px 8px; border-bottom: 1px solid #000;">
-                  <span>Machinery Charges</span>
-                  <span>${formatCurrency(Number(invoiceData.machineryCharges || 0))}</span>
-                </div>
-                <div style="display: flex; justify-content: space-between; padding: 4px 8px; border-bottom: 1px solid #000;">
-                  <span>Material Charges</span>
-                  <span>${formatCurrency(Number(invoiceData.materialCharges || 0))}</span>
-                </div>
+                  <span>${charge.name}</span>
+                  <span>${formatCurrency(Number(charge.amount || 0))}</span>
+                </div>`
+                  )
+                  .join('')}
                 <div style="display: flex; justify-content: space-between; padding: 4px 8px; border-bottom: 1px solid #000;">
                   <span>Total</span>
                   <span>${formatCurrency(calc.totalBeforeTax)}</span>

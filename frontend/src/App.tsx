@@ -12,6 +12,7 @@ import { SmartGeneratorPage } from '@/pages/SmartGeneratorPage';
 import { PayrollPage } from '@/pages/PayrollPage';
 import { PayslipPage } from '@/pages/PayslipPage';
 import { AdvancesPage } from '@/pages/AdvancesPage';
+import { DeploymentsPage } from '@/pages/DeploymentsPage';
 import { StaffPage } from '@/pages/StaffPage';
 import { AttendancePage } from '@/pages/AttendancePage';
 import { EmployeeDocuments } from '@/pages/EmployeeDocuments';
@@ -44,8 +45,10 @@ export const App: React.FC = () => {
               <Route path="/payroll" element={<PayrollPage />} />
               <Route path="/payslips" element={<PayslipPage />} />
               <Route path="/advances" element={<AdvancesPage />} />
+              <Route path="/deployments" element={<DeploymentsPage />} />
               <Route path="/employees" element={<StaffPage />} />
               <Route path="/photos" element={<CompanyProfilesPage />} />
+              <Route path="/entities" element={<CompanyProfilesPage />} />
               <Route path="/settings" element={<CompanyProfilesPage />} />
             </Route>
           </Route>

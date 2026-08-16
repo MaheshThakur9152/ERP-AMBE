@@ -26,6 +26,12 @@ export interface InvoiceRecord {
   dispatched_through?: string;
   destination?: string;
   terms_of_delivery?: string;
+  machinery_charges?: number;
+  machineryCharges?: number;
+  material_charges?: number;
+  materialCharges?: number;
+  additional_charges?: any[];
+  additionalCharges?: any[];
   is_material?: boolean;
   sites?: {
 

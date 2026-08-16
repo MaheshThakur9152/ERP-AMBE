@@ -9,6 +9,11 @@ export const rateCardSchema = z.object({
   persons: z.number().optional().default(1),
 });
 
+export const additionalChargeSchema = z.object({
+  name: z.string().min(1, 'Charge name required'),
+  amount: z.number().min(0, 'Amount must be positive'),
+});
+
 export const siteSchema = z.object({
   id: z.string().optional(),
   company_id: z.string().optional(),
@@ -25,10 +30,15 @@ export const siteSchema = z.object({
   mgmtPercent: z.number().optional().default(5),
   defaultMachineryCharges: z.number().optional().default(0),
   defaultMaterialCharges: z.number().optional().default(0),
+  defaultAdditionalCharges: z.array(additionalChargeSchema).optional().default([
+    { name: 'Machinery Charges', amount: 0 },
+    { name: 'Material Charges', amount: 0 },
+  ]),
   status: z.enum(['Active', 'Inactive']).default('Active'),
   rateCards: z.array(rateCardSchema).min(1, 'At least one rate card item is required'),
 });
 
+export type AdditionalCharge = z.infer<typeof additionalChargeSchema>;
 export type RateCardItem = z.infer<typeof rateCardSchema>;
 export type SiteFormData = z.infer<typeof siteSchema>;
 
@@ -41,4 +51,5 @@ export interface Site extends SiteFormData {
   management_fee_percent?: number;
   default_machinery_charges?: number;
   default_material_charges?: number;
+  default_additional_charges?: AdditionalCharge[];
 }

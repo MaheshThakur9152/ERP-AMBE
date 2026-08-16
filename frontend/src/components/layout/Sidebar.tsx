@@ -7,6 +7,7 @@ import {
   Users,
   MapPin,
   Camera,
+  Building2,
   BookOpen,
   ShieldCheck,
   Phone,
@@ -65,20 +66,7 @@ export const Sidebar: React.FC = () => {
                   }`
                 }
               >
-                Tax Invoices
-              </NavLink>
-
-              <NavLink
-                to="/smart-generator"
-                className={({ isActive }) =>
-                  `w-full flex gap-3 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
-                    isActive
-                      ? 'bg-[#20B2AA] text-white shadow-md'
-                      : 'hover:bg-white/5 text-gray-300'
-                  }`
-                }
-              >
-                Bill Generator
+                Invoice Hub
               </NavLink>
             </div>
           )}
@@ -162,6 +150,18 @@ export const Sidebar: React.FC = () => {
               >
                 Advances
               </NavLink>
+              <NavLink
+                to="/deployments"
+                className={({ isActive }) =>
+                  `w-full flex gap-3 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                    isActive
+                      ? 'bg-[#20B2AA] text-white shadow-md'
+                      : 'hover:bg-white/5 text-gray-300'
+                  }`
+                }
+              >
+                Deployments
+              </NavLink>
             </div>
           )}
         </div>
@@ -180,9 +180,9 @@ export const Sidebar: React.FC = () => {
           <MapPin size={18} /> <span>Sites</span>
         </NavLink>
 
-        {/* Photos */}
+        {/* Entities */}
         <NavLink
-          to="/photos"
+          to="/entities"
           className={({ isActive }) =>
             `w-full flex gap-3 px-4 py-3 rounded-lg font-medium transition-colors ${
               isActive
@@ -191,7 +191,7 @@ export const Sidebar: React.FC = () => {
             }`
           }
         >
-          <Camera size={18} /> <span>Photos</span>
+          <Building2 size={18} /> <span>Entities</span>
         </NavLink>
 
         {/* Device History */}

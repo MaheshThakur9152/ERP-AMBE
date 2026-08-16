@@ -28,6 +28,8 @@ export interface Site {
   defaultMachineryCharges?: number;
   default_material_charges?: number;
   defaultMaterialCharges?: number;
+  default_additional_charges?: { name: string; amount: number }[];
+  defaultAdditionalCharges?: { name: string; amount: number }[];
   createdAt?: string;
   created_at?: string;
   updated_at?: string;
