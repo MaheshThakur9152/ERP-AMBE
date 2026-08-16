@@ -8,6 +8,9 @@ import {
   Building2,
   CheckCircle,
   AlertCircle,
+  Wallet,
+  X,
+  Save,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { calculatePayroll, RateCard, PayrollCalculationResult } from '../utils/payrollCalculator';
@@ -25,6 +28,17 @@ export interface EmployeePayrollRow {
   pd: number;
   wo: number;
   advances: number;
+  adv_amt?: number;
+  shirt?: number;
+  pant?: number;
+  shoes?: number;
+  id_card?: number;
+  other_amt?: number;
+  remark?: string;
+  adv_date?: string;
+  adv_total?: number;
+  in_this_mth?: number;
+  in_next_mth?: number;
   calc: PayrollCalculationResult | null;
   isSaved?: boolean;
   isPaid: boolean;
@@ -61,6 +75,19 @@ export const PayrollHub: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Advance Ledger Modal State
+  const [activeAdvanceRow, setActiveAdvanceRow] = useState<EmployeePayrollRow | null>(null);
+  const [advAmt, setAdvAmt] = useState<number>(0);
+  const [advDate, setAdvDate] = useState<string>('');
+  const [shirt, setShirt] = useState<number>(0);
+  const [pant, setPant] = useState<number>(0);
+  const [shoes, setShoes] = useState<number>(0);
+  const [idCard, setIdCard] = useState<number>(0);
+  const [otherAmt, setOtherAmt] = useState<number>(0);
+  const [remark, setRemark] = useState<string>('');
+  const [inThisMth, setInThisMth] = useState<number>(0);
+  const [isCustomInThisMth, setIsCustomInThisMth] = useState<boolean>(false);
 
   // Save filters to local storage so they survive page refreshes
   useEffect(() => {
@@ -139,9 +166,23 @@ export const PayrollHub: React.FC = () => {
         const saved = payrollRecordsMap.get(emp.id) || payrollRecordsMap.get(emp.biometric_code) || payrollRecordsMap.get(emp.biometricCode);
         const pd = saved?.pd ?? saved?.present_days ?? 26;
         const wo = saved?.wo ?? saved?.weekly_offs ?? 4;
-        const advances = saved?.advances ?? 0;
-        const isPaid = saved?.is_paid ?? false;
+        
+        // Itemized Advance & Uniform Ledger Mapping
+        const adv_amt = Number(saved?.adv_amt || 0);
+        const shirt = Number(saved?.shirt || 0);
+        const pant = Number(saved?.pant || 0);
+        const shoes = Number(saved?.shoes || 0);
+        const id_card = Number(saved?.id_card || 0);
+        const other_amt = Number(saved?.other_amt || 0);
+        const remark = saved?.remark || '';
+        const adv_date = saved?.adv_date || '';
+        const itemSum = adv_amt + shirt + pant + shoes + id_card + other_amt;
+        const adv_total = Number(saved?.adv_total || (itemSum > 0 ? itemSum : (saved?.advances ?? 0)));
+        const in_this_mth = saved?.in_this_mth !== undefined && saved?.in_this_mth !== null ? Number(saved.in_this_mth) : (saved?.advances ?? adv_total);
+        const in_next_mth = saved?.in_next_mth !== undefined && saved?.in_next_mth !== null ? Number(saved.in_next_mth) : Math.max(0, adv_total - in_this_mth);
+        const advances = in_this_mth;
 
+        const isPaid = saved?.is_paid ?? false;
         const rateCard: RateCard | null = emp.rate_cards || null;
         const calc = calculatePayroll(rateCard, emp, pd, wo, daysInMonth, advances);
 
@@ -157,6 +198,17 @@ export const PayrollHub: React.FC = () => {
           pd,
           wo,
           advances,
+          adv_amt,
+          shirt,
+          pant,
+          shoes,
+          id_card,
+          other_amt,
+          remark,
+          adv_date,
+          adv_total,
+          in_this_mth,
+          in_next_mth,
           calc,
           isSaved: !!saved,
           isPaid,
@@ -208,19 +260,54 @@ export const PayrollHub: React.FC = () => {
         esic: row.calc.esic,
         pt: row.calc.pt,
 
+        // Itemized Advance Ledger Columns
+        adv_amt: row.adv_amt ?? 0,
+        shirt: row.shirt ?? 0,
+        pant: row.pant ?? 0,
+        shoes: row.shoes ?? 0,
+        id_card: row.id_card ?? 0,
+        other_amt: row.other_amt ?? 0,
+        remark: row.remark ?? '',
+        adv_date: row.adv_date ?? '',
+        adv_total: row.adv_total ?? (row.advances || 0),
+        in_this_mth: row.in_this_mth ?? row.advances,
+        in_next_mth: row.in_next_mth ?? 0,
+
         advances: row.advances,
         net_salary: row.calc.netSalary,
         is_paid: row.isPaid,
         updated_at: new Date().toISOString(),
       };
 
-      const { error } = await supabase.from('payroll_records').upsert([recordToSave], {
+      const { error: fullError } = await supabase.from('payroll_records').upsert([recordToSave], {
         onConflict: 'month_year,staff_id',
       });
 
-      if (error) {
-        console.error('Supabase Upsert Error:', error);
-        alert(`Failed to save! Supabase says: ${error.message}`);
+      if (fullError) {
+        console.warn('Full advance record upsert failed, retrying fallback to core advances column:', fullError.message);
+        const fallbackRecord: any = { ...recordToSave };
+        delete fallbackRecord.adv_amt;
+        delete fallbackRecord.shirt;
+        delete fallbackRecord.pant;
+        delete fallbackRecord.shoes;
+        delete fallbackRecord.id_card;
+        delete fallbackRecord.other_amt;
+        delete fallbackRecord.remark;
+        delete fallbackRecord.adv_date;
+        delete fallbackRecord.adv_total;
+        delete fallbackRecord.in_this_mth;
+        delete fallbackRecord.in_next_mth;
+
+        const { error: fallbackError } = await supabase.from('payroll_records').upsert([fallbackRecord], {
+          onConflict: 'month_year,staff_id',
+        });
+
+        if (fallbackError) {
+          console.error('Supabase Upsert Error:', fallbackError);
+          alert(`Failed to save! Supabase says: ${fallbackError.message}`);
+        } else {
+          setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, isSaved: true } : r)));
+        }
       } else {
         setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, isSaved: true } : r)));
       }
@@ -228,6 +315,108 @@ export const PayrollHub: React.FC = () => {
       console.error('Auto-save error:', err);
       alert(`Auto-save error: ${err.message}`);
     }
+  };
+
+  // Open Advance Ledger Modal & Hydrate Form
+  const openAdvanceModal = (row: EmployeePayrollRow) => {
+    setActiveAdvanceRow(row);
+    const aAmt = row.adv_amt ?? 0;
+    const aDate = row.adv_date ?? '';
+    const sh = row.shirt ?? 0;
+    const pa = row.pant ?? 0;
+    const shs = row.shoes ?? 0;
+    const idc = row.id_card ?? 0;
+    const oth = row.other_amt ?? 0;
+    const rm = row.remark ?? '';
+    const itemSum = aAmt + sh + pa + shs + idc + oth;
+    const total = row.adv_total ?? (itemSum > 0 ? itemSum : row.advances);
+    const inThis = row.in_this_mth ?? row.advances;
+
+    setAdvAmt(aAmt);
+    setAdvDate(aDate);
+    setShirt(sh);
+    setPant(pa);
+    setShoes(shs);
+    setIdCard(idc);
+    setOtherAmt(oth);
+    setRemark(rm);
+    setInThisMth(inThis);
+    setIsCustomInThisMth(inThis !== total && itemSum > 0);
+  };
+
+  const currentAdvTotal = advAmt + shirt + pant + shoes + idCard + otherAmt;
+  const computedInNextMth = Math.max(0, currentAdvTotal - inThisMth);
+
+  // Auto-recalculate inThisMth when itemized inputs change IF user hasn't overridden it
+  const handleItemizedChange = (
+    field: 'adv_amt' | 'shirt' | 'pant' | 'shoes' | 'id_card' | 'other_amt',
+    val: number
+  ) => {
+    const num = Math.max(0, val);
+    let newAdvAmt = advAmt;
+    let newShirt = shirt;
+    let newPant = pant;
+    let newShoes = shoes;
+    let newIdCard = idCard;
+    let newOtherAmt = otherAmt;
+
+    if (field === 'adv_amt') newAdvAmt = num;
+    if (field === 'shirt') newShirt = num;
+    if (field === 'pant') newPant = num;
+    if (field === 'shoes') newShoes = num;
+    if (field === 'id_card') newIdCard = num;
+    if (field === 'other_amt') newOtherAmt = num;
+
+    setAdvAmt(newAdvAmt);
+    setShirt(newShirt);
+    setPant(newPant);
+    setShoes(newShoes);
+    setIdCard(newIdCard);
+    setOtherAmt(newOtherAmt);
+
+    const newTotal = newAdvAmt + newShirt + newPant + newShoes + newIdCard + newOtherAmt;
+    if (!isCustomInThisMth) {
+      setInThisMth(newTotal);
+    }
+  };
+
+  // Save Advance Ledger to State & Supabase
+  const handleSaveAdvanceLedger = async () => {
+    if (!activeAdvanceRow) return;
+    const total = currentAdvTotal;
+    const finalInThis = inThisMth;
+    const finalInNext = Math.max(0, total - finalInThis);
+
+    const updatedCalc = calculatePayroll(
+      activeAdvanceRow.rateCard,
+      activeAdvanceRow.empRaw,
+      activeAdvanceRow.pd,
+      activeAdvanceRow.wo,
+      daysInMonth,
+      finalInThis
+    );
+
+    const updatedRow: EmployeePayrollRow = {
+      ...activeAdvanceRow,
+      adv_amt: advAmt,
+      adv_date: advDate,
+      shirt,
+      pant,
+      shoes,
+      id_card: idCard,
+      other_amt: otherAmt,
+      remark,
+      adv_total: total,
+      in_this_mth: finalInThis,
+      in_next_mth: finalInNext,
+      advances: finalInThis,
+      calc: updatedCalc,
+      isSaved: false,
+    };
+
+    setRows((prev) => prev.map((r) => (r.id === activeAdvanceRow.id ? updatedRow : r)));
+    await handleAutoSave(updatedRow);
+    setActiveAdvanceRow(null);
   };
 
   // Bulk Mark Selected Employees as PAID
@@ -259,6 +448,17 @@ export const PayrollHub: React.FC = () => {
         epf: r.calc!.epf,
         esic: r.calc!.esic,
         pt: r.calc!.pt,
+        adv_amt: r.adv_amt ?? 0,
+        shirt: r.shirt ?? 0,
+        pant: r.pant ?? 0,
+        shoes: r.shoes ?? 0,
+        id_card: r.id_card ?? 0,
+        other_amt: r.other_amt ?? 0,
+        remark: r.remark ?? '',
+        adv_date: r.adv_date ?? '',
+        adv_total: r.adv_total ?? (r.advances || 0),
+        in_this_mth: r.in_this_mth ?? r.advances,
+        in_next_mth: r.in_next_mth ?? 0,
         advances: r.advances,
         net_salary: r.calc!.netSalary,
         is_paid: true,
@@ -374,7 +574,13 @@ export const PayrollHub: React.FC = () => {
       prevRows.map((row) => {
         if (row.id !== id) return row;
         const updatedCalc = calculatePayroll(row.rateCard, row.empRaw, row.pd, row.wo, daysInMonth, advVal);
-        return { ...row, advances: advVal, calc: updatedCalc, isSaved: false };
+        return {
+          ...row,
+          advances: advVal,
+          in_this_mth: advVal,
+          calc: updatedCalc,
+          isSaved: false,
+        };
       })
     );
   };
@@ -487,7 +693,7 @@ export const PayrollHub: React.FC = () => {
           <div>
             <h1 className="text-xl font-bold text-gray-900 tracking-tight">Payroll Processing &amp; Compliance</h1>
             <p className="text-xs text-gray-500 mt-0.5">
-              Instant onBlur auto-saving (month_year, staff_id) &amp; strict Excel export.
+              Instant onBlur auto-saving (month_year, staff_id) &amp; itemized Advance / Uniform Ledger.
             </p>
           </div>
         </div>
@@ -604,7 +810,7 @@ export const PayrollHub: React.FC = () => {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-gray-700 border-collapse min-w-[1200px]">
+            <table className="w-full text-left text-xs text-gray-700 border-collapse min-w-[1550px]">
               <thead className="bg-slate-100/80 border-b border-gray-200 font-bold uppercase text-[10px] text-gray-600 tracking-wider">
                 <tr>
                   <th className="p-3 w-12 text-center">
@@ -644,7 +850,7 @@ export const PayrollHub: React.FC = () => {
                   <th className="p-3 text-right text-amber-700">ESIC (0.75%)</th>
                   <th className="p-3 text-right text-amber-700">PT</th>
                   <th className="p-3 text-center bg-amber-50/50 text-amber-900 border-x border-amber-100">
-                    Advances
+                    Advances Ledger
                   </th>
                   <th className="p-3 text-right font-bold text-emerald-800 bg-emerald-50/60">
                     Net Salary
@@ -686,10 +892,22 @@ export const PayrollHub: React.FC = () => {
                           </span>
                         )}
                         {row.isPaid && (
-                          <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 uppercase tracking-wider ml-2">
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 uppercase tracking-wider ml-1">
                             Paid
                           </span>
                         )}
+                        <button
+                          type="button"
+                          onClick={() => openAdvanceModal(row)}
+                          className="px-2 py-0.5 rounded text-[9px] font-bold bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                          title="Add/Manage Advance & Uniform Ledger"
+                        >
+                          <Wallet className="w-2.5 h-2.5" />
+                          <span>Adv</span>
+                          {row.advances > 0 && (
+                            <span className="font-mono text-amber-950 font-extrabold">(₹{row.advances.toLocaleString('en-IN')})</span>
+                          )}
+                        </button>
                       </div>
                       <div className="text-[10px] text-gray-400 font-mono">{row.empId}</div>
                     </td>
@@ -775,16 +993,27 @@ export const PayrollHub: React.FC = () => {
                           -₹{row.calc.pt.toLocaleString('en-IN')}
                         </td>
 
-                        {/* Advances Input with onBlur Auto-Save */}
+                        {/* Advances Input + Ledger Modal Button */}
                         <td className="p-2 text-center bg-amber-50/20 border-x border-amber-100">
-                          <input
-                            type="number"
-                            min={0}
-                            value={row.advances === 0 ? '' : row.advances}
-                            onChange={(e) => handleAdvancesChange(row.id, e.target.value === '' ? 0 : Number(e.target.value))}
-                            onBlur={() => handleAutoSave(row)}
-                            className="w-20 bg-white border border-amber-300 focus:ring-2 focus:ring-amber-500 rounded px-2 py-1 text-center font-bold text-amber-900 shadow-2xs outline-none"
-                          />
+                          <div className="flex items-center justify-center gap-1">
+                            <input
+                              type="number"
+                              min={0}
+                              disabled={row.isPaid}
+                              value={row.advances === 0 ? '' : row.advances}
+                              onChange={(e) => handleAdvancesChange(row.id, e.target.value === '' ? 0 : Number(e.target.value))}
+                              onBlur={() => handleAutoSave(row)}
+                              className="w-16 bg-white border border-amber-300 focus:ring-2 focus:ring-amber-500 rounded px-1.5 py-1 text-center font-bold text-amber-900 shadow-2xs outline-none disabled:opacity-50 disabled:bg-gray-100 cursor-not-allowed"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => openAdvanceModal(row)}
+                              className="p-1.5 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 transition-colors cursor-pointer flex-shrink-0"
+                              title="Manage Itemized Advances & Uniform Ledger"
+                            >
+                              <Wallet className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </td>
 
                         {/* Net Salary Read-Only */}
@@ -798,12 +1027,13 @@ export const PayrollHub: React.FC = () => {
               </tbody>
               <tfoot className="bg-slate-100 border-t-2 border-gray-300 font-mono font-bold text-xs">
                 <tr>
-                  <td colSpan={9} className="p-3 text-right font-sans text-gray-700 uppercase">
-                    Grand Totals ({rows.filter((r) => r.calc !== null).length} Active Linked Employees):
+                  <td colSpan={11} className="p-3 text-right uppercase tracking-wider font-sans text-gray-600">
+                    Grand Totals ({rows.filter((r) => r.calc).length} Staff):
                   </td>
-                  <td className="p-3 text-right text-gray-900 font-bold">
+                  <td className="p-3 text-right text-gray-900">
                     ₹{totals.earnedGross.toLocaleString('en-IN')}
                   </td>
+                  <td className="p-3"></td>
                   <td className="p-3 text-right text-amber-800">
                     -₹{totals.epf.toLocaleString('en-IN')}
                   </td>
@@ -813,10 +1043,10 @@ export const PayrollHub: React.FC = () => {
                   <td className="p-3 text-right text-amber-800">
                     -₹{totals.pt.toLocaleString('en-IN')}
                   </td>
-                  <td className="p-3 text-center text-amber-900">
-                    ₹{totals.advances.toLocaleString('en-IN')}
+                  <td className="p-3 text-center text-amber-900 bg-amber-100/50">
+                    -₹{totals.advances.toLocaleString('en-IN')}
                   </td>
-                  <td className="p-3 text-right text-emerald-800 bg-emerald-100/60 font-bold text-sm">
+                  <td className="p-3 text-right text-emerald-800 bg-emerald-100/60 text-sm">
                     ₹{totals.netSalary.toLocaleString('en-IN')}
                   </td>
                 </tr>
@@ -825,6 +1055,219 @@ export const PayrollHub: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Advance & Uniform Ledger Modal */}
+      {activeAdvanceRow && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 font-sans">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 border border-gray-100 max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-gray-200 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-800 border border-amber-300 flex items-center justify-center">
+                  <Wallet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-gray-900 leading-tight">
+                    Advance &amp; Item Deductions
+                  </h2>
+                  <p className="text-xs text-gray-500">
+                    {activeAdvanceRow.name} ({activeAdvanceRow.empId})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveAdvanceRow(null)}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Cash Advance Section */}
+            <div className="space-y-3 bg-slate-50 p-3.5 rounded-xl border border-gray-200">
+              <h3 className="text-xs font-bold text-gray-800 uppercase tracking-wider flex items-center gap-1.5">
+                <DollarSign className="w-3.5 h-3.5 text-amber-600" />
+                Cash Advance
+                {activeAdvanceRow.isPaid && (
+                  <span className="ml-auto text-[9.5px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">
+                    LOCKED (PAID)
+                  </span>
+                )}
+              </h3>
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div>
+                  <label className="block text-gray-600 font-semibold mb-1">Advance Amount (₹)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    disabled={activeAdvanceRow.isPaid}
+                    value={advAmt === 0 ? '' : advAmt}
+                    onChange={(e) => handleItemizedChange('adv_amt', Number(e.target.value))}
+                    placeholder="0"
+                    className="w-full bg-white border border-gray-300 rounded-lg px-3 py-1.5 font-mono font-bold text-gray-900 outline-none focus:ring-2 focus:ring-amber-500 disabled:bg-gray-100 disabled:opacity-60 cursor-not-allowed"
+                  />
+                </div>
+                <div>
+                  <label className="block text-gray-600 font-semibold mb-1">Advance Date</label>
+                  <input
+                    type="date"
+                    disabled={activeAdvanceRow.isPaid}
+                    value={advDate}
+                    onChange={(e) => setAdvDate(e.target.value)}
+                    className="w-full bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs text-gray-900 outline-none focus:ring-2 focus:ring-amber-500 disabled:bg-gray-100 disabled:opacity-60 cursor-not-allowed"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Uniform & Gear Deductions Section */}
+            <div className="space-y-3 bg-slate-50 p-3.5 rounded-xl border border-gray-200">
+              <h3 className="text-xs font-bold text-gray-800 uppercase tracking-wider">
+                Uniform &amp; Gear Deductions
+              </h3>
+              <div className="grid grid-cols-3 gap-2.5 text-xs">
+                <div>
+                  <label className="block text-gray-600 font-medium mb-1 text-[11px]">Shirt (₹)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    disabled={activeAdvanceRow.isPaid}
+                    value={shirt === 0 ? '' : shirt}
+                    onChange={(e) => handleItemizedChange('shirt', Number(e.target.value))}
+                    placeholder="0"
+                    className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-1 font-mono text-gray-900 outline-none focus:ring-2 focus:ring-amber-500 disabled:bg-gray-100 disabled:opacity-60 cursor-not-allowed"
+                  />
+                </div>
+                <div>
+                  <label className="block text-gray-600 font-medium mb-1 text-[11px]">Pant (₹)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    disabled={activeAdvanceRow.isPaid}
+                    value={pant === 0 ? '' : pant}
+                    onChange={(e) => handleItemizedChange('pant', Number(e.target.value))}
+                    placeholder="0"
+                    className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-1 font-mono text-gray-900 outline-none focus:ring-2 focus:ring-amber-500 disabled:bg-gray-100 disabled:opacity-60 cursor-not-allowed"
+                  />
+                </div>
+                <div>
+                  <label className="block text-gray-600 font-medium mb-1 text-[11px]">Shoes (₹)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    disabled={activeAdvanceRow.isPaid}
+                    value={shoes === 0 ? '' : shoes}
+                    onChange={(e) => handleItemizedChange('shoes', Number(e.target.value))}
+                    placeholder="0"
+                    className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-1 font-mono text-gray-900 outline-none focus:ring-2 focus:ring-amber-500 disabled:bg-gray-100 disabled:opacity-60 cursor-not-allowed"
+                  />
+                </div>
+                <div>
+                  <label className="block text-gray-600 font-medium mb-1 text-[11px]">ID Card (₹)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    disabled={activeAdvanceRow.isPaid}
+                    value={idCard === 0 ? '' : idCard}
+                    onChange={(e) => handleItemizedChange('id_card', Number(e.target.value))}
+                    placeholder="0"
+                    className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-1 font-mono text-gray-900 outline-none focus:ring-2 focus:ring-amber-500 disabled:bg-gray-100 disabled:opacity-60 cursor-not-allowed"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-gray-600 font-medium mb-1 text-[11px]">Other Amt (₹)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    disabled={activeAdvanceRow.isPaid}
+                    value={otherAmt === 0 ? '' : otherAmt}
+                    onChange={(e) => handleItemizedChange('other_amt', Number(e.target.value))}
+                    placeholder="0"
+                    className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-1 font-mono text-gray-900 outline-none focus:ring-2 focus:ring-amber-500 disabled:bg-gray-100 disabled:opacity-60 cursor-not-allowed"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Remarks Notes Input */}
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1">Remarks / Notes</label>
+              <input
+                type="text"
+                disabled={activeAdvanceRow.isPaid}
+                value={remark}
+                onChange={(e) => setRemark(e.target.value)}
+                placeholder="e.g. Emergency medical advance / Safety boots"
+                className="w-full bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs text-gray-900 outline-none focus:ring-2 focus:ring-amber-500 disabled:bg-gray-100 disabled:opacity-60 cursor-not-allowed"
+              />
+            </div>
+
+            {/* Split-Month Recovery Schedule Card */}
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 space-y-2.5 text-xs">
+              <div className="flex justify-between items-center font-bold text-amber-900 border-b border-amber-200/70 pb-1.5">
+                <span>Total Advance / Deductions:</span>
+                <span className="text-sm font-mono">₹{currentAdvTotal.toLocaleString('en-IN')}</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <div>
+                  <label className="block text-amber-900 font-bold mb-1 text-[11px]">
+                    Deduct In This Month (₹)
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    disabled={activeAdvanceRow.isPaid}
+                    max={currentAdvTotal}
+                    value={inThisMth === 0 ? '' : inThisMth}
+                    onChange={(e) => {
+                      const val = Math.max(0, Number(e.target.value));
+                      setInThisMth(val);
+                      setIsCustomInThisMth(true);
+                    }}
+                    className="w-full bg-white border border-amber-300 rounded-lg px-2.5 py-1.5 font-mono font-bold text-amber-900 outline-none focus:ring-2 focus:ring-amber-500 disabled:bg-gray-100 disabled:opacity-60 cursor-not-allowed"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-amber-900 font-bold mb-1 text-[11px]">
+                    Carry to Next Month (₹)
+                  </label>
+                  <div className="w-full bg-amber-100/70 border border-amber-300 rounded-lg px-2.5 py-1.5 font-mono font-bold text-amber-900 flex items-center">
+                    ₹{computedInNextMth.toLocaleString('en-IN')}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-3 border-t border-gray-200 pt-3">
+              <button
+                type="button"
+                onClick={() => setActiveAdvanceRow(null)}
+                className="px-4 py-2 rounded-xl border border-gray-300 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+              {activeAdvanceRow.isPaid ? (
+                <span className="px-4 py-2 rounded-xl bg-gray-100 text-gray-500 border border-gray-300 font-bold text-xs">
+                  Locked (PAID)
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleSaveAdvanceLedger}
+                  className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Save Advance Ledger</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

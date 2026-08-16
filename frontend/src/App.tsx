@@ -10,6 +10,8 @@ import { SitesMasterPage } from '@/pages/SitesMasterPage';
 import { InvoiceHubPage } from '@/pages/InvoiceHubPage';
 import { SmartGeneratorPage } from '@/pages/SmartGeneratorPage';
 import { PayrollPage } from '@/pages/PayrollPage';
+import { PayslipPage } from '@/pages/PayslipPage';
+import { AdvancesPage } from '@/pages/AdvancesPage';
 import { StaffPage } from '@/pages/StaffPage';
 import { AttendancePage } from '@/pages/AttendancePage';
 import { EmployeeDocuments } from '@/pages/EmployeeDocuments';
@@ -40,6 +42,8 @@ export const App: React.FC = () => {
               <Route path="/invoice-vault" element={<InvoiceVault />} />
               <Route path="/attendance" element={<AttendancePage />} />
               <Route path="/payroll" element={<PayrollPage />} />
+              <Route path="/payslips" element={<PayslipPage />} />
+              <Route path="/advances" element={<AdvancesPage />} />
               <Route path="/employees" element={<StaffPage />} />
               <Route path="/photos" element={<CompanyProfilesPage />} />
               <Route path="/settings" element={<CompanyProfilesPage />} />

@@ -138,6 +138,30 @@ export const Sidebar: React.FC = () => {
               >
                 Payroll
               </NavLink>
+              <NavLink
+                to="/payslips"
+                className={({ isActive }) =>
+                  `w-full flex gap-3 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                    isActive
+                      ? 'bg-[#20B2AA] text-white shadow-md'
+                      : 'hover:bg-white/5 text-gray-300'
+                  }`
+                }
+              >
+                Payslips
+              </NavLink>
+              <NavLink
+                to="/advances"
+                className={({ isActive }) =>
+                  `w-full flex gap-3 px-4 py-2 rounded-lg text-xs font-semibold transition-colors ${
+                    isActive
+                      ? 'bg-[#20B2AA] text-white shadow-md'
+                      : 'hover:bg-white/5 text-gray-300'
+                  }`
+                }
+              >
+                Advances
+              </NavLink>
             </div>
           )}
         </div>
