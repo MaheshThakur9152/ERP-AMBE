@@ -20,6 +20,7 @@ import { InvoiceVault } from '@/pages/InvoiceVault';
 import { InvoiceTrackerPage } from '@/pages/InvoiceTrackerPage';
 import { MaterialsMasterPage } from '@/pages/MaterialsMasterPage';
 import { MaterialGeneratorPage } from '@/pages/MaterialGeneratorPage';
+import { SecurityCenter } from '@/pages/SecurityCenter';
 
 export const App: React.FC = () => {
   return (
@@ -51,7 +52,7 @@ export const App: React.FC = () => {
               <Route path="/employees" element={<StaffPage />} />
               <Route path="/photos" element={<CompanyProfilesPage />} />
               <Route path="/entities" element={<CompanyProfilesPage />} />
-              <Route path="/settings" element={<CompanyProfilesPage />} />
+              <Route path="/security-center" element={<SecurityCenter />} />
             </Route>
           </Route>
 

@@ -21,7 +21,7 @@ import {
 import { useAuth } from '@/features/auth/context/AuthContext';
 
 export const Sidebar: React.FC = () => {
-  const { signOut } = useAuth();
+  const { signOut, isSuperAdmin } = useAuth();
   const [invoicesExpanded, setInvoicesExpanded] = useState(true);
   const [officeEmployeeExpanded, setOfficeEmployeeExpanded] = useState(true);
 
@@ -209,19 +209,21 @@ export const Sidebar: React.FC = () => {
           <Building2 size={18} /> <span>Entities</span>
         </NavLink>
 
-        {/* Device History */}
-        <NavLink
-          to="/settings"
-          className={({ isActive }) =>
-            `w-full flex gap-3 px-4 py-3 rounded-lg font-medium transition-colors ${
-              isActive
-                ? 'bg-[#20B2AA] text-white shadow-md'
-                : 'hover:bg-white/5 text-gray-200'
-            }`
-          }
-        >
-          <Phone size={18} /> <span>Device History</span>
-        </NavLink>
+        {/* Security Center (SuperAdmin Only) */}
+        {isSuperAdmin && (
+          <NavLink
+            to="/security-center"
+            className={({ isActive }) =>
+              `w-full flex gap-3 px-4 py-3 rounded-lg font-semibold transition-colors items-center ${
+                isActive
+                  ? 'bg-amber-500 text-white shadow-md'
+                  : 'hover:bg-white/5 text-amber-300'
+              }`
+            }
+          >
+            <ShieldCheck size={18} /> <span>Security Center</span>
+          </NavLink>
+        )}
       </nav>
 
       {/* Footer Sign Out */}

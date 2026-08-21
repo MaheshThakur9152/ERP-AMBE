@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import authRoutes from './authRoutes';
+import adminRoutes from './adminRoutes';
 import companyRoutes from './companyRoutes';
 import excelRoutes from './excelRoutes';
 import invoiceRoutes from './invoiceRoutes';
@@ -12,6 +14,8 @@ router.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+router.use('/auth', authRoutes);
+router.use('/admin', adminRoutes);
 router.use('/companies', companyRoutes);
 router.use('/excel', excelRoutes);
 router.use('/invoices', invoiceRoutes);

@@ -308,4 +308,23 @@ export class InvoiceService {
 
     return true;
   }
+
+  /**
+   * Update is_locked status for an invoice
+   */
+  static async updateLockStatus(id: string, isLocked: boolean): Promise<InvoiceRecord> {
+    const { data, error } = await supabaseAdmin
+      .from('invoices')
+      .update({ is_locked: isLocked })
+      .eq('id', id)
+      .select('*, sites(*), companies(*)')
+      .single();
+
+    if (error) {
+      console.error('❌ Supabase update lock status error:', error.message);
+      throw new Error(`Lock status update failed: ${error.message}`);
+    }
+
+    return mapRowToInvoiceRecord(data);
+  }
 }

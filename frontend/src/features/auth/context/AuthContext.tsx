@@ -1,26 +1,30 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
-import { UserProfile } from '../types';
-import { fetchUserProfile } from '../api/authApi';
+import { UserProfile, UserRole } from '../types';
+import { loginApi, logoutApi, fetchMeApi, fetchUserProfile } from '../api/authApi';
 
 interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
   session: Session | null;
+  role: UserRole;
+  isSuperAdmin: boolean;
   loading: boolean;
+  login: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
-  loginAsAdmin: (customEmail?: string) => void;
+  loginAsAdmin: (customEmail?: string, customRole?: UserRole) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const DEMO_USER_KEY = 'facility_erp_demo_user';
+const ROLE_STORAGE_KEY = 'facility_erp_user_role';
 
-const createAdminUser = (email = 'admin@facility.com'): User => ({
-  id: 'admin-001-demo',
-  app_metadata: { provider: 'email', role: 'admin' },
-  user_metadata: { full_name: 'Administrator', role: 'admin' },
+const createMockUser = (email = 'ambe@ambe.local', role: UserRole = 'admin'): User => ({
+  id: 'user-001-demo',
+  app_metadata: { provider: 'email', role },
+  user_metadata: { full_name: email.split('@')[0], role },
   aud: 'authenticated',
   created_at: new Date().toISOString(),
   email,
@@ -29,99 +33,141 @@ const createAdminUser = (email = 'admin@facility.com'): User => ({
   updated_at: new Date().toISOString(),
 });
 
-const defaultAdminProfile: UserProfile = {
-  id: 'admin-001-demo',
-  email: 'admin@facility.com',
-  full_name: 'Administrator',
-  role: 'admin',
+const createMockProfile = (email = 'ambe@ambe.local', role: UserRole = 'admin'): UserProfile => ({
+  id: 'user-001-demo',
+  email,
+  full_name: email.split('@')[0],
+  role,
   phone: null,
   avatar_url: null,
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
-};
+});
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
+  const [role, setRole] = useState<UserRole>(() => {
+    return (localStorage.getItem(ROLE_STORAGE_KEY) as UserRole) || 'admin';
+  });
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
-    // Check local storage for demo admin session first or placeholder config
-    const savedDemoUser = localStorage.getItem(DEMO_USER_KEY);
-    const isPlaceholder = !import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL.includes('placeholder');
+    const initAuth = async () => {
+      // 1. Try backend HTTP-only cookie session check first (/api/auth/me)
+      const backendUser = await fetchMeApi();
+      if (backendUser) {
+        const userObj = createMockUser(backendUser.email, backendUser.role);
+        setUser(userObj);
+        setRole(backendUser.role);
+        localStorage.setItem(ROLE_STORAGE_KEY, backendUser.role);
+        setProfile(createMockProfile(backendUser.email, backendUser.role));
+        setLoading(false);
+        return;
+      }
 
-    if (savedDemoUser || isPlaceholder) {
-      const demoEmail = savedDemoUser || 'admin@facility.com';
-      setUser(createAdminUser(demoEmail));
-      setProfile(defaultAdminProfile);
-      setLoading(false);
-      return;
-    }
+      // 2. Check local storage saved user or demo fallback
+      const savedDemoUser = localStorage.getItem(DEMO_USER_KEY);
+      const savedRole = (localStorage.getItem(ROLE_STORAGE_KEY) as UserRole) || 'admin';
+      const isPlaceholder = !import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL.includes('placeholder');
 
-    // Get initial Supabase session with error fallback
-    supabase.auth
-      .getSession()
-      .then(({ data }) => {
+      if (savedDemoUser || isPlaceholder) {
+        const email = savedDemoUser || 'ambe@ambe.local';
+        setUser(createMockUser(email, savedRole));
+        setRole(savedRole);
+        setProfile(createMockProfile(email, savedRole));
+        setLoading(false);
+        return;
+      }
+
+      // 3. Fallback to Supabase JS Client session
+      try {
+        const { data } = await supabase.auth.getSession();
         if (data?.session?.user) {
           setSession(data.session);
           setUser(data.session.user);
-          fetchUserProfile(data.session.user.id)
-            .then(setProfile)
-            .catch(() => setProfile(defaultAdminProfile));
+          try {
+            const prof = await fetchUserProfile(data.session.user.id);
+            if (prof) {
+              setProfile(prof);
+              setRole(prof.role);
+              localStorage.setItem(ROLE_STORAGE_KEY, prof.role);
+            }
+          } catch {
+            setProfile(createMockProfile());
+          }
         } else {
-          setUser(createAdminUser());
-          setProfile(defaultAdminProfile);
+          setUser(createMockUser());
+          setProfile(createMockProfile());
         }
+      } catch (err) {
+        setUser(createMockUser());
+        setProfile(createMockProfile());
+      } finally {
         setLoading(false);
-      })
-      .catch((err) => {
-        console.warn('Supabase session fetch failed, falling back to demo admin:', err);
-        setUser(createAdminUser());
-        setProfile(defaultAdminProfile);
-        setLoading(false);
-      });
-
-    // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (localStorage.getItem(DEMO_USER_KEY) || isPlaceholder) return;
-      setSession(session);
-      setUser(session?.user ?? createAdminUser());
-      if (session?.user) {
-        try {
-          const prof = await fetchUserProfile(session.user.id);
-          setProfile(prof);
-        } catch {
-          setProfile(defaultAdminProfile);
-        }
-      } else {
-        setProfile(defaultAdminProfile);
       }
-      setLoading(false);
-    });
-
-    return () => {
-      subscription.unsubscribe();
     };
+
+    initAuth();
   }, []);
 
-  const loginAsAdmin = (customEmail?: string) => {
-    const email = customEmail || 'admin@facility.com';
+  const login = async (email: string, password: string) => {
+    setLoading(true);
+    try {
+      const res = await loginApi(email, password);
+      const authenticatedRole = res.user.role;
+
+      localStorage.setItem(DEMO_USER_KEY, res.user.email);
+      localStorage.setItem(ROLE_STORAGE_KEY, authenticatedRole);
+
+      setRole(authenticatedRole);
+      setUser(createMockUser(res.user.email, authenticatedRole));
+      setProfile(createMockProfile(res.user.email, authenticatedRole));
+    } catch (err: any) {
+      console.error('Login failed:', err?.message || err);
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loginAsAdmin = (customEmail?: string, customRole: UserRole = 'admin') => {
+    const email = customEmail || 'ambe@ambe.local';
     localStorage.setItem(DEMO_USER_KEY, email);
-    setUser(createAdminUser(email));
-    setProfile(defaultAdminProfile);
+    localStorage.setItem(ROLE_STORAGE_KEY, customRole);
+    setRole(customRole);
+    setUser(createMockUser(email, customRole));
+    setProfile(createMockProfile(email, customRole));
   };
 
   const signOut = async () => {
     localStorage.removeItem(DEMO_USER_KEY);
+    localStorage.removeItem(ROLE_STORAGE_KEY);
     setUser(null);
     setProfile(null);
     setSession(null);
-    await supabase.auth.signOut();
+    setRole('admin');
+    await logoutApi().catch(() => {});
+    await supabase.auth.signOut().catch(() => {});
   };
 
+  const isSuperAdmin = role === 'superadmin';
+
   return (
-    <AuthContext.Provider value={{ user, profile, session, loading, signOut, loginAsAdmin }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        profile,
+        session,
+        role,
+        isSuperAdmin,
+        loading,
+        login,
+        signOut,
+        loginAsAdmin,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
@@ -134,4 +180,3 @@ export const useAuth = (): AuthContextType => {
   }
   return context;
 };
-

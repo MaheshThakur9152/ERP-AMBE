@@ -26,6 +26,7 @@ export interface InvoiceRecord {
   certified_attendance_url?: string;
   certifiedAttendanceUrl?: string;
   previous_version_id?: string;
+  is_locked?: boolean;
   created_at?: string;
   createdAt?: string;
   challan_no?: string;

@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { InvoiceRecord } from '../types';
 import { fetchInvoicesApi, deleteInvoiceApi, createInvoiceApi } from '../api/invoiceApi';
+import { lockInvoiceApi } from '@/features/auth/api/authApi';
+import { useAuth } from '@/features/auth/context/AuthContext';
 import { toast, ToastContainer } from '@/components/ui/toast';
 import { supabase } from '@/lib/supabase';
 import {
@@ -22,6 +24,8 @@ import {
   FileCheck,
   GitMerge,
   FileCode,
+  Lock,
+  Unlock,
 } from 'lucide-react';
 import { formatCurrency, computeInvoiceCalculations } from '@/features/invoices/utils/invoiceCalculator';
 import { InvoiceData } from '@/features/invoices/types/invoice';
@@ -522,6 +526,26 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
     );
+  };
+
+  const { isSuperAdmin } = useAuth();
+
+  // Handle locking / unlocking invoices via RBAC backend API (SuperAdmin only)
+  const handleToggleLock = async (inv: InvoiceRecord) => {
+    if (!isSuperAdmin) {
+      toast.error('Only SuperAdmin can lock or unlock invoices.');
+      return;
+    }
+    const newStatus = !inv.is_locked;
+    try {
+      await lockInvoiceApi(inv.id, newStatus);
+      setInvoices((prev) =>
+        prev.map((i) => (i.id === inv.id ? { ...i, is_locked: newStatus } : i))
+      );
+      toast.success(`Invoice ${newStatus ? 'locked' : 'unlocked'} successfully`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update lock status');
+    }
   };
 
   // Delete Invoice action handler: strictly filters out record ONLY after receiving 200 OK
@@ -1123,19 +1147,47 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                           >
                             <Download size={17} />
                           </button>
+                          {/* Lock / Unlock Toggle Button for SuperAdmin or Indicator */}
+                          {isSuperAdmin ? (
+                            <button
+                              type="button"
+                              onClick={() => handleToggleLock(inv)}
+                              className={`p-1 transition-colors ${
+                                inv.is_locked ? 'text-red-500 hover:text-red-700' : 'text-gray-400 hover:text-teal-600'
+                              }`}
+                              title={inv.is_locked ? 'Unlock Invoice (SuperAdmin)' : 'Lock Invoice (SuperAdmin)'}
+                            >
+                              {inv.is_locked ? <Lock size={17} /> : <Unlock size={17} />}
+                            </button>
+                          ) : inv.is_locked ? (
+                            <span className="p-1 text-red-400" title="Locked by SuperAdmin">
+                              <Lock size={17} />
+                            </span>
+                          ) : null}
+
                           <button
                             type="button"
+                            disabled={inv.is_locked && !isSuperAdmin}
                             onClick={() => handleEdit(inv)}
-                            className="hover:text-teal-800 transition-colors p-1"
-                            title="Edit Invoice (In-Page)"
+                            className={`p-1 transition-colors ${
+                              inv.is_locked && !isSuperAdmin
+                                ? 'opacity-30 cursor-not-allowed text-gray-300'
+                                : 'hover:text-teal-800'
+                            }`}
+                            title={inv.is_locked && !isSuperAdmin ? 'Invoice is locked by SuperAdmin' : 'Edit Invoice'}
                           >
                             <Edit2 size={17} />
                           </button>
                           <button
                             type="button"
+                            disabled={inv.is_locked && !isSuperAdmin}
                             onClick={() => handleDeleteInvoice(inv.id)}
-                            className="text-gray-400 hover:text-red-600 transition-colors p-1"
-                            title="Delete Invoice"
+                            className={`p-1 transition-colors ${
+                              inv.is_locked && !isSuperAdmin
+                                ? 'opacity-30 cursor-not-allowed text-gray-300'
+                                : 'text-gray-400 hover:text-red-600'
+                            }`}
+                            title={inv.is_locked && !isSuperAdmin ? 'Invoice is locked by SuperAdmin' : 'Delete Invoice'}
                           >
                             <Trash2 size={17} />
                           </button>

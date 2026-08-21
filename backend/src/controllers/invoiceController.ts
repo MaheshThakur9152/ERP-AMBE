@@ -32,4 +32,26 @@ export class InvoiceController {
       res.status(500).json({ success: false, error: error?.message || 'Failed to delete invoice' });
     }
   }
+
+  /**
+   * Protected: SuperAdmin only
+   * PATCH /api/invoices/:id/lock
+   * Toggles or sets the is_locked status of a specific invoice.
+   */
+  static async toggleLock(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { id } = req.params;
+      const { is_locked } = req.body;
+
+      const updatedInvoice = await InvoiceService.updateLockStatus(id, is_locked ?? true);
+      res.status(200).json({
+        success: true,
+        message: `Invoice ${is_locked ? 'locked' : 'unlocked'} successfully`,
+        data: updatedInvoice,
+      });
+    } catch (error: any) {
+      console.error('[InvoiceController.toggleLock] Error:', error);
+      res.status(500).json({ success: false, error: error?.message || 'Failed to update invoice lock status' });
+    }
+  }
 }
