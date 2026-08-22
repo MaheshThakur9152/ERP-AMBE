@@ -8,6 +8,7 @@ export const env = {
   NODE_ENV: process.env.NODE_ENV || 'development',
   SUPABASE_URL: process.env.SUPABASE_URL || '',
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+  FRONTEND_URL: process.env.FRONTEND_URL || process.env.CLIENT_URL || 'http://localhost:5173',
   CLIENT_URL: process.env.CLIENT_URL || 'http://localhost:5173',
   GCP_SERVICE_ACCOUNT_KEY: process.env.GCP_SERVICE_ACCOUNT_KEY || '',
   GCP_CLIENT_EMAIL: process.env.GCP_CLIENT_EMAIL || '',
