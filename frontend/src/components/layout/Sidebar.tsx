@@ -6,40 +6,81 @@ import {
   ChevronDown,
   Users,
   MapPin,
-  Camera,
   Building2,
   Wallet,
   Kanban,
-  BookOpen,
   ShieldCheck,
-  Phone,
-  Sparkles,
+  ShieldAlert,
   LogOut,
-  FileSpreadsheet,
-  Package,
+  User,
 } from 'lucide-react';
 import { useAuth } from '@/features/auth/context/AuthContext';
 
 export const Sidebar: React.FC = () => {
-  const { signOut, isSuperAdmin } = useAuth();
+  const { signOut, isSuperAdmin, role, user } = useAuth();
   const [invoicesExpanded, setInvoicesExpanded] = useState(true);
   const [officeEmployeeExpanded, setOfficeEmployeeExpanded] = useState(true);
 
+  const roleLabel = isSuperAdmin ? 'SUPERADMIN' : 'ADMIN';
+  const displayEmail = user?.email || (isSuperAdmin ? 'superadmin@facility.com' : 'admin@facility.com');
+
   return (
     <aside className="w-72 bg-[#34495E] text-white flex flex-col h-screen sticky top-0 shadow-2xl z-40 select-none flex-shrink-0">
-      {/* Sidebar Header Brand */}
-      <div className="p-6 border-b border-gray-600 bg-[#34495E]/50 flex items-center gap-3">
-        <div className="bg-[#20B2AA] p-2 rounded-lg text-white shadow-md">
-          <LayoutDashboard size={20} />
+      {/* Sidebar Header Brand & Role Badge */}
+      <div className="p-5 border-b border-gray-600 bg-[#2C3E50] flex flex-col gap-3">
+        <div className="flex items-center gap-3">
+          <div className="bg-[#20B2AA] p-2 rounded-xl text-white shadow-md">
+            <LayoutDashboard size={20} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h1 className="font-bold text-base text-white leading-tight truncate">Ambe Admin (v2.3.1)</h1>
+            <span className="text-[10px] text-teal-300 font-mono">Enterprise Portal</span>
+          </div>
         </div>
-        <div>
-          <h1 className="font-bold text-base text-white leading-tight">Ambe Admin (v2.3.1)</h1>
-          <span className="text-[10px] text-teal-300 font-mono">Enterprise Portal</span>
+
+        {/* Clear Role Badge Indicator (No Confusion) */}
+        <div className="flex items-center justify-between bg-black/25 px-3 py-1.5 rounded-lg border border-white/10 mt-1">
+          <span className="text-[10px] font-mono text-gray-300 font-medium">Logged in as:</span>
+          {isSuperAdmin ? (
+            <span className="text-[10px] font-extrabold font-mono tracking-wider px-2 py-0.5 rounded bg-indigo-600 text-white shadow-xs flex items-center gap-1 border border-indigo-400/30">
+              <ShieldAlert size={11} />
+              <span>SUPERADMIN</span>
+            </span>
+          ) : (
+            <span className="text-[10px] font-extrabold font-mono tracking-wider px-2 py-0.5 rounded bg-teal-600 text-white shadow-xs flex items-center gap-1 border border-teal-400/30">
+              <ShieldCheck size={11} />
+              <span>ADMIN</span>
+            </span>
+          )}
         </div>
       </div>
 
       {/* Nav Menu Items */}
       <nav className="flex-1 p-4 space-y-2 overflow-y-auto sidebar-nav text-sm">
+        {/* Security Center (MOVED TO TOP FOR SUPERADMIN) */}
+        {isSuperAdmin && (
+          <div className="pb-2 border-b border-gray-600/60 mb-2">
+            <NavLink
+              to="/security-center"
+              className={({ isActive }) =>
+                `w-full flex items-center justify-between px-4 py-3 rounded-xl font-bold transition-all ${
+                  isActive
+                    ? 'bg-[#20B2AA] text-white shadow-lg ring-2 ring-teal-400/40'
+                    : 'bg-teal-500/15 hover:bg-teal-500/25 text-teal-300 border border-teal-500/30'
+                }`
+              }
+            >
+              <div className="flex gap-3 items-center">
+                <ShieldCheck size={19} className="text-teal-300" />
+                <span className="tracking-wide">Security Center</span>
+              </div>
+              <span className="text-[10px] font-extrabold uppercase bg-teal-400/20 text-teal-200 px-2 py-0.5 rounded-full border border-teal-300/30 font-mono">
+                LOCK
+              </span>
+            </NavLink>
+          </div>
+        )}
+
         {/* Invoices Group */}
         <div className="space-y-1">
           <button
@@ -208,32 +249,26 @@ export const Sidebar: React.FC = () => {
         >
           <Building2 size={18} /> <span>Entities</span>
         </NavLink>
-
-        {/* Security Center (SuperAdmin Only) */}
-        {isSuperAdmin && (
-          <NavLink
-            to="/security-center"
-            className={({ isActive }) =>
-              `w-full flex gap-3 px-4 py-3 rounded-lg font-semibold transition-colors items-center ${
-                isActive
-                  ? 'bg-amber-500 text-white shadow-md'
-                  : 'hover:bg-white/5 text-amber-300'
-              }`
-            }
-          >
-            <ShieldCheck size={18} /> <span>Security Center</span>
-          </NavLink>
-        )}
       </nav>
 
-      {/* Footer Sign Out */}
-      <div className="p-4 border-t border-gray-600">
+      {/* Footer User Info & Sign Out */}
+      <div className="p-4 border-t border-gray-600/80 bg-[#2C3E50]/60 flex flex-col gap-2">
+        <div className="flex items-center gap-2.5 px-2 py-1">
+          <div className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-teal-300 shrink-0 border border-white/10">
+            <User size={14} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-bold text-white truncate">{displayEmail}</p>
+            <p className="text-[10px] text-gray-300 font-mono tracking-wider">ROLE: {roleLabel}</p>
+          </div>
+        </div>
+
         <button
           type="button"
           onClick={signOut}
-          className="flex items-center gap-2 text-red-300 hover:text-white w-full px-4 py-2 rounded-lg hover:bg-white/5 transition-colors font-medium text-sm"
+          className="flex items-center gap-2 text-red-300 hover:text-white w-full px-3 py-2 rounded-lg hover:bg-red-500/20 transition-colors font-semibold text-xs border border-red-500/20 mt-1"
         >
-          <LogOut size={16} /> <span>Sign Out</span>
+          <LogOut size={15} /> <span>Sign Out</span>
         </button>
       </div>
     </aside>

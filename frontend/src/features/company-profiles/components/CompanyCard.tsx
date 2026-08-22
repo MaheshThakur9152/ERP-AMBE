@@ -1,15 +1,20 @@
 import React from 'react';
 import { CompanyProfile } from '../types';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Pencil, Building2, CreditCard, FileText, MapPin, Hash, CheckCircle2 } from 'lucide-react';
+import { Pencil, Building2, CreditCard, FileText, MapPin, Hash, CheckCircle2, Lock, Loader2 } from 'lucide-react';
+import { useAuth } from '@/features/auth/context/AuthContext';
 
 interface CompanyCardProps {
   company: CompanyProfile;
   onEdit: (company: CompanyProfile) => void;
+  onLock?: (company: CompanyProfile) => void;
+  isLocking?: boolean;
 }
 
-export const CompanyCard: React.FC<CompanyCardProps> = ({ company, onEdit }) => {
+export const CompanyCard: React.FC<CompanyCardProps> = ({ company, onEdit, onLock, isLocking = false }) => {
+  const { isSuperAdmin } = useAuth();
+  const isLocked = Boolean(company.is_locked);
+
   return (
     <div className="bg-white border border-gray-200 rounded-2xl shadow-sm hover:shadow-md hover:border-[#20B2AA]/50 transition-all duration-200 overflow-hidden flex flex-col justify-between">
       <div className="p-5 space-y-4">
@@ -32,14 +37,41 @@ export const CompanyCard: React.FC<CompanyCardProps> = ({ company, onEdit }) => 
               <p className="text-xs text-gray-500 truncate font-medium">{company.legal_name}</p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => onEdit(company)}
-            className="p-2 rounded-lg text-gray-400 hover:text-[#20B2AA] hover:bg-teal-50 transition-all border border-transparent hover:border-teal-100 flex-shrink-0"
-            title="Edit Company Profile"
-          >
-            <Pencil className="w-4 h-4" />
-          </button>
+
+          {/* Action Buttons / Lock Badge */}
+          {isLocked ? (
+            <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold flex items-center gap-1 shrink-0">
+              <Lock className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Locked by SuperAdmin</span>
+            </span>
+          ) : (
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                type="button"
+                onClick={() => onEdit(company)}
+                className="p-2 rounded-lg text-gray-400 hover:text-[#20B2AA] hover:bg-teal-50 transition-all border border-transparent hover:border-teal-100 flex-shrink-0 cursor-pointer"
+                title="Edit Company Profile"
+              >
+                <Pencil className="w-4 h-4" />
+              </button>
+
+              {isSuperAdmin && onLock && (
+                <button
+                  type="button"
+                  disabled={isLocking}
+                  onClick={() => onLock(company)}
+                  className="p-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-all border border-transparent hover:border-red-100 flex-shrink-0 cursor-pointer disabled:opacity-50"
+                  title="Quick Lock Entity (SuperAdmin)"
+                >
+                  {isLocking ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-red-500" />
+                  ) : (
+                    <Lock className="w-4 h-4 text-red-500" />
+                  )}
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Tax & Compliance Boxes */}
@@ -109,10 +141,17 @@ export const CompanyCard: React.FC<CompanyCardProps> = ({ company, onEdit }) => 
             {company.terms_and_conditions?.length || 0} Invoice Terms Attached
           </span>
         </div>
-        <div className="flex items-center gap-1 text-green-600 font-semibold text-[11px]">
-          <CheckCircle2 className="w-3.5 h-3.5" />
-          <span>Active</span>
-        </div>
+        {isLocked ? (
+          <div className="flex items-center gap-1 text-emerald-600 font-semibold text-[11px]">
+            <Lock className="w-3.5 h-3.5" />
+            <span>Locked</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1 text-green-600 font-semibold text-[11px]">
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            <span>Active</span>
+          </div>
+        )}
       </div>
     </div>
   );

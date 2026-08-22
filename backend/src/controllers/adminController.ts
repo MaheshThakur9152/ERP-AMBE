@@ -3,12 +3,14 @@ import { supabaseAdmin } from '../config/supabase';
 
 export interface PendingLockItem {
   id: string;
-  entityType: 'sites' | 'invoices' | 'attendance_sheets' | 'payroll_records' | 'staff';
+  entityType: 'sites' | 'invoices' | 'attendance_sheets' | 'payroll_records' | 'staff' | 'companies';
   title: string;
   subtitle: string;
   createdAt: string;
   hoursOld: number;
   is_locked: boolean;
+  uploadedDocUrl?: string | null;
+  details?: Record<string, any>;
 }
 
 export class AdminController {
@@ -21,6 +23,35 @@ export class AdminController {
     try {
       const pendingItems: PendingLockItem[] = [];
       const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+      // 0. Companies
+      const { data: companies } = await supabaseAdmin
+        .from('companies')
+        .select('*')
+        .or('is_locked.eq.false,is_locked.is.null');
+
+      if (companies) {
+        companies.forEach((comp: any) => {
+          const createdAt = comp.created_at || new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+          const hoursOld = Math.floor((Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60));
+          pendingItems.push({
+            id: comp.id,
+            entityType: 'companies',
+            title: comp.name || comp.legal_name || comp.entity_code || 'Company Entity Profile',
+            subtitle: `GSTIN: ${comp.gstin || 'N/A'} | Code: ${comp.entity_code || comp.code || 'COMP'}`,
+            createdAt,
+            hoursOld,
+            is_locked: false,
+            details: {
+              company_name: comp.name || comp.legal_name,
+              entity_code: comp.entity_code || comp.code,
+              gstin: comp.gstin,
+              cin: comp.cin_no || comp.cin,
+              tax_prefix: comp.tax_prefix,
+            },
+          });
+        });
+      }
 
       // 1. Sites
       const { data: sites } = await supabaseAdmin
@@ -47,7 +78,7 @@ export class AdminController {
       // 2. Invoices
       const { data: invoices } = await supabaseAdmin
         .from('invoices')
-        .select('id, invoice_no, type, grand_total, created_at, is_locked, sites(site_name)')
+        .select('id, invoice_no, type, grand_total, created_at, is_locked, certified_doc_url, certified_attendance_url, sites(site_name)')
         .or('is_locked.eq.false,is_locked.is.null')
         .lt('created_at', cutoffTime);
 
@@ -62,6 +93,7 @@ export class AdminController {
             createdAt: inv.created_at,
             hoursOld,
             is_locked: false,
+            uploadedDocUrl: inv.certified_doc_url || inv.certified_attendance_url || null,
           });
         });
       }
@@ -69,7 +101,7 @@ export class AdminController {
       // 3. Attendance Sheets
       const { data: attendance } = await supabaseAdmin
         .from('attendance_sheets')
-        .select('id, month_year, site_id, created_at, is_locked, sites(site_name)')
+        .select('id, month_year, site_id, created_at, is_locked, file_url, sites(site_name)')
         .or('is_locked.eq.false,is_locked.is.null')
         .lt('created_at', cutoffTime);
 
@@ -85,6 +117,7 @@ export class AdminController {
             createdAt: att.created_at,
             hoursOld,
             is_locked: false,
+            uploadedDocUrl: att.file_url || null,
           });
         });
       }
@@ -92,7 +125,7 @@ export class AdminController {
       // 4. Payroll Records
       const { data: payroll } = await supabaseAdmin
         .from('payroll_records')
-        .select('id, month_year, created_at, is_locked')
+        .select('id, month_year, created_at, is_locked, excel_url')
         .or('is_locked.eq.false,is_locked.is.null')
         .lt('created_at', cutoffTime);
 
@@ -107,6 +140,7 @@ export class AdminController {
             createdAt: pr.created_at,
             hoursOld,
             is_locked: false,
+            uploadedDocUrl: pr.excel_url || null,
           });
         });
       }
@@ -139,7 +173,7 @@ export class AdminController {
         return;
       }
 
-      const validTables = ['sites', 'invoices', 'attendance_sheets', 'payroll_records', 'staff', 'employees'];
+      const validTables = ['companies', 'sites', 'invoices', 'attendance_sheets', 'payroll_records', 'staff', 'employees'];
       if (!validTables.includes(entityType)) {
         res.status(400).json({ error: 'Invalid entityType table name' });
         return;
@@ -181,7 +215,7 @@ export class AdminController {
         return;
       }
 
-      const validTables = ['sites', 'invoices', 'attendance_sheets', 'payroll_records', 'staff', 'employees'];
+      const validTables = ['companies', 'sites', 'invoices', 'attendance_sheets', 'payroll_records', 'staff', 'employees'];
 
       const lockPromises = items.map(async (item: { entityType?: string; type?: string; id: string }) => {
         const table = item.entityType || item.type;

@@ -40,6 +40,17 @@ export class CompanyController {
   static async update(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const { id } = req.params;
+      const existing = await CompanyService.getCompanyById(id);
+      if (existing && (existing as any).is_locked) {
+        const userRole = (req as any).user?.role || (req as any).auth?.role;
+        if (userRole !== 'SuperAdmin') {
+          res.status(403).json({
+            success: false,
+            error: 'This company profile entity is locked by SuperAdmin and cannot be modified.',
+          });
+          return;
+        }
+      }
       const company = await CompanyService.updateCompany(id, req.body);
       res.json({ success: true, data: company });
     } catch (err: any) {

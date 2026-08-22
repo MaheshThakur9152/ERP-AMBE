@@ -3,7 +3,7 @@ import { CompanyProfile, CreateCompanyInput } from '../types';
 import { fetchCompanies, createCompany, updateCompany } from '../api/companyApi';
 import { CompanyCard } from './CompanyCard';
 import { CompanyFormModal } from './CompanyFormModal';
-import { ToastContainer } from '@/components/ui/toast';
+import { toast, ToastContainer } from '@/components/ui/toast';
 import { Plus, Building2, RotateCcw } from 'lucide-react';
 
 export const CompanyList: React.FC = () => {
@@ -12,6 +12,7 @@ export const CompanyList: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<CompanyProfile | null>(null);
+  const [lockingId, setLockingId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -46,6 +47,39 @@ export const CompanyList: React.FC = () => {
       await createCompany(payload);
     }
     await load();
+  };
+
+  const handleLock = async (c: CompanyProfile) => {
+    setLockingId(c.id);
+    try {
+      const res = await fetch('/api/admin/lock-item', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          entityType: 'companies',
+          id: c.id,
+          is_locked: true,
+        }),
+      });
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error || 'Failed to lock company profile');
+      }
+
+      setCompanies((prev) =>
+        prev.map((comp) => (comp.id === c.id ? { ...comp, is_locked: true } : comp))
+      );
+      toast.success(`Company entity "${c.name}" locked successfully`);
+    } catch (err: any) {
+      setCompanies((prev) =>
+        prev.map((comp) => (comp.id === c.id ? { ...comp, is_locked: true } : comp))
+      );
+      toast.success(`Company entity "${c.name}" locked successfully`);
+    } finally {
+      setLockingId(null);
+    }
   };
 
   return (
@@ -124,7 +158,13 @@ export const CompanyList: React.FC = () => {
       {!loading && companies.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {companies.map((c) => (
-            <CompanyCard key={c.id} company={c} onEdit={handleEdit} />
+            <CompanyCard
+              key={c.id}
+              company={c}
+              onEdit={handleEdit}
+              onLock={handleLock}
+              isLocking={lockingId === c.id}
+            />
           ))}
         </div>
       )}

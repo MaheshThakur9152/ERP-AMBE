@@ -30,6 +30,7 @@ export interface CompanyProfile {
   stamp_url?: string;
   signature_url?: string;
   is_active?: boolean;
+  is_locked?: boolean;
   created_at?: string;
   updated_at?: string;
 }

@@ -13,7 +13,10 @@ async function getAuthHeader() {
 
 export async function fetchCompanies(): Promise<CompanyProfile[]> {
   const headers = await getAuthHeader();
-  const res = await fetch(`${API_BASE}/companies`, { headers });
+  const res = await fetch(`${API_BASE}/companies`, {
+    headers,
+    credentials: 'include',
+  });
   if (!res.ok) {
     const errorText = await res.text();
     console.error(`[GET /api/companies] API Error ${res.status}:`, errorText);
@@ -31,7 +34,10 @@ export async function fetchCompanies(): Promise<CompanyProfile[]> {
 
 export async function fetchCompanyById(id: string): Promise<CompanyProfile> {
   const headers = await getAuthHeader();
-  const res = await fetch(`${API_BASE}/companies/${id}`, { headers });
+  const res = await fetch(`${API_BASE}/companies/${id}`, {
+    headers,
+    credentials: 'include',
+  });
   if (!res.ok) {
     const errorText = await res.text();
     console.error(`[GET /api/companies/${id}] API Error ${res.status}:`, errorText);
@@ -46,6 +52,7 @@ export async function createCompany(payload: CreateCompanyInput): Promise<Compan
   const res = await fetch(`${API_BASE}/companies`, {
     method: 'POST',
     headers,
+    credentials: 'include',
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
@@ -62,6 +69,7 @@ export async function updateCompany(id: string, payload: UpdateCompanyInput): Pr
   const res = await fetch(`${API_BASE}/companies/${id}`, {
     method: 'PUT',
     headers,
+    credentials: 'include',
     body: JSON.stringify(payload),
   });
   if (!res.ok) {

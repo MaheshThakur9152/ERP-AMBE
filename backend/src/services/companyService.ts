@@ -26,6 +26,7 @@ function mapRowToCompanyProfile(row: any): CompanyProfile {
     proforma_prefix: row.proforma_prefix || 'AS/P/26-27/',
     proforma_sequence: row.proforma_sequence ?? 1,
     is_active: row.is_active !== undefined ? row.is_active : true,
+    is_locked: Boolean(row.is_locked),
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
