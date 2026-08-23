@@ -510,6 +510,10 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
         },
       };
 
+      console.log('🔵 STEP 1 - additionalCharges state:', additionalCharges);
+      console.log('🔵 STEP 1 - recordPayload.additional_charges:', recordPayload.additional_charges);
+      console.log('🔵 STEP 1 - recordPayload.payload.additionalCharges:', recordPayload.payload?.additionalCharges);
+
       const targetId = initialRecord?.id || editId;
       const res = targetId
         ? await updateInvoiceApi(targetId, recordPayload)

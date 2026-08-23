@@ -26,6 +26,7 @@ export async function fetchInvoicesApi(): Promise<InvoiceRecord[]> {
 }
 
 export async function createInvoiceApi(payload: CreateInvoicePayload): Promise<{ status: number; data: InvoiceRecord }> {
+  console.log('🟢 STEP 2 - Outgoing request body:', JSON.stringify(payload));
   const res = await fetchWithRetry(API_BASE, {
     method: 'POST',
     headers: {
@@ -43,13 +44,16 @@ export async function createInvoiceApi(payload: CreateInvoicePayload): Promise<{
   }
 
   const json = await res.json();
+  const result = json.data || json;
+  console.log('🔴 STEP 5 - API response additional_charges:', result?.additional_charges || result?.additionalCharges);
   return {
     status: res.status,
-    data: json.data || json,
+    data: result,
   };
 }
 
 export async function updateInvoiceApi(id: string, payload: CreateInvoicePayload): Promise<{ status: number; data: InvoiceRecord }> {
+  console.log('🟢 STEP 2 - Outgoing request body:', JSON.stringify(payload));
   const res = await fetchWithRetry(`${API_BASE}/${id}`, {
     method: 'PUT',
     headers: {
@@ -67,9 +71,11 @@ export async function updateInvoiceApi(id: string, payload: CreateInvoicePayload
   }
 
   const json = await res.json();
+  const result = json.data || json;
+  console.log('🔴 STEP 5 - API response additional_charges:', result?.additional_charges || result?.additionalCharges);
   return {
     status: res.status,
-    data: json.data || json,
+    data: result,
   };
 }
 

@@ -95,7 +95,7 @@ const convertRecordToInvoiceData = (inv: InvoiceRecord): InvoiceData => {
   );
 
   if (inv.payload && inv.payload.company && inv.payload.company.name) {
-    return {
+    const resPayload = {
       ...inv.payload,
       party: {
         ...inv.payload.party,
@@ -109,13 +109,15 @@ const convertRecordToInvoiceData = (inv: InvoiceRecord): InvoiceData => {
       materialCharges: inv.payload.materialCharges ?? (inv as any).material_charges ?? (inv as any).materialCharges ?? materialCharges,
       delivery: inv.payload?.delivery || {},
     };
+    console.log('🟣 STEP 6 - Final InvoiceData.additionalCharges:', resPayload.additionalCharges);
+    return resPayload;
   }
   const saved = localStorage.getItem('asf_active_invoice');
   if (saved) {
     try {
       const parsed = JSON.parse(saved);
       if (parsed.meta?.invoiceNo === inv.invoiceNo && parsed.company?.name) {
-        return {
+        const resParsed = {
           ...parsed,
           isMaterial: inv.is_material || parsed.isMaterial || false,
           mgmtPercent: Number(parsed.mgmtPercent ?? mgmtPercent),
@@ -124,6 +126,8 @@ const convertRecordToInvoiceData = (inv: InvoiceRecord): InvoiceData => {
           materialCharges: Number(parsed.materialCharges ?? materialCharges),
           delivery: parsed.delivery || {},
         };
+        console.log('🟣 STEP 6 - Final InvoiceData.additionalCharges:', resParsed.additionalCharges);
+        return resParsed;
       }
     } catch (e) {
       console.error(e);
@@ -154,7 +158,7 @@ const convertRecordToInvoiceData = (inv: InvoiceRecord): InvoiceData => {
     ? termsText.join(' | ')
     : String(termsText || '');
 
-  return {
+  const finalResult = {
     company: {
       name: companyName,
       addressLine1: comp?.address_line1 || '',
@@ -217,6 +221,8 @@ const convertRecordToInvoiceData = (inv: InvoiceRecord): InvoiceData => {
     sgstPercent: 9,
     terms: formattedTerms,
   };
+  console.log('🟣 STEP 6 - Final InvoiceData.additionalCharges:', finalResult.additionalCharges);
+  return finalResult;
 };
 
 export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({

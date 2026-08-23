@@ -271,6 +271,8 @@ export class InvoiceService {
       insertRow.payload = payload.payload;
     }
 
+    console.log('🟡 STEP 3 - insertRow.additional_charges:', insertRow.additional_charges);
+
     let { data, error } = await supabaseAdmin
       .from('invoices')
       .insert([insertRow])
@@ -294,6 +296,8 @@ export class InvoiceService {
       }
       data = fallbackInsert.data;
     }
+
+    console.log('🟠 STEP 4 - Supabase returned row.additional_charges:', data?.additional_charges);
 
     if (data) {
       if (!data.companies && companyId) {
@@ -378,6 +382,8 @@ export class InvoiceService {
       updateRow.invoice_no = payload.invoice_no || payload.invoiceNo || payload.meta?.invoiceNo;
     }
 
+    console.log('🟡 STEP 3 - insertRow.additional_charges:', updateRow.additional_charges);
+
     let { data, error } = await supabaseAdmin
       .from('invoices')
       .update(updateRow)
@@ -400,6 +406,8 @@ export class InvoiceService {
       }
       data = fallback.data;
     }
+
+    console.log('🟠 STEP 4 - Supabase returned row.additional_charges:', data?.additional_charges);
 
     if (data) {
       if (!data.companies && companyId) {
