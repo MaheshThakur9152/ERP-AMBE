@@ -25,40 +25,38 @@ import { SecurityCenter } from '@/pages/SecurityCenter';
 export const App: React.FC = () => {
   return (
     <BrowserRouter>
-      <AuthProvider>
-        <Routes>
-          {/* Public Authentication Route */}
-          <Route path="/login" element={<LoginPage />} />
+      <Routes>
+        {/* Public Authentication Route */}
+        <Route path="/login" element={<LoginPage />} />
 
-          {/* Protected Enterprise Routes */}
-          <Route element={<ProtectedRoute />}>
-            <Route element={<DashboardLayout />}>
-              <Route path="/" element={<Navigate to="/invoice-hub" replace />} />
-              <Route path="/dashboard" element={<InvoiceHubPage />} />
-              <Route path="/companies" element={<CompanyProfilesPage />} />
-              <Route path="/sites" element={<SitesMasterPage />} />
-              <Route path="/materials" element={<MaterialsMasterPage />} />
-              <Route path="/invoice-hub" element={<InvoiceHubPage />} />
-              <Route path="/invoice-tracker" element={<InvoiceTrackerPage />} />
-              <Route path="/smart-generator" element={<SmartGeneratorPage />} />
-              <Route path="/material-generator" element={<MaterialGeneratorPage />} />
-              <Route path="/invoices" element={<InvoicePage />} />
-              <Route path="/invoice-vault" element={<InvoiceVault />} />
-              <Route path="/attendance" element={<AttendancePage />} />
-              <Route path="/payroll" element={<PayrollPage />} />
-              <Route path="/payslips" element={<PayslipPage />} />
-              <Route path="/advances" element={<AdvancesPage />} />
-              <Route path="/deployments" element={<DeploymentsPage />} />
-              <Route path="/employees" element={<StaffPage />} />
-              <Route path="/photos" element={<CompanyProfilesPage />} />
-              <Route path="/entities" element={<CompanyProfilesPage />} />
-              <Route path="/security-center" element={<SecurityCenter />} />
-            </Route>
+        {/* Protected Enterprise Routes */}
+        <Route element={<ProtectedRoute />}>
+          <Route element={<DashboardLayout />}>
+            <Route path="/" element={<Navigate to="/invoice-hub" replace />} />
+            <Route path="/dashboard" element={<InvoiceHubPage />} />
+            <Route path="/companies" element={<CompanyProfilesPage />} />
+            <Route path="/sites" element={<SitesMasterPage />} />
+            <Route path="/materials" element={<MaterialsMasterPage />} />
+            <Route path="/invoice-hub" element={<InvoiceHubPage />} />
+            <Route path="/invoice-tracker" element={<InvoiceTrackerPage />} />
+            <Route path="/smart-generator" element={<SmartGeneratorPage />} />
+            <Route path="/material-generator" element={<MaterialGeneratorPage />} />
+            <Route path="/invoices" element={<InvoicePage />} />
+            <Route path="/invoice-vault" element={<InvoiceVault />} />
+            <Route path="/attendance" element={<AttendancePage />} />
+            <Route path="/payroll" element={<PayrollPage />} />
+            <Route path="/payslips" element={<PayslipPage />} />
+            <Route path="/advances" element={<AdvancesPage />} />
+            <Route path="/deployments" element={<DeploymentsPage />} />
+            <Route path="/employees" element={<StaffPage />} />
+            <Route path="/photos" element={<CompanyProfilesPage />} />
+            <Route path="/entities" element={<CompanyProfilesPage />} />
+            <Route path="/security-center" element={<SecurityCenter />} />
           </Route>
+        </Route>
 
-          <Route path="*" element={<Navigate to="/invoice-hub" replace />} />
-        </Routes>
-      </AuthProvider>
+        <Route path="*" element={<Navigate to="/invoice-hub" replace />} />
+      </Routes>
     </BrowserRouter>
   );
 };
