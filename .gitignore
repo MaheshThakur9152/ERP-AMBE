@@ -29,3 +29,7 @@ Thumbs.db
 
 # Binary & temp files
 *.tmp
+
+# Ignored folders
+old frontend/
+
