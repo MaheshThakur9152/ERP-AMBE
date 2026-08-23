@@ -264,7 +264,7 @@ export const pdfService = {
                   <span>${formatCurrency(calc.mgmtChargesAmount)}</span>
                 </div>
                 ${(calc.additionalCharges || [])
-                  .filter((charge) => Number(charge.amount || 0) > 0)
+                  .filter((charge) => (charge.name || '').trim() !== '')
                   .map(
                     (charge) => `
                 <div style="display: flex; justify-content: space-between; padding: 4px 8px; border-bottom: 1px solid #000;">
