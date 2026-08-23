@@ -263,41 +263,25 @@ export class InvoiceService {
       previous_version_id: payload.previous_version_id || payload.previousVersionId || null,
       certified_doc_url: payload.certified_doc_url || payload.certifiedDocUrl || null,
       certified_attendance_url: payload.certified_attendance_url || payload.certifiedAttendanceUrl || null,
-      payload: payload.payload || payload.invoice_data || payload,
       created_at: now,
     };
 
-    if (payload.payload) {
-      insertRow.payload = payload.payload;
-    }
-
     console.log('🟡 STEP 3 - insertRow.additional_charges:', insertRow.additional_charges);
+    console.log('📤 INSERT PAYLOAD:', JSON.stringify(insertRow));
 
-    let { data, error } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from('invoices')
       .insert([insertRow])
       .select('*, sites(*), companies(*)')
       .single();
 
     if (error) {
-      console.warn('⚠️ Supabase insert with payload/join failed, retrying without payload column:', error.message);
-      const insertRowClean = { ...insertRow };
-      delete insertRowClean.payload;
-
-      const fallbackInsert = await supabaseAdmin
-        .from('invoices')
-        .insert([insertRowClean])
-        .select('*')
-        .single();
-
-      if (fallbackInsert.error) {
-        console.error('❌ Supabase insert invoice error:', fallbackInsert.error.message);
-        throw new Error(`Database insert failed: ${fallbackInsert.error.message}`);
-      }
-      data = fallbackInsert.data;
+      console.error('❌ Supabase insert invoice error:', error.message);
+      throw new Error(`Database insert failed: ${error.message}`);
     }
 
     console.log('🟠 STEP 4 - Supabase returned row.additional_charges:', data?.additional_charges);
+    console.log('✅ INSERT SUCCESS - full row:', JSON.stringify(data));
 
     if (data) {
       if (!data.companies && companyId) {
@@ -374,7 +358,6 @@ export class InvoiceService {
       destination: payload.destination || payload.meta?.destination,
       terms_of_delivery: payload.terms_of_delivery || payload.termsOfDelivery || payload.meta?.termsOfDelivery,
       is_material: payload.is_material || payload.isMaterial || false,
-      payload: payload.payload || payload.invoice_data || payload,
       updated_at: new Date().toISOString(),
     };
 
@@ -383,8 +366,9 @@ export class InvoiceService {
     }
 
     console.log('🟡 STEP 3 - insertRow.additional_charges:', updateRow.additional_charges);
+    console.log('📤 UPDATE PAYLOAD:', JSON.stringify(updateRow));
 
-    let { data, error } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from('invoices')
       .update(updateRow)
       .eq('id', id)
@@ -392,22 +376,12 @@ export class InvoiceService {
       .single();
 
     if (error) {
-      console.warn('⚠️ Supabase update failed, retrying without payload:', error.message);
-      delete updateRow.payload;
-      const fallback = await supabaseAdmin
-        .from('invoices')
-        .update(updateRow)
-        .eq('id', id)
-        .select('*')
-        .single();
-
-      if (fallback.error) {
-        throw new Error(`Database update failed: ${fallback.error.message}`);
-      }
-      data = fallback.data;
+      console.error('❌ Supabase update invoice error:', error.message);
+      throw new Error(`Database update failed: ${error.message}`);
     }
 
     console.log('🟠 STEP 4 - Supabase returned row.additional_charges:', data?.additional_charges);
+    console.log('✅ UPDATE SUCCESS - full row:', JSON.stringify(data));
 
     if (data) {
       if (!data.companies && companyId) {
