@@ -12,12 +12,14 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
   data,
   colorMode = 'color',
 }) => {
+  const safeCharges = data.additionalCharges || (data as any).additional_charges || [];
+
   const calc = computeInvoiceCalculations(
     data.items || [],
     data.mgmtPercent ?? 5,
     data.cgstPercent ?? 9,
     data.sgstPercent ?? 9,
-    data.additionalCharges || []
+    safeCharges
   );
 
   const MIN_ROWS = 8;
@@ -265,8 +267,8 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
                   <span>Management charges @ {calc.mgmtChargesPercent}%</span>
                   <span>{formatCurrency(calc.mgmtChargesAmount)}</span>
                 </div>
-                {data.additionalCharges && data.additionalCharges.length > 0 ? (
-                  data.additionalCharges.map((charge, index) => (
+                {safeCharges && safeCharges.length > 0 ? (
+                  safeCharges.map((charge: any, index: number) => (
                     <div key={`dynamic-charge-${index}`} className="flex justify-between p-1">
                       <span>{charge.name || 'Additional Charge'}</span>
                       <span>{formatCurrency(Number(charge.amount ?? 0))}</span>
@@ -276,11 +278,11 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
                   <>
                     <div className="flex justify-between p-1">
                       <span>Machinery Charges</span>
-                      <span>{formatCurrency(Number(data.machineryCharges || 0))}</span>
+                      <span>{formatCurrency(Number(data.machineryCharges || (data as any).machinery_charges || 0))}</span>
                     </div>
                     <div className="flex justify-between p-1">
                       <span>Material Charges</span>
-                      <span>{formatCurrency(Number(data.materialCharges || 0))}</span>
+                      <span>{formatCurrency(Number(data.materialCharges || (data as any).material_charges || 0))}</span>
                     </div>
                   </>
                 )}
