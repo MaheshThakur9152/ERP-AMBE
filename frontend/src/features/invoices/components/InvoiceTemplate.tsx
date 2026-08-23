@@ -267,25 +267,35 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
                   <span>Management charges @ {calc.mgmtChargesPercent}%</span>
                   <span>{formatCurrency(calc.mgmtChargesAmount)}</span>
                 </div>
-                {safeCharges && safeCharges.length > 0 ? (
-                  safeCharges.map((charge: any, index: number) => (
-                    <div key={`dynamic-charge-${index}`} className="flex justify-between p-1">
-                      <span>{charge.name || 'Additional Charge'}</span>
-                      <span>{formatCurrency(Number(charge.amount ?? 0))}</span>
-                    </div>
-                  ))
-                ) : (
-                  <>
-                    <div className="flex justify-between p-1">
-                      <span>Machinery Charges</span>
-                      <span>{formatCurrency(Number(data.machineryCharges || (data as any).machinery_charges || 0))}</span>
-                    </div>
-                    <div className="flex justify-between p-1">
-                      <span>Material Charges</span>
-                      <span>{formatCurrency(Number(data.materialCharges || (data as any).material_charges || 0))}</span>
-                    </div>
-                  </>
-                )}
+                {(() => {
+                  const validCharges = (safeCharges || []).filter((c: any) => Number(c.amount ?? 0) > 0);
+                  if (validCharges.length > 0) {
+                    return validCharges.map((charge: any, index: number) => (
+                      <div key={`dynamic-charge-${index}`} className="flex justify-between p-1">
+                        <span>{charge.name || 'Additional Charge'}</span>
+                        <span>{formatCurrency(Number(charge.amount ?? 0))}</span>
+                      </div>
+                    ));
+                  }
+                  const mach = Number(data.machineryCharges || (data as any).machinery_charges || 0);
+                  const mat = Number(data.materialCharges || (data as any).material_charges || 0);
+                  return (
+                    <>
+                      {mach > 0 && (
+                        <div className="flex justify-between p-1">
+                          <span>Machinery Charges</span>
+                          <span>{formatCurrency(mach)}</span>
+                        </div>
+                      )}
+                      {mat > 0 && (
+                        <div className="flex justify-between p-1">
+                          <span>Material Charges</span>
+                          <span>{formatCurrency(mat)}</span>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
 
                 <div className="flex justify-between p-1 font-normal">
                   <span>Total</span>
