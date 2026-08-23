@@ -277,23 +277,14 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
                       ))
                   : null}
 
-                {/* Legacy Fallback for direct machineryCharges / materialCharges > 0 */}
-                {(!data.additionalCharges || data.additionalCharges.length === 0) && (
-                  <>
-                    {Number(data.machineryCharges) > 0 && (
-                      <div className="flex justify-between p-1">
-                        <span>Machinery Charges</span>
-                        <span>{formatCurrency(Number(data.machineryCharges))}</span>
-                      </div>
-                    )}
-                    {Number(data.materialCharges) > 0 && (
-                      <div className="flex justify-between p-1">
-                        <span>Material Charges</span>
-                        <span>{formatCurrency(Number(data.materialCharges))}</span>
-                      </div>
-                    )}
-                  </>
-                )}
+                <div className="flex justify-between p-1">
+                  <span>Machinery Charges</span>
+                  <span>{formatCurrency(Number(data.machineryCharges || 0))}</span>
+                </div>
+                <div className="flex justify-between p-1">
+                  <span>Material Charges</span>
+                  <span>{formatCurrency(Number(data.materialCharges || 0))}</span>
+                </div>
 
                 <div className="flex justify-between p-1 font-normal">
                   <span>Total</span>
