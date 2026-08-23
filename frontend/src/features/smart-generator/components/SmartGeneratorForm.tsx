@@ -209,15 +209,21 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
 
     const existingAdd =
       initialRecord.payload?.additionalCharges ||
+      initialRecord.payload?.additional_charges ||
       (initialRecord as any).additionalCharges ||
       (initialRecord as any).additional_charges ||
-      matchingSite?.defaultAdditionalCharges ||
-      matchingSite?.default_additional_charges;
+      (matchingSite as any)?.additional_charges ||
+      (matchingSite as any)?.additionalCharges ||
+      matchingSite?.default_additional_charges ||
+      matchingSite?.defaultAdditionalCharges;
 
     let finalAdditional: { name: string; amount: number }[] = [];
 
     if (existingAdd && Array.isArray(existingAdd) && existingAdd.length > 0) {
-      finalAdditional = existingAdd;
+      finalAdditional = existingAdd.map((c: any) => ({
+        name: c.name || c.charge_name || 'Charge',
+        amount: Number(c.amount ?? 0),
+      }));
     } else {
       let mach = Number(
         initialRecord.payload?.machineryCharges ||
@@ -236,10 +242,8 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
         0
       );
 
-      finalAdditional = [
-        { name: 'Machinery Charges', amount: mach },
-        { name: 'Material Charges', amount: mat },
-      ];
+      if (mach > 0) finalAdditional.push({ name: 'Machinery Charges', amount: mach });
+      if (mat > 0) finalAdditional.push({ name: 'Material Charges', amount: mat });
     }
 
     setAdditionalCharges(finalAdditional);
@@ -253,25 +257,25 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
   useEffect(() => {
     if (!selectedSite) return;
     const defaultAdd =
-      selectedSite.defaultAdditionalCharges ||
-      selectedSite.default_additional_charges ||
+      (selectedSite as any).additional_charges ||
       (selectedSite as any).additionalCharges ||
-      (selectedSite as any).additional_charges;
+      selectedSite.default_additional_charges ||
+      selectedSite.defaultAdditionalCharges;
 
     if (defaultAdd && Array.isArray(defaultAdd) && defaultAdd.length > 0) {
       setAdditionalCharges(
         defaultAdd.map((c: any) => ({
-          name: c.name || 'Charge',
-          amount: Number(c.amount || 0),
+          name: c.name || c.charge_name || 'Charge',
+          amount: Number(c.amount ?? 0),
         }))
       );
     } else {
       const mach = Number(selectedSite.defaultMachineryCharges ?? selectedSite.default_machinery_charges ?? 0);
       const mat = Number(selectedSite.defaultMaterialCharges ?? selectedSite.default_material_charges ?? 0);
-      setAdditionalCharges([
-        { name: 'Machinery Charges', amount: mach },
-        { name: 'Material Charges', amount: mat },
-      ]);
+      const fallbacks: { name: string; amount: number }[] = [];
+      if (mach > 0) fallbacks.push({ name: 'Machinery Charges', amount: mach });
+      if (mat > 0) fallbacks.push({ name: 'Material Charges', amount: mat });
+      setAdditionalCharges(fallbacks);
     }
   }, [selectedSiteId, selectedSite, sites]);
 
