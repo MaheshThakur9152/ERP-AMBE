@@ -497,6 +497,7 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
           site_id: selectedSite?.id,
           mgmtPercent: dynamicMgmtPercent,
           additionalCharges,
+          additional_charges: additionalCharges,
           company: {
             ...generatedInvoice.company,
             id: currentCompany?.id,
