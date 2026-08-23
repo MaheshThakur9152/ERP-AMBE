@@ -322,6 +322,91 @@ export class InvoiceService {
   }
 
   /**
+   * Update existing invoice in DB by ID
+   */
+  static async updateInvoice(id: string, payload: any): Promise<InvoiceRecord> {
+    const companyId =
+      payload.company_id ||
+      payload.companyId ||
+      payload.payload?.company_id ||
+      payload.payload?.company?.id;
+
+    const siteId =
+      payload.site_id ||
+      payload.siteId ||
+      payload.payload?.site_id ||
+      payload.payload?.party?.siteId;
+
+    const updateRow: any = {
+      company_id: companyId,
+      site_id: siteId,
+      type: payload.type || 'Tax Invoice',
+      status: payload.status || 'Pending',
+      invoice_date: payload.invoice_date || payload.date || payload.meta?.invoiceDate,
+      billing_period: payload.billing_period || payload.monthYear || payload.meta?.billingPeriod,
+      line_items: payload.line_items || payload.items || payload.payload?.items || [],
+      sub_total: payload.sub_total || payload.subTotal || 0,
+      tax_total: payload.tax_total || payload.taxTotal || 0,
+      grand_total: payload.grand_total || payload.amount || 0,
+      management_fee_percent: payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? payload.payload?.mgmtPercent ?? 5,
+      mgmt_percent: payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? payload.payload?.mgmtPercent ?? 5,
+      machinery_charges: payload.machinery_charges ?? payload.machineryCharges ?? payload.payload?.machineryCharges ?? 0,
+      material_charges: payload.material_charges ?? payload.materialCharges ?? payload.payload?.materialCharges ?? 0,
+      additional_charges: payload.additional_charges || payload.additionalCharges || payload.payload?.additionalCharges || [],
+      challan_no: payload.challan_no || payload.challanNo || payload.meta?.challanNo,
+      challan_date: payload.challan_date || payload.challanDate || payload.meta?.challanDate,
+      buyer_order_no: payload.buyer_order_no || payload.buyerOrderNo || payload.meta?.buyerOrderNo,
+      dispatch_doc_no: payload.dispatch_doc_no || payload.dispatchDocNo || payload.meta?.dispatchDocNo,
+      dispatched_through: payload.dispatched_through || payload.dispatchedThrough || payload.meta?.dispatchedThrough,
+      destination: payload.destination || payload.meta?.destination,
+      terms_of_delivery: payload.terms_of_delivery || payload.termsOfDelivery || payload.meta?.termsOfDelivery,
+      is_material: payload.is_material || payload.isMaterial || false,
+      payload: payload.payload || payload.invoice_data || payload,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (payload.invoice_no || payload.invoiceNo || payload.meta?.invoiceNo) {
+      updateRow.invoice_no = payload.invoice_no || payload.invoiceNo || payload.meta?.invoiceNo;
+    }
+
+    let { data, error } = await supabaseAdmin
+      .from('invoices')
+      .update(updateRow)
+      .eq('id', id)
+      .select('*, sites(*), companies(*)')
+      .single();
+
+    if (error) {
+      console.warn('⚠️ Supabase update failed, retrying without payload:', error.message);
+      delete updateRow.payload;
+      const fallback = await supabaseAdmin
+        .from('invoices')
+        .update(updateRow)
+        .eq('id', id)
+        .select('*')
+        .single();
+
+      if (fallback.error) {
+        throw new Error(`Database update failed: ${fallback.error.message}`);
+      }
+      data = fallback.data;
+    }
+
+    if (data) {
+      if (!data.companies && companyId) {
+        const { data: comp } = await supabaseAdmin.from('companies').select('*').eq('id', companyId).maybeSingle();
+        if (comp) data.companies = comp;
+      }
+      if (!data.sites && siteId) {
+        const { data: st } = await supabaseAdmin.from('sites').select('*').eq('id', siteId).maybeSingle();
+        if (st) data.sites = st;
+      }
+    }
+
+    return mapRowToInvoiceRecord(data);
+  }
+
+  /**
    * Update is_locked status for an invoice
    */
   static async updateLockStatus(id: string, isLocked: boolean): Promise<InvoiceRecord> {

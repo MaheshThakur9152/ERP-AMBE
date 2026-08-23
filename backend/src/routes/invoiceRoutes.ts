@@ -15,6 +15,8 @@ const router = Router();
 
 router.get('/', InvoiceController.list);
 router.post('/', InvoiceController.create);
+router.put('/:id', requireAuth, checkLockBouncer('invoices'), InvoiceController.update);
+router.patch('/:id', requireAuth, checkLockBouncer('invoices'), InvoiceController.update);
 router.delete('/:id', requireAuth, checkLockBouncer('invoices'), InvoiceController.delete);
 router.post('/upload', upload.single('file'), uploadInvoiceDirect);
 

@@ -49,6 +49,30 @@ export async function createInvoiceApi(payload: CreateInvoicePayload): Promise<{
   };
 }
 
+export async function updateInvoiceApi(id: string, payload: CreateInvoicePayload): Promise<{ status: number; data: InvoiceRecord }> {
+  const res = await fetchWithRetry(`${API_BASE}/${id}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+    retries: 1,
+    backoffMs: 500,
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error(`[PUT /api/invoices/${id}] API Error ${res.status}:`, errorText);
+    throw new Error(`PUT /api/invoices/${id} failed with status ${res.status}: ${errorText}`);
+  }
+
+  const json = await res.json();
+  return {
+    status: res.status,
+    data: json.data || json,
+  };
+}
+
 export async function deleteInvoiceApi(id: string): Promise<{ status: number }> {
   const res = await fetchWithRetry(`${API_BASE}/${id}`, {
     method: 'DELETE',

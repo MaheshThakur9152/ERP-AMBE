@@ -4,7 +4,7 @@ import { Site } from '@/features/sites/types';
 import { fetchSitesApi } from '@/features/sites/api/siteApi';
 import { CompanyProfile } from '@/features/company-profiles/types';
 import { fetchCompanies } from '@/features/company-profiles/api/companyApi';
-import { createInvoiceApi } from '@/features/invoice-hub/api/invoiceApi';
+import { createInvoiceApi, updateInvoiceApi } from '@/features/invoice-hub/api/invoiceApi';
 import { toast } from '@/components/ui/toast';
 import { InvoiceLineItem, InvoiceData } from '@/features/invoices/types/invoice';
 import {
@@ -505,10 +505,13 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
         },
       };
 
-      const res = await createInvoiceApi(recordPayload);
+      const targetId = initialRecord?.id || editId;
+      const res = targetId
+        ? await updateInvoiceApi(targetId, recordPayload)
+        : await createInvoiceApi(recordPayload);
 
       if (res.status === 201 || res.status === 200) {
-        toast.success('Invoice created successfully');
+        toast.success(targetId ? 'Invoice updated successfully' : 'Invoice created successfully');
         localStorage.setItem('asf_active_invoice', JSON.stringify(generatedInvoice));
 
         if (onSuccess) {
@@ -523,8 +526,8 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
         throw new Error(`Unexpected server response status ${res.status}`);
       }
     } catch (err: any) {
-      console.error('[SmartGeneratorForm] Failed to POST /api/invoices:', err);
-      toast.error(`API Error: ${err.message || 'Failed to create invoice'}`);
+      console.error('[SmartGeneratorForm] Save invoice error:', err);
+      toast.error(`API Error: ${err.message || 'Failed to save invoice'}`);
     } finally {
       setIsSubmitting(false);
     }

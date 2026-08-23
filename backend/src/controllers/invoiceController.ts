@@ -22,6 +22,17 @@ export class InvoiceController {
     }
   }
 
+  static async update(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { id } = req.params;
+      const record = await InvoiceService.updateInvoice(id, req.body);
+      res.status(200).json({ success: true, data: record });
+    } catch (error: any) {
+      console.error('[InvoiceController.update] Error:', error);
+      res.status(500).json({ success: false, error: error?.message || 'Failed to update invoice' });
+    }
+  }
+
   static async delete(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const { id } = req.params;

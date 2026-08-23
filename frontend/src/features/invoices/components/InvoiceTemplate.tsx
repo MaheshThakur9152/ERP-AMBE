@@ -265,17 +265,19 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
                   <span>Management charges @ {calc.mgmtChargesPercent}%</span>
                   <span>{formatCurrency(calc.mgmtChargesAmount)}</span>
                 </div>
-                {/* 1. Render Dynamic Additional Charges (if any exist) */}
-                {data.additionalCharges && data.additionalCharges.length > 0 && (
-                  data.additionalCharges.map((charge, index) => (
-                    <div key={`dynamic-charge-${index}`} className="flex justify-between p-1">
-                      <span>{charge.name}</span>
-                      <span>{formatCurrency(Number(charge.amount ?? 0))}</span>
-                    </div>
-                  ))
-                )}
+                {/* Render Dynamic Additional Charges (>0) */}
+                {data.additionalCharges && data.additionalCharges.length > 0
+                  ? data.additionalCharges
+                      .filter((charge) => Number(charge.amount || 0) > 0)
+                      .map((charge, index) => (
+                        <div key={`dynamic-charge-${index}`} className="flex justify-between p-1">
+                          <span>{charge.name}</span>
+                          <span>{formatCurrency(Number(charge.amount ?? 0))}</span>
+                        </div>
+                      ))
+                  : null}
 
-                {/* 2. Legacy Fallback: ONLY render if dynamic array is empty AND the legacy monetary value is strictly greater than 0 */}
+                {/* Legacy Fallback for direct machineryCharges / materialCharges > 0 */}
                 {(!data.additionalCharges || data.additionalCharges.length === 0) && (
                   <>
                     {Number(data.machineryCharges) > 0 && (
