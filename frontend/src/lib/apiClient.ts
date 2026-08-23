@@ -1,3 +1,5 @@
+import { supabase } from './supabase';
+
 export interface FetchRetryOptions extends RequestInit {
   retries?: number;
   backoffMs?: number;
@@ -21,7 +23,7 @@ export function getApiUrl(path: string): string {
 
 /**
  * Custom fetch wrapper that automatically retries failed GET/5xx requests with exponential backoff.
- * Prevents transient 500 errors on initial backend/DB startup race conditions.
+ * Automatically attaches credentials: 'include' and Authorization Bearer header if session exists.
  */
 export async function fetchWithRetry(
   url: string,
@@ -30,6 +32,24 @@ export async function fetchWithRetry(
   const { retries = 2, backoffMs = 500, ...fetchOptions } = options;
   const fullUrl = getApiUrl(url);
   const method = (fetchOptions.method || 'GET').toUpperCase();
+
+  // Ensure cross-origin cookies (access_token, refresh_token) are included by default
+  fetchOptions.credentials = fetchOptions.credentials || 'include';
+
+  // Attach Authorization header if available and not already set
+  const headers = new Headers(fetchOptions.headers || {});
+  if (!headers.has('Authorization')) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data?.session?.access_token;
+      if (token) {
+        headers.set('Authorization', `Bearer ${token}`);
+      }
+    } catch {
+      // Ignore session fetch failures
+    }
+  }
+  fetchOptions.headers = headers;
 
   let attempt = 0;
   let lastError: any = null;
@@ -63,3 +83,4 @@ export async function fetchWithRetry(
 
   throw lastError || new Error(`Request failed after ${retries} retries`);
 }
+

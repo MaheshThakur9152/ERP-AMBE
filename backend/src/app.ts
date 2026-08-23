@@ -45,8 +45,8 @@ const allowedOrigins = Array.from(new Set([...DEFAULT_ALLOWED_ORIGINS, ...envOri
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (e.g., server-to-server, mobile apps, curl) or matching allowed list
-      if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes(origin.replace(/\/+$/, ''))) {
+      // Allow requests with no origin (e.g., server-to-server, mobile apps, curl), matching allowed list, or *.vercel.app subdomains
+      if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes(origin.replace(/\/+$/, '')) || /\.vercel\.app$/.test(origin)) {
         callback(null, true);
       } else {
         callback(new Error(`CORS request rejected: Origin ${origin} not allowed`));
