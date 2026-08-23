@@ -219,7 +219,7 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
 
     let finalAdditional: { name: string; amount: number }[] = [];
 
-    if (existingAdd && Array.isArray(existingAdd) && existingAdd.length > 0) {
+    if (existingAdd && Array.isArray(existingAdd)) {
       finalAdditional = existingAdd.map((c: any) => ({
         name: c.name || c.charge_name || 'Charge',
         amount: Number(c.amount ?? 0),
@@ -262,7 +262,7 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
       selectedSite.default_additional_charges ||
       selectedSite.defaultAdditionalCharges;
 
-    if (defaultAdd && Array.isArray(defaultAdd) && defaultAdd.length > 0) {
+    if (defaultAdd && Array.isArray(defaultAdd)) {
       setAdditionalCharges(
         defaultAdd.map((c: any) => ({
           name: c.name || c.charge_name || 'Charge',

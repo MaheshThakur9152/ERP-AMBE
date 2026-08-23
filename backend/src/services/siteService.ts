@@ -24,14 +24,22 @@ function mapRowToSite(row: any): Site {
     defaultMachineryCharges: Number(row.default_machinery_charges ?? row.defaultMachineryCharges ?? 0),
     default_material_charges: Number(row.default_material_charges ?? row.defaultMaterialCharges ?? 0),
     defaultMaterialCharges: Number(row.default_material_charges ?? row.defaultMaterialCharges ?? 0),
-    default_additional_charges: row.additional_charges || row.default_additional_charges || row.defaultAdditionalCharges || [
-      { name: 'Machinery Charges', amount: Number(row.default_machinery_charges ?? row.defaultMachineryCharges ?? 0) },
-      { name: 'Material Charges', amount: Number(row.default_material_charges ?? row.defaultMaterialCharges ?? 0) },
-    ],
-    defaultAdditionalCharges: row.additional_charges || row.default_additional_charges || row.defaultAdditionalCharges || [
-      { name: 'Machinery Charges', amount: Number(row.default_machinery_charges ?? row.defaultMachineryCharges ?? 0) },
-      { name: 'Material Charges', amount: Number(row.default_material_charges ?? row.defaultMaterialCharges ?? 0) },
-    ],
+    default_additional_charges: row.additional_charges || row.default_additional_charges || row.defaultAdditionalCharges || (
+      (Number(row.default_machinery_charges ?? row.defaultMachineryCharges ?? 0) > 0 || Number(row.default_material_charges ?? row.defaultMaterialCharges ?? 0) > 0)
+        ? [
+            { name: 'Machinery Charges', amount: Number(row.default_machinery_charges ?? row.defaultMachineryCharges ?? 0) },
+            { name: 'Material Charges', amount: Number(row.default_material_charges ?? row.defaultMaterialCharges ?? 0) },
+          ].filter(c => c.amount > 0)
+        : []
+    ),
+    defaultAdditionalCharges: row.additional_charges || row.default_additional_charges || row.defaultAdditionalCharges || (
+      (Number(row.default_machinery_charges ?? row.defaultMachineryCharges ?? 0) > 0 || Number(row.default_material_charges ?? row.defaultMaterialCharges ?? 0) > 0)
+        ? [
+            { name: 'Machinery Charges', amount: Number(row.default_machinery_charges ?? row.defaultMachineryCharges ?? 0) },
+            { name: 'Material Charges', amount: Number(row.default_material_charges ?? row.defaultMaterialCharges ?? 0) },
+          ].filter(c => c.amount > 0)
+        : []
+    ),
     rateCards: row.rate_cards || row.rateCards || [],
     createdAt: row.created_at || row.createdAt,
     created_at: row.created_at,

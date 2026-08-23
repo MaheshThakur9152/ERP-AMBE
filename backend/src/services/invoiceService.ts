@@ -87,10 +87,14 @@ function mapRowToInvoiceRecord(row: any): InvoiceRecord {
         mgmtPercent: Number(row.payload.mgmtPercent ?? row.mgmt_percent ?? row.mgmtPercent ?? row.management_fee_percent ?? site?.management_fee_percent ?? site?.mgmt_percent ?? 5),
         machineryCharges: Number(row.payload.machineryCharges ?? row.machinery_charges ?? row.machineryCharges ?? 0),
         materialCharges: Number(row.payload.materialCharges ?? row.material_charges ?? row.materialCharges ?? 0),
-        additionalCharges: row.payload.additionalCharges || row.payload.additional_charges || row.additional_charges || row.additionalCharges || [
-          { name: 'Machinery Charges', amount: Number(row.payload.machineryCharges ?? row.machinery_charges ?? 0) },
-          { name: 'Material Charges', amount: Number(row.payload.materialCharges ?? row.material_charges ?? 0) },
-        ],
+        additionalCharges: row.payload?.additionalCharges || row.payload?.additional_charges || row.additional_charges || row.additionalCharges || (
+          (Number(row.payload?.machineryCharges ?? row.machinery_charges ?? 0) > 0 || Number(row.payload?.materialCharges ?? row.material_charges ?? 0) > 0)
+            ? [
+                { name: 'Machinery Charges', amount: Number(row.payload?.machineryCharges ?? row.machinery_charges ?? 0) },
+                { name: 'Material Charges', amount: Number(row.payload?.materialCharges ?? row.material_charges ?? 0) },
+              ].filter(c => c.amount > 0)
+            : []
+        ),
       }
     : {
         company: defaultCompany,
@@ -101,10 +105,14 @@ function mapRowToInvoiceRecord(row: any): InvoiceRecord {
         mgmtPercent: Number(row.mgmt_percent ?? row.mgmtPercent ?? row.management_fee_percent ?? site?.management_fee_percent ?? site?.mgmt_percent ?? 5),
         machineryCharges: Number(row.machinery_charges ?? row.machineryCharges ?? 0),
         materialCharges: Number(row.material_charges ?? row.materialCharges ?? 0),
-        additionalCharges: row.additional_charges || row.additionalCharges || [
-          { name: 'Machinery Charges', amount: Number(row.machinery_charges ?? row.machineryCharges ?? 0) },
-          { name: 'Material Charges', amount: Number(row.material_charges ?? row.materialCharges ?? 0) },
-        ],
+        additionalCharges: row.additional_charges || row.additionalCharges || (
+          (Number(row.machinery_charges ?? row.machineryCharges ?? 0) > 0 || Number(row.material_charges ?? row.materialCharges ?? 0) > 0)
+            ? [
+                { name: 'Machinery Charges', amount: Number(row.machinery_charges ?? row.machineryCharges ?? 0) },
+                { name: 'Material Charges', amount: Number(row.material_charges ?? row.materialCharges ?? 0) },
+              ].filter(c => c.amount > 0)
+            : []
+        ),
         cgstPercent: 9,
         sgstPercent: 9,
         terms: formattedTerms,
@@ -131,8 +139,8 @@ function mapRowToInvoiceRecord(row: any): InvoiceRecord {
     machineryCharges: Number(row.machinery_charges ?? row.machineryCharges ?? row.payload?.machineryCharges ?? 0),
     material_charges: Number(row.material_charges ?? row.materialCharges ?? row.payload?.materialCharges ?? 0),
     materialCharges: Number(row.material_charges ?? row.materialCharges ?? row.payload?.materialCharges ?? 0),
-    additional_charges: row.additional_charges || row.additionalCharges || row.payload?.additionalCharges || [],
-    additionalCharges: row.additional_charges || row.additionalCharges || row.payload?.additionalCharges || [],
+    additional_charges: row.additional_charges || row.additionalCharges || row.payload?.additionalCharges || row.payload?.additional_charges || [],
+    additionalCharges: row.additional_charges || row.additionalCharges || row.payload?.additionalCharges || row.payload?.additional_charges || [],
     type: row.type || 'Tax Invoice',
     status: row.status || 'Pending',
     itemsCount: Number(row.items_count || row.itemsCount || (row.line_items ? row.line_items.length : 0)),
@@ -352,7 +360,7 @@ export class InvoiceService {
       mgmt_percent: payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? payload.payload?.mgmtPercent ?? 5,
       machinery_charges: payload.machinery_charges ?? payload.machineryCharges ?? payload.payload?.machineryCharges ?? 0,
       material_charges: payload.material_charges ?? payload.materialCharges ?? payload.payload?.materialCharges ?? 0,
-      additional_charges: payload.additional_charges || payload.additionalCharges || payload.payload?.additionalCharges || [],
+      additional_charges: payload.additional_charges || payload.additionalCharges || payload.payload?.additionalCharges || payload.payload?.additional_charges || [],
       challan_no: payload.challan_no || payload.challanNo || payload.meta?.challanNo,
       challan_date: payload.challan_date || payload.challanDate || payload.meta?.challanDate,
       buyer_order_no: payload.buyer_order_no || payload.buyerOrderNo || payload.meta?.buyerOrderNo,

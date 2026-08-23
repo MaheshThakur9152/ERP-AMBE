@@ -38,7 +38,7 @@ export function computeInvoiceCalculations(
   // 3. Additional charges resolution
   let additionalCharges: AdditionalChargeItem[] = [];
   if (Array.isArray(additionalChargesInput)) {
-    additionalCharges = additionalChargesInput;
+    additionalCharges = additionalChargesInput.filter((ch) => (ch?.name || '').trim() !== '');
   } else {
     // Backward compatibility for legacy positional number args
     if (additionalChargesInput) {

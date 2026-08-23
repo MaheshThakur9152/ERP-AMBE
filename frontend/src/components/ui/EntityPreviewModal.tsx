@@ -95,10 +95,14 @@ const buildInvoiceData = (entityData: EntityPreviewData): InvoiceData => {
     ],
     isMaterial,
     mgmtPercent: entityData.details?.mgmt_percent || 5,
-    additionalCharges: entityData.details?.additionalCharges || [
-      { name: 'Machinery Charges', amount: entityData.details?.machinery_charges || 0 },
-      { name: 'Material Charges', amount: entityData.details?.material_charges || 0 },
-    ],
+    additionalCharges: entityData.details?.additionalCharges || entityData.details?.additional_charges || entityData.details?.payload?.additionalCharges || entityData.details?.payload?.additional_charges || (
+      (Number(entityData.details?.machinery_charges || 0) > 0 || Number(entityData.details?.material_charges || 0) > 0)
+        ? [
+            { name: 'Machinery Charges', amount: Number(entityData.details?.machinery_charges || 0) },
+            { name: 'Material Charges', amount: Number(entityData.details?.material_charges || 0) },
+          ].filter(c => c.amount > 0)
+        : []
+    ),
     cgstPercent: entityData.details?.cgst_percent || 9,
     sgstPercent: entityData.details?.sgst_percent || 9,
     terms: entityData.details?.terms || 'Payment can only be done in cheque/DD, NEFT, RTGS',

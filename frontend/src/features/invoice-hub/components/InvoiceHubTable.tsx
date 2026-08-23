@@ -85,10 +85,14 @@ const convertRecordToInvoiceData = (inv: InvoiceRecord): InvoiceData => {
     }
   }
 
-  const additionalCharges = inv.payload?.additionalCharges || (inv as any).additionalCharges || (inv as any).additional_charges || [
-    { name: 'Machinery Charges', amount: machineryCharges },
-    { name: 'Material Charges', amount: materialCharges },
-  ];
+  const additionalCharges = inv.payload?.additionalCharges || inv.payload?.additional_charges || (inv as any).additionalCharges || (inv as any).additional_charges || (
+    (machineryCharges > 0 || materialCharges > 0)
+      ? [
+          { name: 'Machinery Charges', amount: machineryCharges },
+          { name: 'Material Charges', amount: materialCharges },
+        ].filter(c => c.amount > 0)
+      : []
+  );
 
   if (inv.payload && inv.payload.company && inv.payload.company.name) {
     return {
