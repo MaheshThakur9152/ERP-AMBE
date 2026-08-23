@@ -1,5 +1,6 @@
 import { InvoiceRecord } from '../types';
 import { InvoiceData } from '@/features/invoices/types/invoice';
+import { fetchWithRetry } from '@/lib/apiClient';
 
 const API_BASE = '/api/invoices';
 
@@ -8,7 +9,7 @@ export interface CreateInvoicePayload extends Partial<InvoiceRecord> {
 }
 
 export async function fetchInvoicesApi(): Promise<InvoiceRecord[]> {
-  const res = await fetch(API_BASE);
+  const res = await fetchWithRetry(API_BASE, { method: 'GET', retries: 2, backoffMs: 500 });
   if (!res.ok) {
     const errorText = await res.text();
     console.error(`[GET /api/invoices] API Error ${res.status}:`, errorText);
@@ -25,12 +26,14 @@ export async function fetchInvoicesApi(): Promise<InvoiceRecord[]> {
 }
 
 export async function createInvoiceApi(payload: CreateInvoicePayload): Promise<{ status: number; data: InvoiceRecord }> {
-  const res = await fetch(API_BASE, {
+  const res = await fetchWithRetry(API_BASE, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
+    retries: 1,
+    backoffMs: 500,
   });
 
   if (!res.ok && res.status !== 201) {
@@ -47,8 +50,10 @@ export async function createInvoiceApi(payload: CreateInvoicePayload): Promise<{
 }
 
 export async function deleteInvoiceApi(id: string): Promise<{ status: number }> {
-  const res = await fetch(`${API_BASE}/${id}`, {
+  const res = await fetchWithRetry(`${API_BASE}/${id}`, {
     method: 'DELETE',
+    retries: 1,
+    backoffMs: 500,
   });
 
   if (!res.ok) {

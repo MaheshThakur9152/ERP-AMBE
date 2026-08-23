@@ -2,31 +2,70 @@ import { Request, Response, NextFunction } from 'express';
 import { supabaseAdmin } from '../config/supabase';
 import { AuthUser } from '../types/express';
 
+const COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax' as const,
+};
+
+const ACCESS_TOKEN_MAX_AGE = 3600000; // 1 hour
+const REFRESH_TOKEN_MAX_AGE = 31536000000; // 1 year
+
 /**
  * Middleware: requireAuth
- * Extracts JWT token from HTTP-only cookie or Authorization header,
- * verifies token with Supabase, fetches user's role from user_roles table,
- * and attaches req.user to the Request object.
+ * Extracts JWT access token from HTTP-only cookie or Authorization header.
+ * If access token is invalid/expired, attempts silent refresh using refresh_token cookie.
+ * Verifies user with Supabase, fetches role from user_roles, and attaches req.user.
  */
 export const requireAuth = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    // 1. Read token from HTTP-only cookie or Bearer auth header
-    const token = req.cookies?.access_token || req.headers.authorization?.replace(/^Bearer\s+/i, '');
+    const accessToken = req.cookies?.access_token || req.headers.authorization?.replace(/^Bearer\s+/i, '');
+    const refreshToken = req.cookies?.refresh_token;
 
-    if (!token) {
-      res.status(401).json({ error: 'Unauthorized: Missing authentication token' });
+    let user: any = null;
+
+    // 1. Validate Access Token if provided
+    if (accessToken) {
+      const { data: { user: authUser }, error: authError } = await supabaseAdmin.auth.getUser(accessToken);
+      if (!authError && authUser) {
+        user = authUser;
+      }
+    }
+
+    // 2. Silent Refresh if Access Token invalid/expired/missing
+    if (!user && refreshToken) {
+      const { data: refreshData, error: refreshError } = await supabaseAdmin.auth.refreshSession({
+        refresh_token: refreshToken,
+      });
+
+      if (!refreshError && refreshData.session && refreshData.user) {
+        user = refreshData.user;
+
+        // Quietly update cookies in background
+        res.cookie('access_token', refreshData.session.access_token, {
+          ...COOKIE_OPTIONS,
+          maxAge: ACCESS_TOKEN_MAX_AGE,
+        });
+        res.cookie('refresh_token', refreshData.session.refresh_token, {
+          ...COOKIE_OPTIONS,
+          maxAge: REFRESH_TOKEN_MAX_AGE,
+        });
+      } else {
+        // Refresh token invalid or expired -> Clear cookies & 401
+        res.clearCookie('access_token', COOKIE_OPTIONS);
+        res.clearCookie('refresh_token', COOKIE_OPTIONS);
+        res.status(401).json({ error: 'Unauthorized: Session expired, please log in again' });
+        return;
+      }
+    }
+
+    // 3. Reject if no valid user found
+    if (!user) {
+      res.status(401).json({ error: 'Unauthorized: Missing or invalid authentication token' });
       return;
     }
 
-    // 2. Verify token using Supabase admin client
-    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
-
-    if (authError || !user) {
-      res.status(401).json({ error: 'Unauthorized: Invalid or expired token' });
-      return;
-    }
-
-    // 3. Query user_roles table for user's assigned role
+    // 4. Query user_roles table for user's assigned role
     let role: 'admin' | 'superadmin' = 'admin';
 
     const { data: roleData, error: roleError } = await supabaseAdmin
@@ -39,7 +78,7 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
       role = roleData.role as 'admin' | 'superadmin';
     }
 
-    // 4. Attach user object to request
+    // 5. Attach user object to request
     req.user = {
       id: user.id,
       email: user.email,

@@ -170,17 +170,29 @@ export class InvoiceService {
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.warn('⚠️ Supabase join query failed, falling back to simple select:', error.message);
-        const fallbackRes = await supabaseAdmin
+        console.warn('⚠️ Initial Supabase query failed, retrying after 300ms warmup delay:', error.message);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+
+        const retryRes = await supabaseAdmin
           .from('invoices')
-          .select('*')
+          .select('*, sites(*), companies(*)')
           .order('created_at', { ascending: false });
 
-        if (fallbackRes.error) {
-          console.error('❌ Database error fetching invoices:', fallbackRes.error.message);
-          return [];
+        if (!retryRes.error && retryRes.data) {
+          data = retryRes.data;
+          error = null;
+        } else {
+          const fallbackRes = await supabaseAdmin
+            .from('invoices')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+          if (fallbackRes.error) {
+            console.error('❌ Database error fetching invoices:', fallbackRes.error.message);
+            return [];
+          }
+          data = fallbackRes.data;
         }
-        data = fallbackRes.data;
       }
 
       return (data || []).map((row: any) => {

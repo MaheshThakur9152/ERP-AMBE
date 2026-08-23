@@ -1,9 +1,10 @@
 import { Site, SiteFormData } from '../types';
+import { fetchWithRetry } from '@/lib/apiClient';
 
 const API_BASE = '/api/sites';
 
 export async function fetchSitesApi(): Promise<Site[]> {
-  const res = await fetch(API_BASE);
+  const res = await fetchWithRetry(API_BASE, { method: 'GET', retries: 2, backoffMs: 500 });
   if (!res.ok) {
     const errorText = await res.text();
     console.error(`[GET /api/sites] API Error ${res.status}:`, errorText);
@@ -26,10 +27,12 @@ export async function createSiteApi(payload: SiteFormData): Promise<Site> {
     fullPayload: payload,
   });
   try {
-    const res = await fetch(API_BASE, {
+    const res = await fetchWithRetry(API_BASE, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      retries: 1,
+      backoffMs: 500,
     });
     if (!res.ok && res.status !== 201) {
       const errorText = await res.text();
@@ -53,10 +56,12 @@ export async function updateSiteApi(id: string, payload: Partial<SiteFormData>):
     fullPayload: payload,
   });
   try {
-    const res = await fetch(`${API_BASE}/${id}`, {
+    const res = await fetchWithRetry(`${API_BASE}/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      retries: 1,
+      backoffMs: 500,
     });
     if (!res.ok) {
       const errorText = await res.text();
@@ -73,8 +78,10 @@ export async function updateSiteApi(id: string, payload: Partial<SiteFormData>):
 }
 
 export async function deleteSiteApi(id: string): Promise<{ status: number }> {
-  const res = await fetch(`${API_BASE}/${id}`, {
+  const res = await fetchWithRetry(`${API_BASE}/${id}`, {
     method: 'DELETE',
+    retries: 1,
+    backoffMs: 500,
   });
   if (!res.ok) {
     const errorText = await res.text();

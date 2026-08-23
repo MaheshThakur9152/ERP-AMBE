@@ -1,13 +1,20 @@
 import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
 
-// 10 years in milliseconds: 10 * 365 * 24 * 60 * 60 * 1000 = 315,360,000,000
-const TEN_YEARS_MS = 315360000000;
+// Cookie Max Ages
+const ACCESS_TOKEN_MAX_AGE = 3600000; // 1 hour in ms
+const REFRESH_TOKEN_MAX_AGE = 31536000000; // 1 year in ms (365 days)
+
+const COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax' as const,
+};
 
 export class AuthController {
   /**
    * POST /api/auth/login
-   * Authenticates user via Supabase, sets 10-year HTTP-only cookie, and returns user role.
+   * Authenticates user via Supabase, sets HTTP-only Access & Refresh token cookies, and returns user role.
    */
   static async login(req: Request, res: Response): Promise<void> {
     try {
@@ -33,13 +40,18 @@ export class AuthController {
       }
 
       const accessToken = data.session.access_token;
+      const refreshToken = data.session.refresh_token;
 
-      // Set 10-Year HTTP-Only Cookie
+      // Set 1-Hour Access Token Cookie
       res.cookie('access_token', accessToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: TEN_YEARS_MS,
+        ...COOKIE_OPTIONS,
+        maxAge: ACCESS_TOKEN_MAX_AGE,
+      });
+
+      // Set 1-Year Refresh Token Cookie
+      res.cookie('refresh_token', refreshToken, {
+        ...COOKIE_OPTIONS,
+        maxAge: REFRESH_TOKEN_MAX_AGE,
       });
 
       // Fetch user role from user_roles table
@@ -70,14 +82,11 @@ export class AuthController {
 
   /**
    * POST /api/auth/logout
-   * Clears HTTP-only authentication cookie.
+   * Clears HTTP-only access_token and refresh_token authentication cookies.
    */
   static async logout(req: Request, res: Response): Promise<void> {
-    res.clearCookie('access_token', {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-    });
+    res.clearCookie('access_token', COOKIE_OPTIONS);
+    res.clearCookie('refresh_token', COOKIE_OPTIONS);
     res.status(200).json({ success: true, message: 'Logged out successfully' });
   }
 
