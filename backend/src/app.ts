@@ -29,24 +29,32 @@ app.use(
 );
 
 // 3. Strict Environment-Driven CORS
-const allowedOrigins = (env.FRONTEND_URL || 'http://localhost:5173')
+const DEFAULT_ALLOWED_ORIGINS = [
+  'https://admin.ambeservice.com',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://localhost:5000',
+];
+const envOrigins = `${env.FRONTEND_URL || ''},${env.CLIENT_URL || ''}`
   .split(',')
   .map((url) => url.trim())
   .filter(Boolean);
+
+const allowedOrigins = Array.from(new Set([...DEFAULT_ALLOWED_ORIGINS, ...envOrigins]));
 
 app.use(
   cors({
     origin: (origin, callback) => {
       // Allow requests with no origin (e.g., server-to-server, mobile apps, curl) or matching allowed list
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes(origin.replace(/\/+$/, ''))) {
         callback(null, true);
       } else {
-        callback(new Error('CORS request rejected: Origin not allowed'));
+        callback(new Error(`CORS request rejected: Origin ${origin} not allowed`));
       }
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
   })
 );
 

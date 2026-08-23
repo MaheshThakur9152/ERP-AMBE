@@ -7,10 +7,8 @@ export interface FetchRetryOptions extends RequestInit {
  * Resolves relative API paths against VITE_API_URL environment variable if present.
  */
 export function getApiUrl(path: string): string {
-  const envUrl = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
-  if (!envUrl) {
-    return path;
-  }
+  const rawEnv = import.meta.env.VITE_API_URL;
+  const envUrl = (rawEnv && rawEnv.trim()) ? rawEnv.trim().replace(/\/+$/, '') : 'http://localhost:5000';
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   if (envUrl.endsWith('/api') && cleanPath.startsWith('/api/')) {
     return `${envUrl}${cleanPath.substring(4)}`;
