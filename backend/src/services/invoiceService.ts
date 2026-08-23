@@ -251,6 +251,7 @@ export class InvoiceService {
       mgmt_percent: payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? payload.payload?.mgmtPercent ?? 5,
       machinery_charges: payload.machinery_charges ?? payload.machineryCharges ?? payload.payload?.machineryCharges ?? 0,
       material_charges: payload.material_charges ?? payload.materialCharges ?? payload.payload?.materialCharges ?? 0,
+      additional_charges: payload.additional_charges || payload.additionalCharges || payload.payload?.additionalCharges || payload.payload?.additional_charges || [],
       challan_no: payload.challan_no || payload.challanNo || payload.meta?.challanNo || '',
       challan_date: payload.challan_date || payload.challanDate || payload.meta?.challanDate || '',
       buyer_order_no: payload.buyer_order_no || payload.buyerOrderNo || payload.meta?.buyerOrderNo || '',
