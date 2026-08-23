@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { getApiUrl } from '@/lib/apiClient';
 import { UserProfile, UserRole } from '../types';
 
 const AUTH_API_BASE = '/api/auth';
@@ -14,7 +15,7 @@ export interface LoginResponse {
 }
 
 export async function loginApi(email: string, password: string): Promise<LoginResponse> {
-  const res = await fetch(`${AUTH_API_BASE}/login`, {
+  const res = await fetch(getApiUrl(`${AUTH_API_BASE}/login`), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -32,7 +33,7 @@ export async function loginApi(email: string, password: string): Promise<LoginRe
 }
 
 export async function logoutApi(): Promise<void> {
-  await fetch(`${AUTH_API_BASE}/logout`, {
+  await fetch(getApiUrl(`${AUTH_API_BASE}/logout`), {
     method: 'POST',
     credentials: 'include',
   });
@@ -40,7 +41,7 @@ export async function logoutApi(): Promise<void> {
 
 export async function fetchMeApi(): Promise<LoginResponse['user'] | null> {
   try {
-    const res = await fetch(`${AUTH_API_BASE}/me`, {
+    const res = await fetch(getApiUrl(`${AUTH_API_BASE}/me`), {
       method: 'GET',
       credentials: 'include',
     });
@@ -67,7 +68,7 @@ export async function fetchUserProfile(userId: string): Promise<UserProfile | nu
 }
 
 export async function lockInvoiceApi(id: string, isLocked: boolean): Promise<any> {
-  const res = await fetch(`/api/invoices/${id}/lock`, {
+  const res = await fetch(getApiUrl(`/api/invoices/${id}/lock`), {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',

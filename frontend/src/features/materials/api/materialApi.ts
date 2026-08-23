@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { getApiUrl } from '@/lib/apiClient';
 import { Material, CreateMaterialInput, UpdateMaterialInput } from '../types';
 
 const API_BASE = '/api';
@@ -13,7 +14,7 @@ async function getAuthHeader() {
 
 export async function fetchMaterialsApi(): Promise<Material[]> {
   const headers = await getAuthHeader();
-  const res = await fetch(`${API_BASE}/materials`, { headers });
+  const res = await fetch(getApiUrl(`${API_BASE}/materials`), { headers });
   if (!res.ok) {
     const errorText = await res.text();
     console.error(`[GET /api/materials] API Error ${res.status}:`, errorText);
@@ -31,7 +32,7 @@ export async function fetchMaterialsApi(): Promise<Material[]> {
 
 export async function createMaterialApi(payload: CreateMaterialInput): Promise<Material> {
   const headers = await getAuthHeader();
-  const res = await fetch(`${API_BASE}/materials`, {
+  const res = await fetch(getApiUrl(`${API_BASE}/materials`), {
     method: 'POST',
     headers,
     body: JSON.stringify(payload),
@@ -47,7 +48,7 @@ export async function createMaterialApi(payload: CreateMaterialInput): Promise<M
 
 export async function updateMaterialApi(id: string, payload: UpdateMaterialInput): Promise<Material> {
   const headers = await getAuthHeader();
-  const res = await fetch(`${API_BASE}/materials/${id}`, {
+  const res = await fetch(getApiUrl(`${API_BASE}/materials/${id}`), {
     method: 'PUT',
     headers,
     body: JSON.stringify(payload),
@@ -63,7 +64,7 @@ export async function updateMaterialApi(id: string, payload: UpdateMaterialInput
 
 export async function deleteMaterialApi(id: string): Promise<boolean> {
   const headers = await getAuthHeader();
-  const res = await fetch(`${API_BASE}/materials/${id}`, {
+  const res = await fetch(getApiUrl(`${API_BASE}/materials/${id}`), {
     method: 'DELETE',
     headers,
   });

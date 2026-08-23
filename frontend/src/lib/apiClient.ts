@@ -4,6 +4,24 @@ export interface FetchRetryOptions extends RequestInit {
 }
 
 /**
+ * Resolves relative API paths against VITE_API_URL environment variable if present.
+ */
+export function getApiUrl(path: string): string {
+  const envUrl = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
+  if (!envUrl) {
+    return path;
+  }
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  if (envUrl.endsWith('/api') && cleanPath.startsWith('/api/')) {
+    return `${envUrl}${cleanPath.substring(4)}`;
+  }
+  if (envUrl.endsWith('/api') && cleanPath === '/api') {
+    return envUrl;
+  }
+  return `${envUrl}${cleanPath}`;
+}
+
+/**
  * Custom fetch wrapper that automatically retries failed GET/5xx requests with exponential backoff.
  * Prevents transient 500 errors on initial backend/DB startup race conditions.
  */
@@ -12,6 +30,7 @@ export async function fetchWithRetry(
   options: FetchRetryOptions = {}
 ): Promise<Response> {
   const { retries = 2, backoffMs = 500, ...fetchOptions } = options;
+  const fullUrl = getApiUrl(url);
   const method = (fetchOptions.method || 'GET').toUpperCase();
 
   let attempt = 0;
@@ -19,7 +38,7 @@ export async function fetchWithRetry(
 
   while (attempt <= retries) {
     try {
-      const response = await fetch(url, fetchOptions);
+      const response = await fetch(fullUrl, fetchOptions);
 
       // Retry on 5xx server errors (e.g. transient 500 startup race condition)
       if (!response.ok && response.status >= 500 && attempt < retries) {

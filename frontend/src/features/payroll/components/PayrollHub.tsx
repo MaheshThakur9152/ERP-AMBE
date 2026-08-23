@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { getApiUrl } from '@/lib/apiClient';
 import {
   DollarSign,
   Download,
@@ -110,7 +111,7 @@ export const PayrollHub: React.FC = () => {
         const { data, error } = await supabase.from('sites').select('id, site_name, code_name').order('site_name');
         if (error) {
           console.warn('Fallback: fetching sites via API', error);
-          const res = await fetch('/api/sites');
+          const res = await fetch(getApiUrl('/api/sites'));
           const json = await res.json();
           setSites(json.data || json || []);
         } else if (data) {

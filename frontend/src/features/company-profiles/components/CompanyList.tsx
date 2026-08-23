@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { getApiUrl } from '@/lib/apiClient';
 import { CompanyProfile, CreateCompanyInput } from '../types';
 import { fetchCompanies, createCompany, updateCompany } from '../api/companyApi';
 import { CompanyCard } from './CompanyCard';
@@ -52,7 +53,7 @@ export const CompanyList: React.FC = () => {
   const handleLock = async (c: CompanyProfile) => {
     setLockingId(c.id);
     try {
-      const res = await fetch('/api/admin/lock-item', {
+      const res = await fetch(getApiUrl('/api/admin/lock-item'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

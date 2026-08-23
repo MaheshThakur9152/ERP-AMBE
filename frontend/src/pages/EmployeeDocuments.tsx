@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { getApiUrl } from '@/lib/apiClient';
 import {
   FileText,
   Upload,
@@ -178,7 +179,7 @@ export const EmployeeDocuments: React.FC = () => {
       formData.append('siteName', siteName);
       formData.append('designation', designation);
 
-      const response = await fetch('/api/documents/upload', {
+      const response = await fetch(getApiUrl('/api/documents/upload'), {
         method: 'POST',
         body: formData,
       });

@@ -55,34 +55,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     const initAuth = async () => {
-      // 1. Try backend HTTP-only cookie session check first (/api/auth/me)
-      const backendUser = await fetchMeApi();
-      if (backendUser) {
-        const userObj = createMockUser(backendUser.email, backendUser.role);
-        setUser(userObj);
-        setRole(backendUser.role);
-        localStorage.setItem(ROLE_STORAGE_KEY, backendUser.role);
-        setProfile(createMockProfile(backendUser.email, backendUser.role));
-        setLoading(false);
-        return;
-      }
-
-      // 2. Check local storage saved user or demo fallback
-      const savedDemoUser = localStorage.getItem(DEMO_USER_KEY);
-      const savedRole = (localStorage.getItem(ROLE_STORAGE_KEY) as UserRole) || 'admin';
-      const isPlaceholder = !import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL.includes('placeholder');
-
-      if (savedDemoUser || isPlaceholder) {
-        const email = savedDemoUser || 'ambe@ambe.local';
-        setUser(createMockUser(email, savedRole));
-        setRole(savedRole);
-        setProfile(createMockProfile(email, savedRole));
-        setLoading(false);
-        return;
-      }
-
-      // 3. Fallback to Supabase JS Client session
       try {
+        // 1. Try backend HTTP-only cookie session check first (/api/auth/me)
+        const backendUser = await fetchMeApi();
+        if (backendUser) {
+          const userObj = createMockUser(backendUser.email, backendUser.role);
+          setUser(userObj);
+          setRole(backendUser.role);
+          localStorage.setItem(ROLE_STORAGE_KEY, backendUser.role);
+          setProfile(createMockProfile(backendUser.email, backendUser.role));
+          return;
+        }
+
+        // 2. Check explicitly saved user session in local storage
+        const savedDemoUser = localStorage.getItem(DEMO_USER_KEY);
+        const savedRole = (localStorage.getItem(ROLE_STORAGE_KEY) as UserRole) || 'admin';
+
+        if (savedDemoUser) {
+          setUser(createMockUser(savedDemoUser, savedRole));
+          setRole(savedRole);
+          setProfile(createMockProfile(savedDemoUser, savedRole));
+          return;
+        }
+
+        // 3. Fallback to Supabase JS Client session
         const { data } = await supabase.auth.getSession();
         if (data?.session?.user) {
           setSession(data.session);
@@ -95,15 +91,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               localStorage.setItem(ROLE_STORAGE_KEY, prof.role);
             }
           } catch {
-            setProfile(createMockProfile());
+            setProfile(createMockProfile(data.session.user.email || 'ambe@ambe.local', 'admin'));
           }
-        } else {
-          setUser(createMockUser());
-          setProfile(createMockProfile());
+          return;
         }
+
+        // 4. No active session -> unauthenticated (redirect to /login via ProtectedRoute)
+        setUser(null);
+        setProfile(null);
+        setSession(null);
       } catch (err) {
-        setUser(createMockUser());
-        setProfile(createMockProfile());
+        setUser(null);
+        setProfile(null);
+        setSession(null);
       } finally {
         setLoading(false);
       }

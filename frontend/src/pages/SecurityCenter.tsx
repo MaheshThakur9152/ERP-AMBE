@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/features/auth/context/AuthContext';
+import { getApiUrl } from '@/lib/apiClient';
 import {
   ShieldCheck,
   ShieldAlert,
@@ -58,7 +59,7 @@ export const SecurityCenter: React.FC = () => {
     if (!isSuperAdmin) return;
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/pending-locks', {
+      const res = await fetch(getApiUrl('/api/admin/pending-locks'), {
         method: 'GET',
         credentials: 'include',
       });
@@ -227,7 +228,7 @@ export const SecurityCenter: React.FC = () => {
   const handleLockSingle = async (item: PendingLockItem) => {
     setLockingSingleId(item.id);
     try {
-      const res = await fetch('/api/admin/lock-item', {
+      const res = await fetch(getApiUrl('/api/admin/lock-item'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -284,7 +285,7 @@ export const SecurityCenter: React.FC = () => {
     });
 
     try {
-      const res = await fetch('/api/admin/lock-bulk', {
+      const res = await fetch(getApiUrl('/api/admin/lock-bulk'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { getApiUrl } from '@/lib/apiClient';
 import {
   FileText,
   Upload,
@@ -163,7 +164,7 @@ export const InvoiceVault: React.FC = () => {
       formData.append('siteName', siteName);
       formData.append('site_name', siteName);
 
-      const response = await fetch('/api/invoices/upload', {
+      const response = await fetch(getApiUrl('/api/invoices/upload'), {
         method: 'POST',
         body: formData,
       });

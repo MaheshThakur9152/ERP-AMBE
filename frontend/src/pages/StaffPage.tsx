@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getApiUrl } from '@/lib/apiClient';
 import {
   Users,
   Search,
@@ -272,7 +273,7 @@ export const StaffPage: React.FC = () => {
       uploadData.append('siteName', site);
       uploadData.append('designation', designation);
 
-      const response = await fetch('/api/documents/upload', {
+      const response = await fetch(getApiUrl('/api/documents/upload'), {
         method: 'POST',
         body: uploadData,
       });

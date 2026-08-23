@@ -1,10 +1,11 @@
 import JSZip from 'jszip';
 import { InvoiceData } from '@/features/invoices/types/invoice';
+import { getApiUrl } from '@/lib/apiClient';
 
 export const excelService = {
   exportInvoice: async (invoiceData: InvoiceData): Promise<void> => {
     try {
-      const response = await fetch('/api/excel/export-invoice', {
+      const response = await fetch(getApiUrl('/api/excel/export-invoice'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
