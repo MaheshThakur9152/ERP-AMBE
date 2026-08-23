@@ -265,26 +265,25 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
                   <span>Management charges @ {calc.mgmtChargesPercent}%</span>
                   <span>{formatCurrency(calc.mgmtChargesAmount)}</span>
                 </div>
-                {/* Render Dynamic Additional Charges (>0) */}
-                {data.additionalCharges && data.additionalCharges.length > 0
-                  ? data.additionalCharges
-                      .filter((charge) => Number(charge.amount || 0) > 0)
-                      .map((charge, index) => (
-                        <div key={`dynamic-charge-${index}`} className="flex justify-between p-1">
-                          <span>{charge.name}</span>
-                          <span>{formatCurrency(Number(charge.amount ?? 0))}</span>
-                        </div>
-                      ))
-                  : null}
-
-                <div className="flex justify-between p-1">
-                  <span>Machinery Charges</span>
-                  <span>{formatCurrency(Number(data.machineryCharges || 0))}</span>
-                </div>
-                <div className="flex justify-between p-1">
-                  <span>Material Charges</span>
-                  <span>{formatCurrency(Number(data.materialCharges || 0))}</span>
-                </div>
+                {data.additionalCharges && data.additionalCharges.length > 0 ? (
+                  data.additionalCharges.map((charge, index) => (
+                    <div key={`dynamic-charge-${index}`} className="flex justify-between p-1">
+                      <span>{charge.name || 'Additional Charge'}</span>
+                      <span>{formatCurrency(Number(charge.amount ?? 0))}</span>
+                    </div>
+                  ))
+                ) : (
+                  <>
+                    <div className="flex justify-between p-1">
+                      <span>Machinery Charges</span>
+                      <span>{formatCurrency(Number(data.machineryCharges || 0))}</span>
+                    </div>
+                    <div className="flex justify-between p-1">
+                      <span>Material Charges</span>
+                      <span>{formatCurrency(Number(data.materialCharges || 0))}</span>
+                    </div>
+                  </>
+                )}
 
                 <div className="flex justify-between p-1 font-normal">
                   <span>Total</span>
