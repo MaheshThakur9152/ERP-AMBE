@@ -13,6 +13,34 @@ export interface PendingLockItem {
   details?: Record<string, any>;
 }
 
+interface EntityLockConfig {
+  table: PendingLockItem['entityType'];
+  select: string;
+  useCutoff?: boolean;
+  mapFn: (row: any, hoursOld: number, createdAt: string) => PendingLockItem;
+}
+
+async function fetchEntityPendingLocks(config: EntityLockConfig): Promise<PendingLockItem[]> {
+  const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  let query = supabaseAdmin
+    .from(config.table)
+    .select(config.select)
+    .or('is_locked.eq.false,is_locked.is.null');
+
+  if (config.useCutoff !== false) {
+    query = query.lt('created_at', cutoffTime);
+  }
+
+  const { data, error } = await query;
+  if (error || !data) return [];
+
+  return data.map((row: any) => {
+    const createdAt = row.created_at || new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+    const hoursOld = Math.floor((Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60));
+    return config.mapFn(row, hoursOld, createdAt);
+  });
+}
+
 export class AdminController {
   /**
    * GET /api/admin/pending-locks
@@ -21,20 +49,13 @@ export class AdminController {
    */
   static async getPendingLocks(req: Request, res: Response): Promise<void> {
     try {
-      const pendingItems: PendingLockItem[] = [];
-      const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-
-      // 0. Companies
-      const { data: companies } = await supabaseAdmin
-        .from('companies')
-        .select('*')
-        .or('is_locked.eq.false,is_locked.is.null');
-
-      if (companies) {
-        companies.forEach((comp: any) => {
-          const createdAt = comp.created_at || new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
-          const hoursOld = Math.floor((Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60));
-          pendingItems.push({
+      const results = await Promise.all([
+        // 0. Companies
+        fetchEntityPendingLocks({
+          table: 'companies',
+          select: '*',
+          useCutoff: false,
+          mapFn: (comp, hoursOld, createdAt) => ({
             id: comp.id,
             entityType: 'companies',
             title: comp.name || comp.legal_name || comp.entity_code || 'Company Entity Profile',
@@ -49,104 +70,70 @@ export class AdminController {
               cin: comp.cin_no || comp.cin,
               tax_prefix: comp.tax_prefix,
             },
-          });
-        });
-      }
-
-      // 1. Sites
-      const { data: sites } = await supabaseAdmin
-        .from('sites')
-        .select('id, site_name, client_name, created_at, is_locked')
-        .or('is_locked.eq.false,is_locked.is.null')
-        .lt('created_at', cutoffTime);
-
-      if (sites) {
-        sites.forEach((st: any) => {
-          const hoursOld = Math.floor((Date.now() - new Date(st.created_at).getTime()) / (1000 * 60 * 60));
-          pendingItems.push({
+          }),
+        }),
+        // 1. Sites
+        fetchEntityPendingLocks({
+          table: 'sites',
+          select: 'id, site_name, client_name, created_at, is_locked',
+          mapFn: (st, hoursOld, createdAt) => ({
             id: st.id,
             entityType: 'sites',
             title: st.site_name || 'Unnamed Site',
             subtitle: `Client: ${st.client_name || 'N/A'}`,
-            createdAt: st.created_at,
+            createdAt,
             hoursOld,
             is_locked: false,
-          });
-        });
-      }
-
-      // 2. Invoices
-      const { data: invoices } = await supabaseAdmin
-        .from('invoices')
-        .select('id, invoice_no, type, grand_total, created_at, is_locked, certified_doc_url, certified_attendance_url, sites(site_name)')
-        .or('is_locked.eq.false,is_locked.is.null')
-        .lt('created_at', cutoffTime);
-
-      if (invoices) {
-        invoices.forEach((inv: any) => {
-          const hoursOld = Math.floor((Date.now() - new Date(inv.created_at).getTime()) / (1000 * 60 * 60));
-          pendingItems.push({
+          }),
+        }),
+        // 2. Invoices
+        fetchEntityPendingLocks({
+          table: 'invoices',
+          select: 'id, invoice_no, type, grand_total, created_at, is_locked, certified_doc_url, certified_attendance_url, sites(site_name)',
+          mapFn: (inv, hoursOld, createdAt) => ({
             id: inv.id,
             entityType: 'invoices',
             title: `Invoice #${inv.invoice_no || inv.id}`,
             subtitle: `${inv.type || 'Invoice'} - ₹${inv.grand_total || 0}`,
-            createdAt: inv.created_at,
+            createdAt,
             hoursOld,
             is_locked: false,
             uploadedDocUrl: inv.certified_doc_url || inv.certified_attendance_url || null,
-          });
-        });
-      }
-
-      // 3. Attendance Sheets
-      const { data: attendance } = await supabaseAdmin
-        .from('attendance_sheets')
-        .select('id, month_year, site_id, created_at, is_locked, file_url, sites(site_name)')
-        .or('is_locked.eq.false,is_locked.is.null')
-        .lt('created_at', cutoffTime);
-
-      if (attendance) {
-        attendance.forEach((att: any) => {
-          const hoursOld = Math.floor((Date.now() - new Date(att.created_at).getTime()) / (1000 * 60 * 60));
-          const siteName = att.sites?.site_name || 'Site Attendance';
-          pendingItems.push({
+          }),
+        }),
+        // 3. Attendance Sheets
+        fetchEntityPendingLocks({
+          table: 'attendance_sheets',
+          select: 'id, month_year, site_id, created_at, is_locked, file_url, sites(site_name)',
+          mapFn: (att, hoursOld, createdAt) => ({
             id: att.id,
             entityType: 'attendance_sheets',
-            title: `${siteName} - ${att.month_year || 'Attendance'}`,
+            title: `${att.sites?.site_name || 'Site Attendance'} - ${att.month_year || 'Attendance'}`,
             subtitle: `Attendance Sheet`,
-            createdAt: att.created_at,
+            createdAt,
             hoursOld,
             is_locked: false,
             uploadedDocUrl: att.file_url || null,
-          });
-        });
-      }
-
-      // 4. Payroll Records
-      const { data: payroll } = await supabaseAdmin
-        .from('payroll_records')
-        .select('id, month_year, created_at, is_locked, excel_url')
-        .or('is_locked.eq.false,is_locked.is.null')
-        .lt('created_at', cutoffTime);
-
-      if (payroll) {
-        payroll.forEach((pr: any) => {
-          const hoursOld = Math.floor((Date.now() - new Date(pr.created_at).getTime()) / (1000 * 60 * 60));
-          pendingItems.push({
+          }),
+        }),
+        // 4. Payroll Records
+        fetchEntityPendingLocks({
+          table: 'payroll_records',
+          select: 'id, month_year, created_at, is_locked, excel_url',
+          mapFn: (pr, hoursOld, createdAt) => ({
             id: pr.id,
             entityType: 'payroll_records',
             title: `Payroll Record - ${pr.month_year || 'Monthly'}`,
             subtitle: `Payroll Batch`,
-            createdAt: pr.created_at,
+            createdAt,
             hoursOld,
             is_locked: false,
             uploadedDocUrl: pr.excel_url || null,
-          });
-        });
-      }
+          }),
+        }),
+      ]);
 
-      // Sort by oldest first
-      pendingItems.sort((a, b) => b.hoursOld - a.hoursOld);
+      const pendingItems = results.flat().sort((a, b) => b.hoursOld - a.hoursOld);
 
       res.status(200).json({
         success: true,
@@ -155,7 +142,7 @@ export class AdminController {
       });
     } catch (err: any) {
       console.error('[AdminController.getPendingLocks] Error:', err);
-      res.status(500).json({ success: false, error: err.message || 'Failed to fetch pending locks' });
+      res.status(500).json({ success: false, error: 'Failed to fetch pending locks', ...(process.env.NODE_ENV === 'development' && { details: err.message }) });
     }
   }
 
@@ -173,7 +160,7 @@ export class AdminController {
         return;
       }
 
-      const validTables = ['companies', 'sites', 'invoices', 'attendance_sheets', 'payroll_records', 'staff', 'employees'];
+      const validTables = ['companies', 'sites', 'invoices', 'attendance_sheets', 'payroll_records', 'materials', 'staff', 'employee_documents', 'company_documents'];
       if (!validTables.includes(entityType)) {
         res.status(400).json({ error: 'Invalid entityType table name' });
         return;
@@ -187,7 +174,7 @@ export class AdminController {
         .eq('id', id);
 
       if (error) {
-        res.status(500).json({ error: `Failed to update lock status: ${error.message}` });
+        res.status(500).json({ error: 'Failed to update lock status', ...(process.env.NODE_ENV === 'development' && { details: error.message }) });
         return;
       }
 
@@ -197,7 +184,7 @@ export class AdminController {
       });
     } catch (err: any) {
       console.error('[AdminController.lockItem] Error:', err);
-      res.status(500).json({ error: err.message || 'Failed to update lock status' });
+      res.status(500).json({ error: 'Failed to update lock status', ...(process.env.NODE_ENV === 'development' && { details: err.message }) });
     }
   }
 
@@ -215,7 +202,7 @@ export class AdminController {
         return;
       }
 
-      const validTables = ['companies', 'sites', 'invoices', 'attendance_sheets', 'payroll_records', 'staff', 'employees'];
+      const validTables = ['companies', 'sites', 'invoices', 'attendance_sheets', 'payroll_records', 'materials', 'staff', 'employee_documents', 'company_documents'];
 
       const lockPromises = items.map(async (item: { entityType?: string; type?: string; id: string }) => {
         const table = item.entityType || item.type;
@@ -243,7 +230,7 @@ export class AdminController {
       });
     } catch (err: any) {
       console.error('[AdminController.lockBulk] Error:', err);
-      res.status(500).json({ error: err.message || 'Failed to process bulk lock' });
+      res.status(500).json({ error: 'Failed to process bulk lock', ...(process.env.NODE_ENV === 'development' && { details: err.message }) });
     }
   }
 }

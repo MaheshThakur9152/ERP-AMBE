@@ -1,61 +1,67 @@
 import { Request, Response, NextFunction } from 'express';
 import { SiteService } from '../services/siteService';
+import { ApiResponse } from '../types/api';
 
 export class SiteController {
   static async list(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const sites = await SiteService.getAllSites();
-      res.json({ success: true, data: sites });
+      const sites = await SiteService.getAllSites(req.user);
+      const response: ApiResponse = { success: true, data: sites };
+      res.json(response);
     } catch (err: any) {
       console.error('[SiteController.list] Error:', err);
-      res.status(500).json({ success: false, error: err.message || 'Failed to fetch sites' });
+      next(err);
     }
   }
 
   static async getById(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const { id } = req.params;
-      const site = await SiteService.getSiteById(id);
+      const site = await SiteService.getSiteById(id, req.user);
       if (!site) {
         res.status(404).json({ success: false, error: 'Site not found' });
         return;
       }
-      res.json({ success: true, data: site });
+      const response: ApiResponse = { success: true, data: site };
+      res.json(response);
     } catch (err: any) {
       console.error('[SiteController.getById] Error:', err);
-      res.status(500).json({ success: false, error: err.message || 'Failed to fetch site' });
+      next(err);
     }
   }
 
   static async create(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const site = await SiteService.createSite(req.body);
-      res.status(201).json({ success: true, data: site });
+      const site = await SiteService.createSite(req.body, req.user);
+      const response: ApiResponse = { success: true, data: site };
+      res.status(201).json(response);
     } catch (err: any) {
       console.error('[SiteController.create] Error:', err);
-      res.status(500).json({ success: false, error: err.message || 'Failed to create site' });
+      next(err);
     }
   }
 
   static async update(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const { id } = req.params;
-      const site = await SiteService.updateSite(id, req.body);
-      res.json({ success: true, data: site });
+      const site = await SiteService.updateSite(id, req.body, req.user);
+      const response: ApiResponse = { success: true, data: site };
+      res.json(response);
     } catch (err: any) {
       console.error('[SiteController.update] Error:', err);
-      res.status(500).json({ success: false, error: err.message || 'Failed to update site' });
+      next(err);
     }
   }
 
   static async delete(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const { id } = req.params;
-      await SiteService.deleteSite(id);
-      res.status(200).json({ success: true, message: 'Site deleted successfully', id });
+      await SiteService.deleteSite(id, req.user);
+      const response: ApiResponse = { success: true, message: 'Site deleted successfully', id };
+      res.status(200).json(response);
     } catch (err: any) {
       console.error('[SiteController.delete] Error:', err);
-      res.status(500).json({ success: false, error: err.message || 'Failed to delete site' });
+      next(err);
     }
   }
 }

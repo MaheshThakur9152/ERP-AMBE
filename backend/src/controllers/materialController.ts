@@ -1,24 +1,27 @@
 import { Request, Response, NextFunction } from 'express';
 import { MaterialService } from '../services/materialService';
+import { ApiResponse } from '../types/api';
 
 export class MaterialController {
   static async list(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const materials = await MaterialService.getAllMaterials();
-      res.json({ success: true, data: materials });
+      const response: ApiResponse = { success: true, data: materials };
+      res.json(response);
     } catch (err: any) {
       console.error('[MaterialController.list] Error:', err);
-      res.status(500).json({ success: false, error: err.message || 'Failed to fetch materials' });
+      next(err);
     }
   }
 
   static async create(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const record = await MaterialService.createMaterial(req.body);
-      res.status(201).json({ success: true, data: record });
+      const response: ApiResponse = { success: true, data: record };
+      res.status(201).json(response);
     } catch (err: any) {
       console.error('[MaterialController.create] Error:', err);
-      res.status(500).json({ success: false, error: err.message || 'Failed to create material' });
+      next(err);
     }
   }
 
@@ -26,10 +29,11 @@ export class MaterialController {
     try {
       const { id } = req.params;
       const record = await MaterialService.updateMaterial(id, req.body);
-      res.json({ success: true, data: record });
+      const response: ApiResponse = { success: true, data: record };
+      res.json(response);
     } catch (err: any) {
       console.error('[MaterialController.update] Error:', err);
-      res.status(500).json({ success: false, error: err.message || 'Failed to update material' });
+      next(err);
     }
   }
 
@@ -37,10 +41,11 @@ export class MaterialController {
     try {
       const { id } = req.params;
       await MaterialService.deleteMaterial(id);
-      res.json({ success: true, message: 'Material deleted successfully', id });
+      const response: ApiResponse = { success: true, message: 'Material deleted successfully', id };
+      res.json(response);
     } catch (err: any) {
       console.error('[MaterialController.delete] Error:', err);
-      res.status(500).json({ success: false, error: err.message || 'Failed to delete material' });
+      next(err);
     }
   }
 }

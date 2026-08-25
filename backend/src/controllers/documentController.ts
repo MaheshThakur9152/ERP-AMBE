@@ -3,13 +3,18 @@ import { GoogleDriveService } from '../services/googleDriveService';
 import { supabaseAdmin } from '../config/supabase';
 import path from 'path';
 
+function sanitizeFileName(name?: string): string {
+  if (!name) return 'document';
+  return path.basename(name.replace(/[^a-zA-Z0-9._-]/g, '_'));
+}
+
 export const uploadDocument = async (req: Request, res: Response): Promise<void> => {
   try {
     const file = req.file;
-    const staffId = req.body.staff_id || req.body.staffId;
-    let employeeName = req.body.employeeName || req.body.employee_name || '';
-    const docType = req.body.docType || req.body.document_type || 'Document';
-    const siteName = req.body.siteName || '';
+    const staffId = req.body.staff_id;
+    let employeeName = req.body.employee_name || '';
+    const docType = req.body.doc_type || 'Document';
+    const siteName = req.body.site_name || '';
     const designation = req.body.designation || '';
 
     if (!file) {
@@ -21,6 +26,8 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
       res.status(400).json({ error: 'staff_id is required' });
       return;
     }
+
+    const safeOriginalName = sanitizeFileName(file.originalname);
 
     // If employeeName was not supplied in body, query staff table
     if (!employeeName && supabaseAdmin) {
@@ -42,7 +49,7 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
     // 1. Upload to Google Drive
     const driveResult = await GoogleDriveService.uploadEmployeeDocument({
       fileBuffer: file.buffer,
-      originalName: file.originalname,
+      originalName: safeOriginalName,
       mimeType: file.mimetype,
       employeeName,
       docType,
@@ -77,8 +84,8 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
       if (dbError) {
         console.error('❌ Supabase insert error:', dbError);
         res.status(500).json({
-          error: 'Uploaded to Drive, but failed to insert metadata in Supabase',
-          details: dbError.message,
+          error: 'Uploaded to Drive, but failed to insert metadata',
+          ...(process.env.NODE_ENV === 'development' && { details: dbError.message }),
           gcp_file_url: driveResult.webViewLink,
           file_name: driveResult.name,
         });
@@ -95,7 +102,7 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
     });
   } catch (error: any) {
     console.error("Google Drive Upload Error:", error.response?.data || error.message || error);
-    res.status(500).json({ error: 'Failed to upload', details: error.message });
+    res.status(500).json({ error: 'Failed to upload', ...(process.env.NODE_ENV === 'development' && { details: error.message }) });
   }
 };
 
@@ -103,21 +110,24 @@ export const uploadCompanyInvoiceDocument = async (req: Request, res: Response):
   try {
     const file = req.file;
     const entity = req.body.entity || 'Ambe';
-    const docType = req.body.docType || req.body.document_type || 'Tax Invoice';
+    const docType = req.body.doc_type || 'Tax Invoice';
     const month = req.body.month || 'Jan';
     const year = req.body.year || '2026';
-    const siteName = req.body.siteName || req.body.site_name || '';
-    const generatedName = req.body.generatedName || req.body.file_name || file?.originalname;
+    const siteName = req.body.site_name || '';
+    const rawGeneratedName = req.body.generatedName || file?.originalname;
 
     if (!file) {
       res.status(400).json({ error: 'No file uploaded' });
       return;
     }
 
+    const generatedName = sanitizeFileName(rawGeneratedName);
+    const safeOriginalName = sanitizeFileName(file.originalname);
+
     // 1. Upload to Google Drive
     const driveResult = await GoogleDriveService.uploadCompanyDocument({
       fileBuffer: file.buffer,
-      originalName: file.originalname,
+      originalName: safeOriginalName,
       mimeType: file.mimetype,
       generatedName,
       entity,
@@ -147,8 +157,8 @@ export const uploadCompanyInvoiceDocument = async (req: Request, res: Response):
       if (dbError) {
         console.error('❌ Supabase insert error:', dbError);
         res.status(500).json({
-          error: 'Uploaded to Drive, but failed to insert metadata in Supabase',
-          details: dbError.message,
+          error: 'Uploaded to Drive, but failed to insert metadata',
+          ...(process.env.NODE_ENV === 'development' && { details: dbError.message }),
           gcp_file_url: driveResult.webViewLink,
           file_name: driveResult.name,
         });
@@ -165,20 +175,22 @@ export const uploadCompanyInvoiceDocument = async (req: Request, res: Response):
     });
   } catch (error: any) {
     console.error("Google Drive Invoice Upload Error:", error.response?.data || error.message || error);
-    res.status(500).json({ error: 'Failed to upload invoice document', details: error.message });
+    res.status(500).json({ error: 'Failed to upload invoice document', ...(process.env.NODE_ENV === 'development' && { details: error.message }) });
   }
 };
 
 export const uploadInvoiceDirect = async (req: Request, res: Response): Promise<void> => {
   try {
     const file = req.file;
-    const fileName = req.body.fileName || req.body.file_name || file?.originalname;
-    const invoiceId = req.body.invoiceId || req.body.id;
+    const rawFileName = req.body.file_name || req.body.fileName || file?.originalname;
+    const invoiceId = req.body.invoice_id || req.body.invoiceId || req.body.id;
 
     if (!file) {
       res.status(400).json({ error: 'No file uploaded' });
       return;
     }
+
+    const fileName = sanitizeFileName(rawFileName);
 
     // Direct single-folder upload for max speed using process.env.DRIVE_INVOICE_FOLDER_ID
     const driveResult = await GoogleDriveService.uploadSingleFolderFile({
@@ -210,6 +222,6 @@ export const uploadInvoiceDirect = async (req: Request, res: Response): Promise<
     });
   } catch (error: any) {
     console.error('Direct Invoice Upload Error:', error.response?.data || error.message || error);
-    res.status(500).json({ error: 'Failed to upload invoice attachment', details: error.message });
+    res.status(500).json({ error: 'Failed to upload invoice attachment', ...(process.env.NODE_ENV === 'development' && { details: error.message }) });
   }
 };

@@ -1,46 +1,106 @@
+import { z } from 'zod';
 import { supabaseAdmin } from '../config/supabase';
 import { CompanyProfile } from '../types/company';
 
-function mapRowToCompanyProfile(row: any): CompanyProfile {
+const CompanyRowSchema = z
+  .object({
+    id: z.string().optional(),
+    entity_code: z.string().optional(),
+    code: z.string().optional(),
+    name: z.string().optional(),
+    legal_name: z.string().optional(),
+    tagline: z.string().optional(),
+    gstin: z.string().optional().default(''),
+    pan: z.string().optional(),
+    cin_no: z.string().optional(),
+    cin: z.string().optional(),
+    email_website: z.string().optional(),
+    email: z.string().optional(),
+    phone: z.string().optional(),
+    contact_no: z.string().optional(),
+    website: z.string().optional(),
+    address_line1: z.string().optional().default(''),
+    address_line2: z.string().optional().default(''),
+    city: z.string().optional().default(''),
+    state: z.string().optional().default(''),
+    pincode: z.string().optional().default(''),
+    state_code: z.string().optional(),
+    bank_name: z.string().optional().default(''),
+    account_no: z.string().optional(),
+    bank_account_no: z.string().optional(),
+    ifsc_code: z.string().optional(),
+    bank_ifsc: z.string().optional(),
+    branch_name: z.string().optional(),
+    bank_branch: z.string().optional(),
+    default_terms: z.any().optional(),
+    terms_and_conditions: z.any().optional(),
+    tax_prefix: z.string().optional().default('AS/26-27/'),
+    tax_sequence: z.number().optional().default(1),
+    proforma_prefix: z.string().optional().default('AS/P/26-27/'),
+    proforma_sequence: z.number().optional().default(1),
+    logo_url: z.string().optional(),
+    stamp_url: z.string().optional(),
+    signature_url: z.string().optional(),
+    is_active: z.boolean().optional().default(true),
+    is_locked: z.boolean().optional().default(false),
+    created_at: z.string().optional(),
+    updated_at: z.string().optional(),
+  })
+  .passthrough();
+
+function mapRowToCompanyProfile(rawRow: any): CompanyProfile {
+  const row = CompanyRowSchema.parse(rawRow || {});
+  const terms = row.terms_and_conditions || row.default_terms || [];
+  const normalizedTerms = Array.isArray(terms) ? terms : [String(terms)];
+
   return {
     id: row.id,
     code: row.entity_code || row.code || '',
-    name: row.name || '',
-    legal_name: row.name || row.legal_name || '',
-    address_line1: row.address_line1 || '',
-    address_line2: row.address_line2 || '',
-    city: row.city || '',
-    state: row.state || '',
-    pincode: row.pincode || '',
-    phone: row.contact_no || row.phone || '',
-    email: row.email_website || row.email || '',
-    gstin: row.gstin || '',
-    cin: row.cin_no || row.cin || '',
-    bank_name: row.bank_name || '',
-    bank_account_no: row.account_no || row.bank_account_no || '',
-    bank_ifsc: row.ifsc_code || row.bank_ifsc || '',
-    bank_branch: row.branch_name || row.bank_branch || '',
-    terms_and_conditions: row.default_terms || row.terms_and_conditions || [],
-    tax_prefix: row.tax_prefix || 'AS/26-27/',
-    tax_sequence: row.tax_sequence ?? 1,
-    proforma_prefix: row.proforma_prefix || 'AS/P/26-27/',
-    proforma_sequence: row.proforma_sequence ?? 1,
-    is_active: row.is_active !== undefined ? row.is_active : true,
+    name: row.name || row.legal_name || '',
+    legal_name: row.legal_name || row.name || '',
+    address_line1: row.address_line1,
+    address_line2: row.address_line2,
+    city: row.city,
+    state: row.state,
+    pincode: row.pincode,
+    phone: row.phone || row.contact_no || '',
+    email: row.email || row.email_website || '',
+    gstin: row.gstin,
+    cin: row.cin || row.cin_no || '',
+    bank_name: row.bank_name,
+    bank_account_no: row.bank_account_no || row.account_no || '',
+    bank_ifsc: row.bank_ifsc || row.ifsc_code || '',
+    bank_branch: row.bank_branch || row.branch_name || '',
+    terms_and_conditions: normalizedTerms,
+    tax_prefix: row.tax_prefix,
+    tax_sequence: row.tax_sequence,
+    proforma_prefix: row.proforma_prefix,
+    proforma_sequence: row.proforma_sequence,
+    is_active: row.is_active,
     is_locked: Boolean(row.is_locked),
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
 }
 
+function formatAddressLine2(
+  addressLine2?: string,
+  city?: string,
+  state?: string,
+  pincode?: string
+): string {
+  return [addressLine2, city, state, pincode].filter(Boolean).join(', ');
+}
+
 export class CompanyService {
   /**
-   * Fetch all companies from DB strictly using SELECT * FROM companies ORDER BY created_at DESC
+   * Fetch all companies from DB strictly using SELECT * FROM companies ORDER BY name ASC
    */
   static async getAllCompanies(): Promise<CompanyProfile[]> {
     const { data, error } = await supabaseAdmin
       .from('companies')
       .select('*')
-      .order('created_at', { ascending: false });
+      .order('name', { ascending: true });
 
     if (error) {
       console.error('❌ Database error fetching companies:', error.message);
@@ -50,7 +110,7 @@ export class CompanyService {
   }
 
   /**
-   * Fetch company profile by ID
+   * Fetch company by ID strictly using eq('id', id)
    */
   static async getCompanyById(id: string): Promise<CompanyProfile | null> {
     const { data, error } = await supabaseAdmin
@@ -59,15 +119,12 @@ export class CompanyService {
       .eq('id', id)
       .single();
 
-    if (error) {
-      console.error('❌ Database error fetching company by ID:', error.message);
-      throw new Error(`Database query failed: ${error.message}`);
-    }
+    if (error) return null;
     return data ? mapRowToCompanyProfile(data) : null;
   }
 
   /**
-   * Fetch company by code (e.g. 'AMBE', 'ASF')
+   * Fetch company by Entity Code or Code
    */
   static async getCompanyByCode(code: string): Promise<CompanyProfile | null> {
     const formattedCode = code.toUpperCase().trim();
@@ -93,7 +150,7 @@ export class CompanyService {
       entity_code: formattedCode,
       name: payload.name || payload.legal_name,
       address_line1: payload.address_line1,
-      address_line2: [payload.address_line2, payload.city, payload.state, payload.pincode].filter(Boolean).join(', '),
+      address_line2: formatAddressLine2(payload.address_line2, payload.city, payload.state, payload.pincode),
       contact_no: payload.phone || payload.contact_no || '',
       email_website: payload.email || payload.email_website || '',
       cin_no: payload.cin || payload.cin_no || '',
@@ -143,14 +200,14 @@ export class CompanyService {
       payload.state !== undefined ||
       payload.pincode !== undefined
     ) {
-      const address2Parts = [
+      const formattedAddress = formatAddressLine2(
         payload.address_line2,
         payload.city,
         payload.state,
-        payload.pincode,
-      ].filter(Boolean);
-      if (address2Parts.length > 0) {
-        updateData.address_line2 = address2Parts.join(', ');
+        payload.pincode
+      );
+      if (formattedAddress) {
+        updateData.address_line2 = formattedAddress;
       }
     }
     if (payload.phone !== undefined || payload.contact_no !== undefined) {

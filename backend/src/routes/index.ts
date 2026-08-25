@@ -7,10 +7,11 @@ import invoiceRoutes from './invoiceRoutes';
 import siteRoutes from './siteRoutes';
 import materialRoutes from './materialRoutes';
 import documentRoutes from './documentRoutes';
+import attendanceRoutes from './attendanceRoutes';
 
 const router = Router();
 
-router.get('/health', (req, res) => {
+router.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
@@ -22,6 +23,7 @@ router.use('/invoices', invoiceRoutes);
 router.use('/sites', siteRoutes);
 router.use('/materials', materialRoutes);
 router.use('/documents', documentRoutes);
+router.use('/attendance', attendanceRoutes);
 
 export default router;
 

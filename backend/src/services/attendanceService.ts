@@ -1,17 +1,42 @@
+import { z } from 'zod';
 import { supabaseAdmin } from '../config/supabase';
 import { AttendanceSheet } from '../types/attendance';
+import { AuthUser } from '../types/express';
 
-function mapRowToAttendanceSheet(row: any): AttendanceSheet {
+const AttendanceSheetSchema = z
+  .object({
+    id: z.string(),
+    site_id: z.string().optional(),
+    siteId: z.string().optional(),
+    company_id: z.string().optional(),
+    companyId: z.string().optional(),
+    site_name: z.string().optional(),
+    siteName: z.string().optional(),
+    company_name: z.string().optional(),
+    companyName: z.string().optional(),
+    month: z.string().optional().default(''),
+    year: z.string().optional().default(''),
+    records: z.array(z.any()).optional().default([]),
+    summary: z.record(z.any()).optional().default({}),
+    file_url: z.string().optional().nullable(),
+    is_locked: z.boolean().optional().default(false),
+    created_at: z.string().optional(),
+    updated_at: z.string().optional(),
+  })
+  .passthrough();
+
+function mapRowToAttendanceSheet(rawRow: any): AttendanceSheet {
+  const row = AttendanceSheetSchema.parse(rawRow || {});
   return {
     id: row.id,
     site_id: row.site_id || row.siteId || '',
-    siteId: row.site_id || row.siteId || '',
+    siteId: row.siteId || row.site_id || '',
     company_id: row.company_id || row.companyId || '',
-    companyId: row.company_id || row.companyId || '',
-    siteName: row.site_name || row.siteName || '',
-    companyName: row.company_name || row.companyName || '',
-    month: row.month || '',
-    year: row.year || '',
+    companyId: row.companyId || row.company_id || '',
+    siteName: row.siteName || row.site_name || '',
+    companyName: row.companyName || row.company_name || '',
+    month: row.month,
+    year: row.year,
     records: Array.isArray(row.records) ? row.records : [],
     summary: row.summary || {},
     created_at: row.created_at,
@@ -21,14 +46,45 @@ function mapRowToAttendanceSheet(row: any): AttendanceSheet {
 
 export class AttendanceService {
   /**
-   * Get all attendance sheets with optional filters
+   * Validates tenant ownership of a target attendance sheet before mutation
    */
-  static async getAllSheets(siteId?: string, month?: string, year?: string): Promise<AttendanceSheet[]> {
+  static async verifySheetOwnership(sheetId: string, user?: AuthUser): Promise<void> {
+    if (!user || user.role === 'superadmin' || !user.company_id) {
+      return;
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('attendance_sheets')
+      .select('id, company_id')
+      .eq('id', sheetId)
+      .maybeSingle();
+
+    if (error || !data) {
+      throw new Error('Attendance sheet not found');
+    }
+
+    if (data.company_id && data.company_id !== user.company_id) {
+      throw new Error('FORBIDDEN_TENANT_ACCESS: You do not have permission to access this attendance sheet');
+    }
+  }
+
+  /**
+   * Get all attendance sheets with optional filters and tenant scoping
+   */
+  static async getAllSheets(
+    siteId?: string,
+    month?: string,
+    year?: string,
+    user?: AuthUser
+  ): Promise<AttendanceSheet[]> {
     let query = supabaseAdmin
       .from('attendance_sheets')
       .select('*')
       .order('created_at', { ascending: false });
 
+    if (user && user.role !== 'superadmin' && user.company_id) {
+      query = query.eq('company_id', user.company_id);
+    }
     if (siteId) {
       query = query.eq('site_id', siteId);
     }
@@ -50,9 +106,11 @@ export class AttendanceService {
   }
 
   /**
-   * Get sheet by ID
+   * Get sheet by ID with tenant verification
    */
-  static async getSheetById(id: string): Promise<AttendanceSheet | null> {
+  static async getSheetById(id: string, user?: AuthUser): Promise<AttendanceSheet | null> {
+    await this.verifySheetOwnership(id, user);
+
     const { data, error } = await supabaseAdmin
       .from('attendance_sheets')
       .select('*')
@@ -68,13 +126,19 @@ export class AttendanceService {
   }
 
   /**
-   * Save / Create attendance sheet
+   * Save / Create attendance sheet with tenant scoping
    */
-  static async createSheet(payload: any): Promise<AttendanceSheet> {
+  static async createSheet(payload: any, user?: AuthUser): Promise<AttendanceSheet> {
     const now = new Date().toISOString();
+    let companyId = payload.company_id || payload.companyId || '';
+
+    if (user && user.role !== 'superadmin' && user.company_id) {
+      companyId = user.company_id;
+    }
+
     const insertRow = {
       site_id: payload.site_id || payload.siteId || '',
-      company_id: payload.company_id || payload.companyId || '',
+      company_id: companyId,
       site_name: payload.site_name || payload.siteName || '',
       company_name: payload.company_name || payload.companyName || '',
       month: payload.month || '',
@@ -100,9 +164,11 @@ export class AttendanceService {
   }
 
   /**
-   * Update attendance sheet
+   * Update attendance sheet with tenant verification
    */
-  static async updateSheet(id: string, payload: any): Promise<AttendanceSheet> {
+  static async updateSheet(id: string, payload: any, user?: AuthUser): Promise<AttendanceSheet> {
+    await this.verifySheetOwnership(id, user);
+
     const updateRow: any = {
       updated_at: new Date().toISOString(),
     };
@@ -136,9 +202,11 @@ export class AttendanceService {
   }
 
   /**
-   * Delete sheet
+   * Delete sheet with tenant verification
    */
-  static async deleteSheet(id: string): Promise<boolean> {
+  static async deleteSheet(id: string, user?: AuthUser): Promise<boolean> {
+    await this.verifySheetOwnership(id, user);
+
     const { error } = await supabaseAdmin
       .from('attendance_sheets')
       .delete()

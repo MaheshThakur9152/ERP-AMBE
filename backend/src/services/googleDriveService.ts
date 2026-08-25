@@ -7,7 +7,7 @@ function initDriveClient() {
   const oauth2Client = new google.auth.OAuth2(
     env.GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID,
     env.GOOGLE_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET,
-    'https://developers.google.com/oauthplayground'
+    env.GOOGLE_REDIRECT_URI || process.env.GOOGLE_REDIRECT_URI || 'https://developers.google.com/oauthplayground'
   );
 
   oauth2Client.setCredentials({
@@ -21,10 +21,11 @@ const drive = initDriveClient();
 
 async function getOrCreateDriveFolder(folderName: string, parentId: string): Promise<string> {
   const cleanName = folderName.trim().replace(/[\/\\:*?"<>|]/g, '_') || 'Unknown';
+  const safeQueryName = cleanName.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
   // Check if folder already exists
   const listRes = await drive.files.list({
-    q: `mimeType='application/vnd.google-apps.folder' and name='${cleanName.replace(/'/g, "\\'")}' and '${parentId}' in parents and trashed=false`,
+    q: `mimeType='application/vnd.google-apps.folder' and name='${safeQueryName}' and '${parentId}' in parents and trashed=false`,
     fields: 'files(id, name)',
     spaces: 'drive',
   });

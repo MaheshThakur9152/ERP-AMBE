@@ -1,16 +1,9 @@
 import { Router } from 'express';
-import { ExcelService } from '../services/excelService';
+import { ExcelController } from '../controllers/excelController';
+import { requireAuth } from '../middlewares/authMiddleware';
 
 const router = Router();
 
-router.post('/export-invoice', (req, res) => {
-  try {
-    const invoiceData = req.body;
-    return ExcelService.generateInvoiceCsv(invoiceData, res);
-  } catch (error) {
-    console.error('Error exporting excel:', error);
-    return res.status(500).json({ error: 'Failed to export excel' });
-  }
-});
+router.post('/export-invoice', requireAuth, ExcelController.exportInvoice);
 
 export default router;

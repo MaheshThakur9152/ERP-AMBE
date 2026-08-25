@@ -1,13 +1,13 @@
 import { Router } from 'express';
 import { SiteController } from '../controllers/siteController';
-import { requireAuth, checkLockBouncer } from '../middlewares/authMiddleware';
+import { requireAuth, requireAdmin, checkLockBouncer } from '../middlewares/authMiddleware';
 
 const router = Router();
 
-router.get('/', SiteController.list);
-router.get('/:id', SiteController.getById);
-router.post('/', requireAuth, SiteController.create);
-router.put('/:id', requireAuth, checkLockBouncer('sites'), SiteController.update);
-router.delete('/:id', requireAuth, checkLockBouncer('sites'), SiteController.delete);
+router.get('/', requireAuth, SiteController.list);
+router.get('/:id', requireAuth, SiteController.getById);
+router.post('/', requireAuth, requireAdmin, SiteController.create);
+router.put('/:id', requireAuth, requireAdmin, checkLockBouncer('sites'), SiteController.update);
+router.delete('/:id', requireAuth, requireAdmin, checkLockBouncer('sites'), SiteController.delete);
 
 export default router;

@@ -1,15 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { supabaseAdmin } from '../config/supabase';
 import { AuthUser } from '../types/express';
-
-const COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax' as const,
-};
-
-const ACCESS_TOKEN_MAX_AGE = 3600000; // 1 hour
-const REFRESH_TOKEN_MAX_AGE = 31536000000; // 1 year
+import { COOKIE_OPTIONS, ACCESS_TOKEN_MAX_AGE, REFRESH_TOKEN_MAX_AGE } from '../config/constants';
 
 /**
  * Middleware: requireAuth
@@ -67,15 +59,21 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
 
     // 4. Query user_roles table for user's assigned role
     let role: 'admin' | 'superadmin' = 'admin';
+    let companyId: string | undefined = undefined;
 
     const { data: roleData, error: roleError } = await supabaseAdmin
       .from('user_roles')
-      .select('role')
+      .select('role, company_id')
       .eq('user_id', user.id)
       .maybeSingle();
 
-    if (!roleError && roleData?.role) {
-      role = roleData.role as 'admin' | 'superadmin';
+    if (!roleError && roleData) {
+      if (roleData.role) {
+        role = roleData.role as 'admin' | 'superadmin';
+      }
+      if (roleData.company_id) {
+        companyId = roleData.company_id;
+      }
     }
 
     // 5. Attach user object to request
@@ -83,6 +81,8 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
       id: user.id,
       email: user.email,
       role,
+      company_id: companyId,
+      companyId: companyId,
     };
 
     next();
@@ -166,7 +166,7 @@ export const checkLockBouncer = (tableName: string) => {
       next();
     } catch (err: any) {
       console.error(`checkLockBouncer [${tableName}] error:`, err);
-      next();
+      res.status(500).json({ error: 'Failed to verify lock status' });
     }
   };
 };

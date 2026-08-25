@@ -1,14 +1,16 @@
 import { Request, Response, NextFunction } from 'express';
 import { CompanyService } from '../services/companyService';
+import { ApiResponse } from '../types/api';
 
 export class CompanyController {
   static async list(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const companies = await CompanyService.getAllCompanies();
-      res.json({ success: true, data: companies });
+      const response: ApiResponse = { success: true, data: companies };
+      res.json(response);
     } catch (err: any) {
       console.error('[CompanyController.list] Error:', err);
-      res.status(500).json({ success: false, error: err.message || 'Failed to fetch companies' });
+      next(err);
     }
   }
 
@@ -20,42 +22,60 @@ export class CompanyController {
         res.status(404).json({ success: false, error: 'Company profile not found' });
         return;
       }
-      res.json({ success: true, data: company });
+      const response: ApiResponse = { success: true, data: company };
+      res.json(response);
     } catch (err: any) {
       console.error('[CompanyController.getById] Error:', err);
-      res.status(500).json({ success: false, error: err.message || 'Failed to fetch company profile' });
+      next(err);
     }
   }
 
   static async create(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
+      if (
+        req.user?.role !== 'superadmin' &&
+        req.user?.company_id &&
+        req.body.id &&
+        req.body.id !== req.user.company_id
+      ) {
+        res.status(403).json({
+          success: false,
+          error: 'Forbidden: Cannot create profiles for other company entities',
+        });
+        return;
+      }
+
       const company = await CompanyService.createCompany(req.body);
-      res.status(201).json({ success: true, data: company });
+      const response: ApiResponse = { success: true, data: company };
+      res.status(201).json(response);
     } catch (err: any) {
       console.error('[CompanyController.create] Error:', err);
-      res.status(500).json({ success: false, error: err.message || 'Failed to create company profile' });
+      next(err);
     }
   }
 
   static async update(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const { id } = req.params;
-      const existing = await CompanyService.getCompanyById(id);
-      if (existing && (existing as any).is_locked) {
-        const userRole = (req as any).user?.role || (req as any).auth?.role;
-        if (userRole !== 'SuperAdmin') {
-          res.status(403).json({
-            success: false,
-            error: 'This company profile entity is locked by SuperAdmin and cannot be modified.',
-          });
-          return;
-        }
+
+      if (
+        req.user?.role !== 'superadmin' &&
+        req.user?.company_id &&
+        id !== req.user.company_id
+      ) {
+        res.status(403).json({
+          success: false,
+          error: 'Forbidden: Cannot modify profiles of other company entities',
+        });
+        return;
       }
+
       const company = await CompanyService.updateCompany(id, req.body);
-      res.json({ success: true, data: company });
+      const response: ApiResponse = { success: true, data: company };
+      res.json(response);
     } catch (err: any) {
       console.error('[CompanyController.update] Error:', err);
-      res.status(500).json({ success: false, error: err.message || 'Failed to update company profile' });
+      next(err);
     }
   }
 
@@ -64,10 +84,11 @@ export class CompanyController {
       const { id } = req.params;
       const { is_active } = req.body;
       const company = await CompanyService.toggleActiveState(id, Boolean(is_active));
-      res.json({ success: true, data: company });
+      const response: ApiResponse = { success: true, data: company };
+      res.json(response);
     } catch (err: any) {
       console.error('[CompanyController.toggleStatus] Error:', err);
-      res.status(500).json({ success: false, error: err.message || 'Failed to toggle company status' });
+      next(err);
     }
   }
 }

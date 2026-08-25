@@ -4,6 +4,8 @@ export interface AuthUser {
   id: string;
   email?: string;
   role: 'admin' | 'superadmin';
+  company_id?: string;
+  companyId?: string;
 }
 
 declare global {

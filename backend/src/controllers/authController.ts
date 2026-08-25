@@ -1,15 +1,6 @@
 import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
-
-// Cookie Max Ages
-const ACCESS_TOKEN_MAX_AGE = 3600000; // 1 hour in ms
-const REFRESH_TOKEN_MAX_AGE = 31536000000; // 1 year in ms (365 days)
-
-const COOKIE_OPTIONS = {
-  httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax' as const,
-};
+import { COOKIE_OPTIONS, ACCESS_TOKEN_MAX_AGE, REFRESH_TOKEN_MAX_AGE } from '../config/constants';
 
 export class AuthController {
   /**

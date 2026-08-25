@@ -69,30 +69,37 @@ export class GCPStorageService {
       });
 
       blobStream.on('finish', async () => {
-        let publicUrl = `https://storage.googleapis.com/${bucketName}/${destinationPath}`;
-
         try {
-          await blob.makePublic();
-        } catch (pubErr) {
-          console.warn('⚠️ Could not set public ACL (uniform bucket access active), trying signed URL fallback.');
-          try {
-            const [signedUrl] = await blob.getSignedUrl({
-              action: 'read',
-              expires: '03-09-2099',
-            });
-            publicUrl = signedUrl;
-          } catch (signedErr) {
-            console.warn('⚠️ Defaulting to standard public URL.');
-          }
-        }
+          const [signedUrl] = await blob.getSignedUrl({
+            action: 'read',
+            expires: Date.now() + 60 * 60 * 1000, // 1 hour TTL
+          });
 
-        resolve({
-          gcp_file_url: publicUrl,
-          file_name: originalName,
-        });
+          resolve({
+            gcp_file_url: signedUrl,
+            file_name: originalName,
+          });
+        } catch (signedErr: any) {
+          console.error('❌ Failed to generate signed URL:', signedErr);
+          reject(signedErr);
+        }
       });
 
       blobStream.end(fileBuffer);
     });
+  }
+
+  /**
+   * Generates a fresh signed read URL for a stored GCP file path
+   */
+  public static async getSignedFileUrl(destinationPath: string, expiresInMs = 60 * 60 * 1000): Promise<string> {
+    const bucketName = env.GCP_BUCKET_NAME || 'ambe-erp-documents';
+    const bucket = this.storage.bucket(bucketName);
+    const blob = bucket.file(destinationPath);
+    const [signedUrl] = await blob.getSignedUrl({
+      action: 'read',
+      expires: Date.now() + expiresInMs,
+    });
+    return signedUrl;
   }
 }
