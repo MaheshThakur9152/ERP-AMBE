@@ -318,15 +318,13 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
       const result = await response.json();
       const docUrl = result.webViewLink || result.gcp_file_url || result.certified_doc_url;
 
-      // Execute Supabase update query to save URL into certified_doc_url column
-      const { error: dbError } = await supabase
-        .from('invoices')
-        .update({ certified_doc_url: docUrl })
-        .eq('id', inv.id);
-
-      if (dbError) {
-        console.error('Supabase certified_doc_url update error:', dbError);
-      }
+      setInvoices((prev) =>
+        prev.map((item) =>
+          item.id === inv.id
+            ? { ...item, certified_doc_url: docUrl, certifiedDocUrl: docUrl }
+            : item
+        )
+      );
 
       // Refresh table data
       await loadInvoicesFromApi();
@@ -1103,9 +1101,9 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                             </>
                           )}
                           {/* Certified Invoice Attachment UI (Paperclip vs Eye) */}
-                          {inv.certified_doc_url || (inv as any).certified_doc_url ? (
+                          {inv.certified_doc_url || inv.certifiedDocUrl || (inv as any).certified_doc_url ? (
                             <a
-                              href={inv.certified_doc_url || (inv as any).certified_doc_url}
+                              href={inv.certified_doc_url || inv.certifiedDocUrl || (inv as any).certified_doc_url}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-teal-600 hover:text-teal-800 transition-colors p-1"

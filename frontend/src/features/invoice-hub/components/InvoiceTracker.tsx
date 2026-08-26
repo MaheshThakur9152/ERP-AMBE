@@ -95,12 +95,14 @@ export const InvoiceTracker: React.FC = () => {
   }, [invoices, searchQuery]);
 
   // Handle Inline Certified Bill Upload
+  // Handle Inline Certified Bill Upload
   const handleUploadCertifiedBill = async (inv: InvoiceRecord, file: File) => {
     setUploadingDocId(inv.id);
     try {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('invoiceId', inv.id);
+      formData.append('docType', 'bill');
       formData.append('fileName', `${inv.invoiceNo}_Certified_Bill.${file.name.split('.').pop()}`);
 
       const res = await fetch(getApiUrl('/api/invoices/upload'), {
@@ -115,7 +117,14 @@ export const InvoiceTracker: React.FC = () => {
       const json = await res.json();
       const docUrl = json.webViewLink || json.gcp_file_url || json.certified_doc_url;
 
-      await supabase.from('invoices').update({ certified_doc_url: docUrl }).eq('id', inv.id);
+      setInvoices((prev) =>
+        prev.map((item) =>
+          item.id === inv.id
+            ? { ...item, certified_doc_url: docUrl, certifiedDocUrl: docUrl }
+            : item
+        )
+      );
+
       toast.success(`Certified Bill attached to ${inv.invoiceNo}`);
       await loadInvoices();
     } catch (err: any) {
@@ -133,6 +142,7 @@ export const InvoiceTracker: React.FC = () => {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('invoiceId', inv.id);
+      formData.append('docType', 'attendance');
       formData.append('fileName', `${inv.invoiceNo}_Certified_Attendance.${file.name.split('.').pop()}`);
 
       const res = await fetch(getApiUrl('/api/invoices/upload'), {
@@ -145,9 +155,16 @@ export const InvoiceTracker: React.FC = () => {
       }
 
       const json = await res.json();
-      const attUrl = json.webViewLink || json.gcp_file_url || json.certified_doc_url;
+      const attUrl = json.webViewLink || json.gcp_file_url || json.certified_attendance_url || json.certified_doc_url;
 
-      await supabase.from('invoices').update({ certified_attendance_url: attUrl }).eq('id', inv.id);
+      setInvoices((prev) =>
+        prev.map((item) =>
+          item.id === inv.id
+            ? { ...item, certified_attendance_url: attUrl, certifiedAttendanceUrl: attUrl }
+            : item
+        )
+      );
+
       toast.success(`Certified Attendance attached to ${inv.invoiceNo}`);
       await loadInvoices();
     } catch (err: any) {
@@ -236,8 +253,8 @@ export const InvoiceTracker: React.FC = () => {
               <div className="p-4 flex-1 bg-white divide-y divide-gray-50 space-y-1">
                 {group.invoices.map((inv) => {
                   const isProforma = inv.type === 'Proforma Invoice';
-                  const certDoc = inv.certified_doc_url || (inv as any).certified_doc_url;
-                  const certAtt = inv.certified_attendance_url || (inv as any).certified_attendance_url;
+                  const certDoc = inv.certified_doc_url || inv.certifiedDocUrl || (inv as any).certified_doc_url;
+                  const certAtt = inv.certified_attendance_url || inv.certifiedAttendanceUrl || (inv as any).certified_attendance_url;
 
                   return (
                     <div

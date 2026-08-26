@@ -200,16 +200,24 @@ export const uploadInvoiceDirect = async (req: Request, res: Response): Promise<
     });
 
     const webViewLink = driveResult.webViewLink;
+    const isAttendance =
+      req.body.doc_type === 'attendance' ||
+      req.body.docType === 'attendance' ||
+      rawFileName?.toLowerCase().includes('attendance');
 
-    // Save link to Supabase if invoiceId provided
+    // Save link to Supabase using supabaseAdmin if invoiceId provided
     if (invoiceId && supabaseAdmin) {
+      const updateData = isAttendance
+        ? { certified_attendance_url: webViewLink }
+        : { certified_doc_url: webViewLink };
+
       const { error: dbError } = await supabaseAdmin
         .from('invoices')
-        .update({ certified_doc_url: webViewLink })
+        .update(updateData)
         .eq('id', invoiceId);
 
       if (dbError) {
-        console.error('Supabase certified_doc_url update error:', dbError);
+        console.error('Supabase invoice attachment update error:', dbError);
       }
     }
 
@@ -218,7 +226,8 @@ export const uploadInvoiceDirect = async (req: Request, res: Response): Promise<
       webViewLink,
       file_name: driveResult.name,
       gcp_file_url: webViewLink,
-      certified_doc_url: webViewLink,
+      certified_doc_url: !isAttendance ? webViewLink : undefined,
+      certified_attendance_url: isAttendance ? webViewLink : undefined,
     });
   } catch (error: any) {
     console.error('Direct Invoice Upload Error:', error.response?.data || error.message || error);
