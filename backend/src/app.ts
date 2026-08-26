@@ -30,7 +30,10 @@ app.use(
 
 // 3. Strict Environment-Driven CORS
 const DEFAULT_ALLOWED_ORIGINS = [
+  'https://ambeservice.com',
   'https://admin.ambeservice.com',
+  'https://app.ambeservice.com',
+  'https://api.ambeservice.com',
   'http://localhost:5173',
   'http://localhost:3000',
   'http://localhost:5000',
@@ -45,8 +48,13 @@ const allowedOrigins = Array.from(new Set([...DEFAULT_ALLOWED_ORIGINS, ...envOri
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (e.g., server-to-server, mobile apps, curl) or matching allowed list
-      if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes(origin.replace(/\/+$/, ''))) {
+      // Allow requests with no origin (server-to-server, curl) or matching allowed list / ambeservice.com domains
+      if (
+        !origin ||
+        allowedOrigins.includes(origin) ||
+        allowedOrigins.includes(origin.replace(/\/+$/, '')) ||
+        /^https:\/\/([a-z0-9-]+\.)?ambeservice\.com$/.test(origin)
+      ) {
         callback(null, true);
       } else {
         callback(new Error(`CORS request rejected: Origin ${origin} not allowed`));

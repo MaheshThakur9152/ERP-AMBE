@@ -10,7 +10,8 @@ export interface FetchRetryOptions extends RequestInit {
  */
 export function getApiUrl(path: string): string {
   const rawEnv = import.meta.env.VITE_API_URL;
-  const envUrl = (rawEnv && rawEnv.trim()) ? rawEnv.trim().replace(/\/+$/, '') : 'http://localhost:5000';
+  const defaultUrl = import.meta.env.PROD ? 'https://api.ambeservice.com/api' : 'http://localhost:5000';
+  const envUrl = (rawEnv && rawEnv.trim()) ? rawEnv.trim().replace(/\/+$/, '') : defaultUrl;
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
   if (envUrl.endsWith('/api') && cleanPath.startsWith('/api/')) {
     return `${envUrl}${cleanPath.substring(4)}`;
