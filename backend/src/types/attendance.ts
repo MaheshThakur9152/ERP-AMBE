@@ -24,6 +24,8 @@ export interface AttendanceSheet {
   year: number | string;
   records: AttendanceRecordItem[];
   summary?: any;
+  is_locked?: boolean;
+  isLocked?: boolean;
   created_at?: string;
   updated_at?: string;
 }

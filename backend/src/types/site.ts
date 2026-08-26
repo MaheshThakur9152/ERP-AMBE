@@ -30,6 +30,8 @@ export interface Site {
   defaultMaterialCharges?: number;
   default_additional_charges?: { name: string; amount: number }[];
   defaultAdditionalCharges?: { name: string; amount: number }[];
+  is_locked?: boolean;
+  isLocked?: boolean;
   createdAt?: string;
   created_at?: string;
   updated_at?: string;

@@ -87,6 +87,8 @@ function mapRowToSite(rawRow: any): Site {
     defaultAdditionalCharges: additional,
     default_additional_charges: additional,
     rateCards: row.rateCards || row.rate_cards || [],
+    is_locked: Boolean(row.is_locked),
+    isLocked: Boolean(row.is_locked),
     createdAt: row.createdAt || row.created_at,
     created_at: row.created_at || row.createdAt,
     updated_at: row.updated_at,

@@ -39,6 +39,8 @@ function mapRowToAttendanceSheet(rawRow: any): AttendanceSheet {
     year: row.year,
     records: Array.isArray(row.records) ? row.records : [],
     summary: row.summary || {},
+    is_locked: row.is_locked ?? false,
+    isLocked: row.is_locked ?? false,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
