@@ -193,6 +193,8 @@ export function mapRowToInvoiceRecord(rawRow: any): InvoiceRecord {
     sites: row.sites || undefined,
     companies: row.companies || undefined,
     is_material: row.is_material || row.payload?.isMaterial || false,
+    is_locked: row.is_locked ?? false,
+    isLocked: row.is_locked ?? false,
     certified_doc_url: row.certified_doc_url || row.certifiedDocUrl || row.payload?.certified_doc_url || row.payload?.certifiedDocUrl || null,
     certifiedDocUrl: row.certified_doc_url || row.certifiedDocUrl || row.payload?.certified_doc_url || row.payload?.certifiedDocUrl || null,
     certified_attendance_url: row.certified_attendance_url || row.certifiedAttendanceUrl || row.payload?.certified_attendance_url || row.payload?.certifiedAttendanceUrl || null,
@@ -504,18 +506,22 @@ export class InvoiceQueryService {
    * Update is_locked status for an invoice
    */
   static async updateLockStatus(id: string, isLocked: boolean): Promise<InvoiceRecord> {
+    const now = new Date().toISOString();
+    console.warn(`[invoice:lock:update] invoice_id=${id} setting is_locked=${isLocked}`);
+
     const { data, error } = await supabaseAdmin
       .from('invoices')
-      .update({ is_locked: isLocked })
+      .update({ is_locked: isLocked, updated_at: now })
       .eq('id', id)
       .select('*, sites(*), companies(*)')
       .single();
 
     if (error) {
-      console.error('❌ Supabase update lock status error:', error.message);
+      console.error(`[invoice:lock:update:error] invoice_id=${id} error:`, error.message);
       throw new Error(`Lock status update failed: ${error.message}`);
     }
 
+    console.warn(`[invoice:lock:update:success] invoice_id=${id} db_is_locked=${data?.is_locked} updated_at=${data?.updated_at}`);
     return mapRowToInvoiceRecord(data);
   }
 }

@@ -33,6 +33,8 @@ export interface InvoiceRecord {
   additional_charges?: any[];
   additionalCharges?: any[];
   is_material?: boolean;
+  is_locked?: boolean | null;
+  isLocked?: boolean | null;
   sites?: {
 
     client_name?: string;
