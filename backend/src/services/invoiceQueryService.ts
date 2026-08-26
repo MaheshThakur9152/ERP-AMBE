@@ -229,8 +229,11 @@ export class InvoiceQueryService {
         .map((row: any) => {
           try {
             return mapRowToInvoiceRecord(row);
-          } catch (e) {
-            console.error('Error mapping row to InvoiceRecord:', e);
+          } catch (e: any) {
+            const issueSummary = e instanceof z.ZodError
+              ? e.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', ')
+              : (e?.message || String(e));
+            console.warn(`Invoice row validation failed [id=${row?.id || 'unknown'}]: ${issueSummary}`);
             return null;
           }
         })
