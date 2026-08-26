@@ -71,4 +71,27 @@ export class InvoiceController {
       next(error);
     }
   }
+
+  /**
+   * Protected: Admin / SuperAdmin only
+   * PATCH /api/invoices/:id/cancel
+   * Sets status = 'Cancelled', cancelled_at = now(), optional cancelled_reason
+   */
+  static async cancel(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { id } = req.params;
+      const { cancelled_reason } = req.body;
+
+      const cancelledInvoice = await InvoiceService.cancelInvoice(id, cancelled_reason, req.user);
+      const response: ApiResponse = {
+        success: true,
+        message: 'Invoice cancelled successfully',
+        data: cancelledInvoice,
+      };
+      res.status(200).json(response);
+    } catch (error: any) {
+      console.error('[InvoiceController.cancel] Error:', error);
+      next(error);
+    }
+  }
 }

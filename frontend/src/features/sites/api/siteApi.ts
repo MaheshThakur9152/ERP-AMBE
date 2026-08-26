@@ -1,4 +1,4 @@
-import { Site, SiteFormData } from '../types';
+import { Site, SiteFormData, SiteDocument } from '../types';
 import { fetchWithRetry } from '@/lib/apiClient';
 
 const API_BASE = '/api/sites';
@@ -89,4 +89,104 @@ export async function deleteSiteApi(id: string): Promise<{ status: number }> {
     throw new Error(`DELETE /api/sites/${id} failed with status ${res.status}: ${errorText}`);
   }
   return { status: res.status };
+}
+
+export async function fetchSiteDocumentsApi(siteId: string): Promise<SiteDocument[]> {
+  const res = await fetchWithRetry(`${API_BASE}/${siteId}/documents`, {
+    method: 'GET',
+    retries: 2,
+    backoffMs: 500,
+  });
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error(`[GET /api/sites/${siteId}/documents] API Error ${res.status}:`, errorText);
+    throw new Error(`Failed to fetch site documents: ${errorText}`);
+  }
+  const json = await res.json();
+  if (json.data && Array.isArray(json.data)) {
+    return json.data;
+  }
+  if (Array.isArray(json)) {
+    return json;
+  }
+  return [];
+}
+
+export async function uploadSiteDocumentApi(
+  siteId: string,
+  file: File,
+  documentType: string,
+  documentLabel?: string
+): Promise<{ success: boolean; file_name: string; gcp_file_url: string; document: SiteDocument }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('document_type', documentType);
+  if (documentLabel) {
+    formData.append('document_label', documentLabel);
+  }
+
+  const res = await fetchWithRetry(`${API_BASE}/${siteId}/documents`, {
+    method: 'POST',
+    body: formData,
+    retries: 1,
+    backoffMs: 500,
+  });
+
+  if (!res.ok && res.status !== 201) {
+    const errorText = await res.text();
+    console.error(`[POST /api/sites/${siteId}/documents] API Error ${res.status}:`, errorText);
+    throw new Error(`Failed to upload site document: ${errorText}`);
+  }
+
+  const json = await res.json();
+  return json;
+}
+
+export async function fetchAllDocumentsApi(params?: {
+  site_id?: string;
+  document_type?: string;
+  search?: string;
+}): Promise<SiteDocument[]> {
+  const query = new URLSearchParams();
+  if (params?.site_id) query.append('site_id', params.site_id);
+  if (params?.document_type && params.document_type !== 'All') query.append('document_type', params.document_type);
+  if (params?.search) query.append('search', params.search);
+
+  const queryString = query.toString() ? `?${query.toString()}` : '';
+  const res = await fetchWithRetry(`/api/documents${queryString}`, {
+    method: 'GET',
+    retries: 2,
+    backoffMs: 500,
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error(`[GET /api/documents] API Error ${res.status}:`, errorText);
+    throw new Error(`Failed to fetch documents: ${errorText}`);
+  }
+
+  const json = await res.json();
+  if (json.data && Array.isArray(json.data)) {
+    return json.data;
+  }
+  if (Array.isArray(json)) {
+    return json;
+  }
+  return [];
+}
+
+export async function deleteDocumentApi(id: string): Promise<{ success: boolean }> {
+  const res = await fetchWithRetry(`/api/documents/${id}`, {
+    method: 'DELETE',
+    retries: 1,
+    backoffMs: 500,
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error(`[DELETE /api/documents/${id}] API Error ${res.status}:`, errorText);
+    throw new Error(`Failed to delete document: ${errorText}`);
+  }
+
+  return { success: true };
 }

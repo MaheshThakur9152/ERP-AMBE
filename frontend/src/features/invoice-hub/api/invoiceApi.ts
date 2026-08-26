@@ -94,3 +94,30 @@ export async function deleteInvoiceApi(id: string): Promise<{ status: number }> 
 
   return { status: res.status };
 }
+
+export async function cancelInvoiceApi(
+  id: string,
+  cancelled_reason?: string
+): Promise<{ status: number; data: InvoiceRecord }> {
+  const res = await fetchWithRetry(`${API_BASE}/${id}/cancel`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ cancelled_reason }),
+    retries: 1,
+    backoffMs: 500,
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error(`[PATCH /api/invoices/${id}/cancel] API Error ${res.status}:`, errorText);
+    throw new Error(`Failed to cancel invoice: ${errorText}`);
+  }
+
+  const json = await res.json();
+  return {
+    status: res.status,
+    data: json.data || json,
+  };
+}

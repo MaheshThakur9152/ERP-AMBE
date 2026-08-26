@@ -64,4 +64,46 @@ export class SiteController {
       next(err);
     }
   }
+
+  static async getDocuments(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { siteId, id } = req.params;
+      const targetSiteId = siteId || id;
+      const docs = await SiteService.getSiteDocuments(targetSiteId, req.user);
+      const response: ApiResponse = { success: true, data: docs };
+      res.status(200).json(response);
+    } catch (err: any) {
+      console.error('[SiteController.getDocuments] Error:', err);
+      next(err);
+    }
+  }
+
+  static async uploadDocument(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { siteId, id } = req.params;
+      const targetSiteId = siteId || id;
+      const file = req.file;
+
+      if (!file) {
+        res.status(400).json({ success: false, error: 'No file uploaded' });
+        return;
+      }
+
+      const documentType = req.body.document_type || req.body.documentType || req.body.doc_type || 'Document';
+      const documentLabel = req.body.document_label || req.body.documentLabel || req.body.label;
+
+      const result = await SiteService.uploadSiteDocument(
+        targetSiteId,
+        file,
+        documentType,
+        documentLabel,
+        req.user
+      );
+
+      res.status(201).json(result);
+    } catch (err: any) {
+      console.error('[SiteController.uploadDocument] Error:', err);
+      next(err);
+    }
+  }
 }

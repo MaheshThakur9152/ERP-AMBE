@@ -53,3 +53,19 @@ export interface Site extends SiteFormData {
   default_material_charges?: number;
   default_additional_charges?: AdditionalCharge[];
 }
+
+export interface SiteDocument {
+  id: string;
+  site_id: string;
+  document_type: string;
+  document_label?: string | null;
+  file_name: string;
+  gcp_file_url?: string | null;
+  drive_file_id?: string | null;
+  drive_web_view_link?: string | null;
+  file_size?: number | null;
+  mime_type?: string | null;
+  uploaded_at?: string | null;
+  created_at?: string | null;
+  uploaded_by?: string | null;
+}

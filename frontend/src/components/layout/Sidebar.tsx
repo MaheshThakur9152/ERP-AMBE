@@ -13,6 +13,7 @@ import {
   ShieldAlert,
   LogOut,
   User,
+  FolderArchive,
 } from 'lucide-react';
 import { useAuth } from '@/features/auth/context/AuthContext';
 
@@ -234,6 +235,20 @@ export const Sidebar: React.FC = () => {
           }
         >
           <MapPin size={18} /> <span>Sites</span>
+        </NavLink>
+
+        {/* Documents */}
+        <NavLink
+          to="/documents"
+          className={({ isActive }) =>
+            `w-full flex gap-3 px-4 py-3 rounded-lg font-medium transition-colors ${
+              isActive
+                ? 'bg-[#20B2AA] text-white shadow-md'
+                : 'hover:bg-white/5 text-gray-200'
+            }`
+          }
+        >
+          <FolderArchive size={18} /> <span>Documents</span>
         </NavLink>
 
         {/* Entities */}

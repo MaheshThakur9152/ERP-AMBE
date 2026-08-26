@@ -21,6 +21,8 @@
     "googleapis": "^174.0.1",
     "helmet": "^8.0.0",
     "multer": "^2.2.0",
+    "pdf-lib": "^1.17.1",
+    "sharp": "^0.35.4",
     "zod": "^3.24.2"
   },
   "devDependencies": {

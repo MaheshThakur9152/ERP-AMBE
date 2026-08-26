@@ -21,10 +21,18 @@ export interface InvoiceRecord {
   line_items?: any[];
   isMaterial?: boolean;
   is_material?: boolean;
+  code_name?: string;
+  codeName?: string;
   certified_doc_url?: string;
   certifiedDocUrl?: string;
   certified_attendance_url?: string;
   certifiedAttendanceUrl?: string;
+  generated_pdf_url?: string;
+  generatedPdfUrl?: string;
+  cancelled_at?: string;
+  cancelledAt?: string;
+  cancelled_reason?: string;
+  cancelledReason?: string;
   previous_version_id?: string;
   is_locked?: boolean;
   created_at?: string;
@@ -40,6 +48,8 @@ export interface InvoiceRecord {
   sites?: {
     client_name?: string;
     site_name?: string;
+    code_name?: string;
+    codeName?: string;
     address?: string;
     gstin?: string;
     work_order_ref?: string;

@@ -21,6 +21,7 @@ import { InvoiceTrackerPage } from '@/pages/InvoiceTrackerPage';
 import { MaterialsMasterPage } from '@/pages/MaterialsMasterPage';
 import { MaterialGeneratorPage } from '@/pages/MaterialGeneratorPage';
 import { SecurityCenter } from '@/pages/SecurityCenter';
+import { DocumentsMasterPage } from '@/pages/DocumentsMasterPage';
 
 export const App: React.FC = () => {
   return (
@@ -36,6 +37,7 @@ export const App: React.FC = () => {
             <Route path="/dashboard" element={<InvoiceHubPage />} />
             <Route path="/companies" element={<CompanyProfilesPage />} />
             <Route path="/sites" element={<SitesMasterPage />} />
+            <Route path="/documents" element={<DocumentsMasterPage />} />
             <Route path="/materials" element={<MaterialsMasterPage />} />
             <Route path="/invoice-hub" element={<InvoiceHubPage />} />
             <Route path="/invoice-tracker" element={<InvoiceTrackerPage />} />

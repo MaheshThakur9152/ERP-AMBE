@@ -1,6 +1,7 @@
 export interface CompanyProfile {
   id?: string;
   code: string;
+  entity_code?: string;
   name: string;
   legal_name: string;
   tagline?: string;

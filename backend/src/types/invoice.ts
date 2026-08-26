@@ -49,6 +49,12 @@ export interface InvoiceRecord {
   certifiedDocUrl?: string | null;
   certified_attendance_url?: string | null;
   certifiedAttendanceUrl?: string | null;
+  generated_pdf_url?: string | null;
+  generatedPdfUrl?: string | null;
+  cancelled_at?: string | null;
+  cancelledAt?: string | null;
+  cancelled_reason?: string | null;
+  cancelledReason?: string | null;
   previous_version_id?: string | null;
   created_at?: string;
   updated_at?: string;

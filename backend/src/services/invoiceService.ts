@@ -26,4 +26,8 @@ export class InvoiceService {
   static updateLockStatus(id: string, isLocked: boolean): Promise<InvoiceRecord> {
     return InvoiceQueryService.updateLockStatus(id, isLocked);
   }
+
+  static cancelInvoice(id: string, cancelledReason?: string, user?: AuthUser): Promise<InvoiceRecord> {
+    return InvoiceQueryService.cancelInvoice(id, cancelledReason, user);
+  }
 }

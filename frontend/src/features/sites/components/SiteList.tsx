@@ -1,7 +1,23 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Site } from '../types';
-import { Search, Plus, Building, Edit2, Trash2, ShieldCheck, MapPin, FileText, CreditCard } from 'lucide-react';
+import {
+  Search,
+  Plus,
+  Building,
+  Edit2,
+  Trash2,
+  ShieldCheck,
+  MapPin,
+  FileText,
+  CreditCard,
+  Upload,
+  FileCheck,
+  Loader2,
+} from 'lucide-react';
 import { RateCardManager } from './RateCardManager';
+import { DocumentUploadModal } from './DocumentUploadModal';
+import { fetchSiteDocumentsApi } from '../api/siteApi';
+import { toast } from '@/components/ui/toast';
 
 interface SiteListProps {
   sites: Site[];
@@ -19,6 +35,38 @@ export const SiteList: React.FC<SiteListProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | 'Active' | 'Inactive'>('All');
   const [managingRateCardSite, setManagingRateCardSite] = useState<{ id: string; name: string } | null>(null);
+  const [siteWorkOrders, setSiteWorkOrders] = useState<Record<string, string>>({});
+  const [uploadModalSite, setUploadModalSite] = useState<Site | null>(null);
+
+  const loadWorkOrders = () => {
+    if (sites.length === 0) return;
+
+    // Load work order document links for visible sites
+    Promise.allSettled(
+      sites.map(async (s) => {
+        try {
+          const docs = await fetchSiteDocumentsApi(s.id);
+          const wo = docs.find((d) => d.document_type === 'Work Order');
+          const url = wo?.gcp_file_url || wo?.drive_web_view_link;
+          return { siteId: s.id, url };
+        } catch {
+          return { siteId: s.id, url: undefined };
+        }
+      })
+    ).then((results) => {
+      const map: Record<string, string> = {};
+      results.forEach((res) => {
+        if (res.status === 'fulfilled' && res.value.url) {
+          map[res.value.siteId] = res.value.url;
+        }
+      });
+      setSiteWorkOrders(map);
+    });
+  };
+
+  useEffect(() => {
+    loadWorkOrders();
+  }, [sites]);
 
   const filteredSites = sites.filter((site) => {
     const siteName = (site as any).siteName || (site as any).site_name || '';
@@ -162,8 +210,44 @@ export const SiteList: React.FC<SiteListProps> = ({
                       </td>
                       <td className="py-3.5 px-4 text-gray-800 font-medium">{site.clientName}</td>
                       <td className="py-3.5 px-4 font-mono text-gray-600 text-xs">{site.gstin}</td>
-                      <td className="py-3.5 px-4 font-mono text-xs text-indigo-700">
-                        {site.workOrderRefNo}
+                      <td className="py-3.5 px-4 font-mono text-xs">
+                        <div className="flex flex-col gap-1">
+                          <span className="font-semibold text-indigo-700">
+                            {site.workOrderRefNo || <span className="text-gray-400 font-normal italic">No Ref #</span>}
+                          </span>
+                          <div className="flex items-center gap-1.5 pt-0.5">
+                            {siteWorkOrders[site.id] ? (
+                              <a
+                                href={siteWorkOrders[site.id]}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-50 text-[#20B2AA] border border-[#20B2AA]/30 hover:bg-[#20B2AA]/10 flex items-center gap-1 transition-colors"
+                                title="View Stored Work Order Document"
+                              >
+                                <FileCheck className="w-3 h-3 text-[#20B2AA]" />
+                                <span>View</span>
+                              </a>
+                            ) : (
+                              <span
+                                className="px-1.5 py-0.5 rounded text-[10px] text-gray-400 bg-gray-50 border border-gray-200 flex items-center gap-1 cursor-not-allowed select-none"
+                                title="No Work Order document stored yet"
+                              >
+                                <FileText className="w-3 h-3 text-gray-300" />
+                                <span>View</span>
+                              </span>
+                            )}
+
+                            <button
+                              type="button"
+                              onClick={() => setUploadModalSite(site)}
+                              className="px-1.5 py-0.5 rounded text-[10px] font-semibold border text-[#20B2AA] border-[#20B2AA]/30 hover:bg-[#20B2AA]/10 flex items-center gap-1 transition-colors"
+                              title="Upload Work Order Document"
+                            >
+                              <Upload className="w-3 h-3 text-[#20B2AA]" />
+                              <span>+ Upload</span>
+                            </button>
+                          </div>
+                        </div>
                       </td>
                       <td className="py-3.5 px-4 text-center">
                         <button
@@ -222,6 +306,19 @@ export const SiteList: React.FC<SiteListProps> = ({
           onClose={() => setManagingRateCardSite(null)}
           siteId={managingRateCardSite.id}
           siteName={managingRateCardSite.name}
+        />
+      )}
+
+      {/* Upload Document Modal */}
+      {uploadModalSite && (
+        <DocumentUploadModal
+          isOpen={!!uploadModalSite}
+          onClose={() => setUploadModalSite(null)}
+          onSuccess={loadWorkOrders}
+          initialSiteId={uploadModalSite.id}
+          lockSite={true}
+          initialDocumentType="Work Order"
+          sites={sites}
         />
       )}
     </div>

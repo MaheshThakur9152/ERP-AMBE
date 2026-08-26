@@ -5,8 +5,11 @@ import {
   uploadDocument,
   uploadCompanyInvoiceDocument,
   uploadInvoiceDirect,
+  getAllSiteDocuments,
+  uploadSiteDocumentGlobal,
+  deleteSiteDocument,
 } from '../controllers/documentController';
-import { requireAuth, requireAdmin } from '../middlewares/authMiddleware';
+import { requireAuth, requireAdmin, requireSuperAdmin } from '../middlewares/authMiddleware';
 import { validateFileMagicBytes } from '../middlewares/fileValidator';
 
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'application/pdf', 'image/webp'];
@@ -141,5 +144,25 @@ router.post(
   validateAndNormalizeInvoiceDirectUpload,
   uploadInvoiceDirect
 );
+
+// Site documents global management routes
+router.get('/', requireAuth, getAllSiteDocuments);
+router.post(
+  '/upload-site',
+  requireAuth,
+  requireAdmin,
+  upload.single('file'),
+  validateFileMagicBytes,
+  uploadSiteDocumentGlobal
+);
+router.post(
+  '/site-document',
+  requireAuth,
+  requireAdmin,
+  upload.single('file'),
+  validateFileMagicBytes,
+  uploadSiteDocumentGlobal
+);
+router.delete('/:id', requireAuth, requireSuperAdmin, deleteSiteDocument);
 
 export default router;

@@ -6,7 +6,8 @@ import { createSiteApi, updateSiteApi } from '../api/siteApi';
 import { fetchCompanies } from '@/features/company-profiles/api/companyApi';
 import { CompanyProfile } from '@/features/company-profiles/types';
 import { toast } from '@/components/ui/toast';
-import { X, Plus, Trash2, Building, FileText, CreditCard, ShieldCheck, Loader2 } from 'lucide-react';
+import { X, Plus, Trash2, Building, FileText, CreditCard, ShieldCheck, Loader2, FolderArchive } from 'lucide-react';
+import { SiteDocumentsTab } from './SiteDocumentsTab';
 
 interface SiteFormSheetProps {
   isOpen: boolean;
@@ -24,9 +25,11 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
   const [companies, setCompanies] = useState<CompanyProfile[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
   const [isLoadingCompanies, setIsLoadingCompanies] = useState<boolean>(false);
+  const [activeTab, setActiveTab] = useState<'details' | 'documents'>('details');
 
   useEffect(() => {
     if (isOpen) {
+      setActiveTab('details');
       setIsLoadingCompanies(true);
       fetchCompanies()
         .then((data) => {
@@ -205,31 +208,67 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
     <div className="fixed inset-0 z-50 overflow-hidden bg-slate-900/60 backdrop-blur-xs flex justify-end">
       <div className="w-full max-w-2xl bg-white border-l border-gray-200 text-gray-800 flex flex-col h-full shadow-2xl animate-in slide-in-from-right duration-200">
         {/* Modal Header */}
-        <div className="px-6 py-5 bg-[#34495E] text-white flex items-center justify-between shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-white">
-              <Building className="w-5 h-5" />
+        <div className="px-6 py-4 bg-[#34495E] text-white shadow-sm space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-white">
+                <Building className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold">
+                  {editingSite ? `Edit Site Master: ${editingSite.siteName || (editingSite as any).site_name || ''}` : 'Add New Site Master'}
+                </h2>
+                <p className="text-xs text-slate-300">
+                  Define client party details, operating entity, work order reference &amp; rate cards.
+                </p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-lg font-bold">
-                {editingSite ? 'Edit Site Master' : 'Add New Site Master'}
-              </h2>
-              <p className="text-xs text-slate-300">
-                Define client party details, operating entity, work order reference &amp; role rate cards.
-              </p>
-            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-2 text-slate-300 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 text-slate-300 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+
+          {editingSite && (
+            <div className="flex items-center gap-2 pt-1 border-t border-white/10">
+              <button
+                type="button"
+                onClick={() => setActiveTab('details')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                  activeTab === 'details'
+                    ? 'bg-white text-[#34495E] shadow-xs'
+                    : 'text-slate-200 hover:bg-white/10'
+                }`}
+              >
+                <Building className="w-3.5 h-3.5" />
+                <span>Site Details</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('documents')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                  activeTab === 'documents'
+                    ? 'bg-white text-[#34495E] shadow-xs'
+                    : 'text-slate-200 hover:bg-white/10'
+                }`}
+              >
+                <FolderArchive className="w-3.5 h-3.5" />
+                <span>Documents</span>
+              </button>
+            </div>
+          )}
         </div>
 
-        {/* Modal Form Body */}
-        <form onSubmit={handleSubmit(onSubmit)} className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50">
+        {/* Modal Body */}
+        {activeTab === 'documents' && editingSite ? (
+          <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
+            <SiteDocumentsTab siteId={editingSite.id} siteName={editingSite.siteName || (editingSite as any).site_name || 'Site'} />
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit(onSubmit)} className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50">
           {/* Section 1: Operating Entity & Client Party Info */}
           <div className="space-y-4 bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
             <h3 className="text-xs font-bold uppercase text-[#20B2AA] tracking-wider flex items-center gap-1.5 border-b border-gray-100 pb-2">
@@ -540,6 +579,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
             </button>
           </div>
         </form>
+        )}
       </div>
     </div>
   );

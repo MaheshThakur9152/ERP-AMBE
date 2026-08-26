@@ -3,6 +3,10 @@ import { supabaseAdmin } from '../config/supabase';
 import { Site } from '../types/site';
 import { CompanyService } from './companyService';
 import { DEFAULT_MGMT_FEE_PERCENT } from '../config/constants';
+import { GCPStorageService } from './gcpStorageService';
+import { GoogleDriveService } from './googleDriveService';
+import { CompressionService } from './compressionService';
+import { buildFileName } from '../utils/fileUtils';
 
 const SiteRowSchema = z
   .object({
@@ -289,5 +293,138 @@ export class SiteService {
       throw new Error(`Database delete failed: ${error.message}`);
     }
     return true;
+  }
+
+  /**
+   * Fetch all documents for a site ordered by uploaded_at DESC
+   */
+  static async getSiteDocuments(siteId: string, user?: AuthUser): Promise<any[]> {
+    await this.verifySiteOwnership(siteId, user);
+
+    let { data, error } = await supabaseAdmin
+      .from('site_documents')
+      .select('*')
+      .eq('site_id', siteId)
+      .order('uploaded_at', { ascending: false });
+
+    if (error) {
+      console.warn('⚠️ Supabase get site_documents with uploaded_at ordering failed, trying created_at:', error.message);
+      const fallback = await supabaseAdmin
+        .from('site_documents')
+        .select('*')
+        .eq('site_id', siteId);
+      
+      if (fallback.error) {
+        console.error('❌ Database error fetching site_documents:', fallback.error.message);
+        throw new Error(`Database query failed: ${fallback.error.message}`);
+      }
+      data = fallback.data;
+    }
+
+    return data || [];
+  }
+
+  /**
+   * Upload, compress, and store a site document in GCP & Google Drive
+   */
+  static async uploadSiteDocument(
+    siteId: string,
+    file: Express.Multer.File,
+    documentType: string,
+    documentLabel?: string,
+    user?: AuthUser
+  ): Promise<any> {
+    await this.verifySiteOwnership(siteId, user);
+
+    // 1. Fetch site and company info for building file name
+    const site = await this.getSiteById(siteId, user);
+    let entityCode = 'AMBE';
+    if (site?.company_id || site?.companyId) {
+      const targetCompanyId = site.company_id || site.companyId;
+      try {
+        const company = await CompanyService.getCompanyById(targetCompanyId!);
+        if (company) {
+          entityCode = company.entity_code || company.code || 'AMBE';
+        }
+      } catch (compErr) {
+        console.warn('⚠️ Could not fetch company for entity code:', compErr);
+      }
+    }
+
+    const siteCodeName = site?.code_name || site?.codeName || site?.siteName || 'SITE';
+
+    // 2. Compress file
+    const compressed = await CompressionService.compressFile(file.buffer, file.mimetype);
+
+    // 3. Generate uniform filename using buildFileName()
+    const fileName = buildFileName({
+      type: 'site_doc',
+      entityCode,
+      siteCodeName,
+      documentType: documentType || 'DOCUMENT',
+      originalName: file.originalname,
+    });
+
+    // 4. Upload to GCP Storage
+    let gcpFileUrl = '';
+    try {
+      const gcpRes = await GCPStorageService.uploadSiteDocument(
+        compressed.buffer,
+        fileName,
+        compressed.mimeType,
+        siteId
+      );
+      gcpFileUrl = gcpRes.gcp_file_url;
+    } catch (gcpErr: any) {
+      console.warn('⚠️ GCP upload failed:', gcpErr?.message || gcpErr);
+    }
+
+    // 5. Upload copy to Google Drive backup
+    let driveResult: { id?: string; name?: string; webViewLink?: string } | null = null;
+    try {
+      driveResult = await GoogleDriveService.uploadSiteDocumentFile({
+        fileBuffer: compressed.buffer,
+        fileName,
+        mimeType: compressed.mimeType,
+        siteName: site?.siteName,
+      });
+    } catch (driveErr: any) {
+      console.warn('⚠️ Google Drive backup upload failed:', driveErr?.message || driveErr);
+    }
+
+    // 6. Insert metadata into public.site_documents
+    const uploadedAt = new Date().toISOString();
+    const finalFileUrl = gcpFileUrl || driveResult?.webViewLink || '';
+
+    const insertPayload: any = {
+      site_id: siteId,
+      document_type: documentType || 'Document',
+      document_label: documentLabel || null,
+      file_name: fileName,
+      gcp_file_url: finalFileUrl,
+      uploaded_at: uploadedAt,
+    };
+
+    let insertedRow = null;
+    const { data: insertedData, error: dbError } = await supabaseAdmin
+      .from('site_documents')
+      .insert([insertPayload])
+      .select('*')
+      .single();
+
+    if (dbError) {
+      console.error('❌ Supabase insert site_documents error:', dbError);
+      throw new Error(`Failed to save site document metadata: ${dbError.message}`);
+    }
+
+    insertedRow = insertedData;
+
+    return {
+      success: true,
+      file_name: fileName,
+      gcp_file_url: finalFileUrl,
+      drive_web_view_link: driveResult?.webViewLink || null,
+      document: insertedRow,
+    };
   }
 }

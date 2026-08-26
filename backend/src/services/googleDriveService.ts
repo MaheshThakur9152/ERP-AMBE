@@ -211,6 +211,55 @@ export class GoogleDriveService {
     };
   }
 
+  public static async uploadSiteDocumentFile({
+    fileBuffer,
+    fileName,
+    mimeType,
+    siteName,
+  }: {
+    fileBuffer: Buffer;
+    fileName: string;
+    mimeType: string;
+    siteName?: string;
+  }): Promise<{ id: string; name: string; webViewLink: string }> {
+    const rootFolderId =
+      process.env.DRIVE_SITE_FOLDER_ID ||
+      env.DRIVE_INVOICE_FOLDER_ID ||
+      process.env.DRIVE_INVOICE_FOLDER_ID ||
+      env.DRIVE_EMPLOYEE_FOLDER_ID ||
+      process.env.DRIVE_EMPLOYEE_FOLDER_ID ||
+      '';
+
+    let targetFolderId = rootFolderId;
+    if (rootFolderId && siteName && siteName.trim()) {
+      try {
+        targetFolderId = await getOrCreateDriveFolder(siteName, rootFolderId);
+      } catch (folderErr) {
+        console.warn('⚠️ Google Drive site folder creation warning:', folderErr);
+      }
+    }
+
+    const stream = Readable.from(fileBuffer);
+
+    const response = await drive.files.create({
+      requestBody: {
+        name: fileName,
+        parents: targetFolderId ? [targetFolderId] : undefined,
+      },
+      media: {
+        mimeType,
+        body: stream,
+      },
+      fields: 'id, name, webViewLink',
+    });
+
+    return {
+      id: response.data.id || '',
+      name: response.data.name || fileName,
+      webViewLink: response.data.webViewLink || '',
+    };
+  }
+
   public static async getMimeType(fileId: string): Promise<string> {
     const meta = await drive.files.get({ fileId, fields: 'mimeType' });
     return meta.data.mimeType || 'application/octet-stream';

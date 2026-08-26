@@ -43,4 +43,7 @@ router.post(
 // Protected RBAC route: only SuperAdmin can lock/unlock invoices
 router.patch('/:id/lock', requireAuth, requireSuperAdmin, InvoiceController.toggleLock);
 
+// Cancel invoice route: Admin & SuperAdmin
+router.patch('/:id/cancel', requireAuth, requireAdmin, checkLockBouncer('invoices'), InvoiceController.cancel);
+
 export default router;

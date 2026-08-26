@@ -90,6 +90,55 @@ export class GCPStorageService {
   }
 
   /**
+   * Upload site document with exact generated file name
+   */
+  public static async uploadSiteDocument(
+    fileBuffer: Buffer,
+    fileName: string,
+    mimeType: string,
+    siteId: string
+  ): Promise<{ gcp_file_url: string; file_name: string }> {
+    const bucketName = env.GCP_BUCKET_NAME || 'ambe-erp-documents';
+    const bucket = this.storage.bucket(bucketName);
+    const destinationPath = `site-docs/${siteId}/${fileName}`;
+    const blob = bucket.file(destinationPath);
+
+    return new Promise((resolve, reject) => {
+      const blobStream = blob.createWriteStream({
+        resumable: false,
+        contentType: mimeType,
+      });
+
+      blobStream.on('error', (err) => {
+        console.error('❌ GCP Storage Site Doc Upload Error:', err);
+        reject(err);
+      });
+
+      blobStream.on('finish', async () => {
+        try {
+          const [signedUrl] = await blob.getSignedUrl({
+            action: 'read',
+            expires: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days TTL
+          });
+
+          resolve({
+            gcp_file_url: signedUrl,
+            file_name: fileName,
+          });
+        } catch (signedErr: any) {
+          console.warn('⚠️ Could not generate signed URL, using fallback URL:', signedErr?.message);
+          resolve({
+            gcp_file_url: `https://storage.googleapis.com/${bucketName}/${destinationPath}`,
+            file_name: fileName,
+          });
+        }
+      });
+
+      blobStream.end(fileBuffer);
+    });
+  }
+
+  /**
    * Generates a fresh signed read URL for a stored GCP file path
    */
   public static async getSignedFileUrl(destinationPath: string, expiresInMs = 60 * 60 * 1000): Promise<string> {

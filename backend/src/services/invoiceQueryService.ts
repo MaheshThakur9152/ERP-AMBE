@@ -195,10 +195,16 @@ export function mapRowToInvoiceRecord(rawRow: any): InvoiceRecord {
     is_material: row.is_material || row.payload?.isMaterial || false,
     is_locked: row.is_locked ?? false,
     isLocked: row.is_locked ?? false,
-    certified_doc_url: row.certified_doc_url || row.certifiedDocUrl || row.payload?.certified_doc_url || row.payload?.certifiedDocUrl || null,
-    certifiedDocUrl: row.certified_doc_url || row.certifiedDocUrl || row.payload?.certified_doc_url || row.payload?.certifiedDocUrl || null,
-    certified_attendance_url: row.certified_attendance_url || row.certifiedAttendanceUrl || row.payload?.certified_attendance_url || row.payload?.certifiedAttendanceUrl || null,
-    certifiedAttendanceUrl: row.certified_attendance_url || row.certifiedAttendanceUrl || row.payload?.certified_attendance_url || row.payload?.certifiedAttendanceUrl || null,
+    certified_doc_url: (row.certified_doc_url || row.certifiedDocUrl || row.payload?.certified_doc_url || row.payload?.certifiedDocUrl) ? String(row.certified_doc_url || row.certifiedDocUrl || row.payload?.certified_doc_url || row.payload?.certifiedDocUrl) : null,
+    certifiedDocUrl: (row.certified_doc_url || row.certifiedDocUrl || row.payload?.certified_doc_url || row.payload?.certifiedDocUrl) ? String(row.certified_doc_url || row.certifiedDocUrl || row.payload?.certified_doc_url || row.payload?.certifiedDocUrl) : null,
+    certified_attendance_url: (row.certified_attendance_url || row.certifiedAttendanceUrl || row.payload?.certified_attendance_url || row.payload?.certifiedAttendanceUrl) ? String(row.certified_attendance_url || row.certifiedAttendanceUrl || row.payload?.certified_attendance_url || row.payload?.certifiedAttendanceUrl) : null,
+    certifiedAttendanceUrl: (row.certified_attendance_url || row.certifiedAttendanceUrl || row.payload?.certified_attendance_url || row.payload?.certifiedAttendanceUrl) ? String(row.certified_attendance_url || row.certifiedAttendanceUrl || row.payload?.certified_attendance_url || row.payload?.certifiedAttendanceUrl) : null,
+    generated_pdf_url: (row.generated_pdf_url || row.generatedPdfUrl || row.payload?.generated_pdf_url || row.payload?.generatedPdfUrl) ? String(row.generated_pdf_url || row.generatedPdfUrl || row.payload?.generated_pdf_url || row.payload?.generatedPdfUrl) : null,
+    generatedPdfUrl: (row.generated_pdf_url || row.generatedPdfUrl || row.payload?.generated_pdf_url || row.payload?.generatedPdfUrl) ? String(row.generated_pdf_url || row.generatedPdfUrl || row.payload?.generated_pdf_url || row.payload?.generatedPdfUrl) : null,
+    cancelled_at: (row.cancelled_at || row.cancelledAt) ? String(row.cancelled_at || row.cancelledAt) : null,
+    cancelledAt: (row.cancelled_at || row.cancelledAt) ? String(row.cancelled_at || row.cancelledAt) : null,
+    cancelled_reason: (row.cancelled_reason || row.cancelledReason) ? String(row.cancelled_reason || row.cancelledReason) : null,
+    cancelledReason: (row.cancelled_reason || row.cancelledReason) ? String(row.cancelled_reason || row.cancelledReason) : null,
     previous_version_id: row.previous_version_id || row.previousVersionId || row.payload?.previous_version_id || null,
     payload: fullPayload,
     created_at: row.created_at ? String(row.created_at) : (row.createdAt ? String(row.createdAt) : undefined),
@@ -359,6 +365,7 @@ export class InvoiceQueryService {
       previous_version_id: payload.previous_version_id || payload.previousVersionId || null,
       certified_doc_url: payload.certified_doc_url || payload.certifiedDocUrl || null,
       certified_attendance_url: payload.certified_attendance_url || payload.certifiedAttendanceUrl || null,
+      generated_pdf_url: payload.generated_pdf_url || payload.generatedPdfUrl || payload.pdf_url || payload.pdfUrl || null,
       created_at: now,
     };
 
@@ -468,6 +475,22 @@ export class InvoiceQueryService {
       is_material: payload.is_material ?? payload.isMaterial ?? false,
     };
 
+    if (payload.generated_pdf_url !== undefined || payload.generatedPdfUrl !== undefined) {
+      updateRow.generated_pdf_url = payload.generated_pdf_url || payload.generatedPdfUrl || null;
+    }
+    if (payload.certified_doc_url !== undefined || payload.certifiedDocUrl !== undefined) {
+      updateRow.certified_doc_url = payload.certified_doc_url || payload.certifiedDocUrl || null;
+    }
+    if (payload.certified_attendance_url !== undefined || payload.certifiedAttendanceUrl !== undefined) {
+      updateRow.certified_attendance_url = payload.certified_attendance_url || payload.certifiedAttendanceUrl || null;
+    }
+    if (payload.cancelled_at !== undefined || payload.cancelledAt !== undefined) {
+      updateRow.cancelled_at = payload.cancelled_at || payload.cancelledAt || null;
+    }
+    if (payload.cancelled_reason !== undefined || payload.cancelledReason !== undefined) {
+      updateRow.cancelled_reason = payload.cancelled_reason || payload.cancelledReason || null;
+    }
+
     // Server-side NOT NULL validation before DB write
     this.validateRequiredColumns(updateRow);
 
@@ -497,6 +520,37 @@ export class InvoiceQueryService {
         const { data: st } = await supabaseAdmin.from('sites').select('*').eq('id', siteId).maybeSingle();
         if (st) data.sites = st;
       }
+    }
+
+    return mapRowToInvoiceRecord(data);
+  }
+
+  /**
+   * Cancel an invoice setting status = 'Cancelled', cancelled_at = now(), optional cancelled_reason
+   */
+  static async cancelInvoice(id: string, cancelledReason?: string, user?: AuthUser): Promise<InvoiceRecord> {
+    await this.verifyInvoiceOwnership(id, user);
+    const now = new Date().toISOString();
+
+    const updatePayload: any = {
+      status: 'Cancelled',
+      cancelled_at: now,
+      updated_at: now,
+    };
+    if (cancelledReason !== undefined && cancelledReason !== null) {
+      updatePayload.cancelled_reason = cancelledReason;
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('invoices')
+      .update(updatePayload)
+      .eq('id', id)
+      .select('*, sites(*), companies(*)')
+      .single();
+
+    if (error) {
+      console.error(`[invoice:cancel:error] invoice_id=${id} error:`, error.message);
+      throw new Error(`Invoice cancellation failed: ${error.message}`);
     }
 
     return mapRowToInvoiceRecord(data);
