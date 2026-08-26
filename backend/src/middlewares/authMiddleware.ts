@@ -60,11 +60,10 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
     // 4. Query user_roles table for user's assigned role
     let role: 'admin' | 'superadmin' = 'admin';
     let rawDbRole: string | null = null;
-    let companyId: string | undefined = undefined;
 
     const { data: roleData, error: roleError } = await supabaseAdmin
       .from('user_roles')
-      .select('role, company_id')
+      .select('role')
       .eq('user_id', user.id)
       .maybeSingle();
 
@@ -77,9 +76,6 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
       if (roleData.role) {
         role = (roleData.role.trim().toLowerCase() === 'superadmin') ? 'superadmin' : 'admin';
       }
-      if (roleData.company_id) {
-        companyId = roleData.company_id;
-      }
     }
 
     console.warn(`[authn] user_id=${user.id} email=${user.email} rawDbRole=${rawDbRole} parsedRole=${role}`);
@@ -89,8 +85,6 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
       id: user.id,
       email: user.email,
       role,
-      company_id: companyId,
-      companyId: companyId,
     };
 
     next();
