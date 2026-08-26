@@ -4,10 +4,69 @@ import { AuthUser } from '../types/express';
 import { COOKIE_OPTIONS, ACCESS_TOKEN_MAX_AGE, REFRESH_TOKEN_MAX_AGE } from '../config/constants';
 
 /**
+ * Robust user role lookup with retries and loud logging.
+ * Prevents cold-start DB connection drops from silently downgrading privileges.
+ */
+export async function fetchUserRole(
+  userId: string,
+  email?: string
+): Promise<{ role: 'admin' | 'superadmin'; rawDbRole: string | null; error?: any }> {
+  const maxRetries = 3;
+  let lastError: any = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (error) {
+        lastError = error;
+        console.error(
+          `[auth:db:error] attempt=${attempt}/${maxRetries} user_id=${userId} email=${email || 'unknown'} error=${error.message}`
+        );
+        if (attempt < maxRetries) {
+          await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+          continue;
+        }
+        break;
+      }
+
+      if (data && data.role) {
+        const parsedRole = data.role.trim().toLowerCase() === 'superadmin' ? 'superadmin' : 'admin';
+        console.warn(
+          `[auth:db:success] user_id=${userId} email=${email || 'unknown'} rawDbRole=${data.role} parsedRole=${parsedRole}`
+        );
+        return { role: parsedRole, rawDbRole: data.role };
+      }
+
+      // Query succeeded cleanly with zero rows
+      console.warn(
+        `[auth:db:empty] user_id=${userId} email=${email || 'unknown'} no row in user_roles -> default admin`
+      );
+      return { role: 'admin', rawDbRole: null };
+    } catch (err: any) {
+      lastError = err;
+      console.error(
+        `[auth:db:exception] attempt=${attempt}/${maxRetries} user_id=${userId} email=${email || 'unknown'} exception=${err?.message || err}`
+      );
+      if (attempt < maxRetries) {
+        await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+      }
+    }
+  }
+
+  // All retries failed with an active error
+  return { role: 'admin', rawDbRole: null, error: lastError };
+}
+
+/**
  * Middleware: requireAuth
  * Extracts JWT access token from HTTP-only cookie or Authorization header.
  * If access token is invalid/expired, attempts silent refresh using refresh_token cookie.
- * Verifies user with Supabase, fetches role from user_roles, and attaches req.user.
+ * Verifies user with Supabase, fetches role from user_roles with retry, and attaches req.user.
  */
 export const requireAuth = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -19,7 +78,9 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
     // 1. Validate Access Token if provided
     if (accessToken) {
       const { data: { user: authUser }, error: authError } = await supabaseAdmin.auth.getUser(accessToken);
-      if (!authError && authUser) {
+      if (authError) {
+        console.warn(`[auth:jwt] accessToken validation failed: ${authError.message}`);
+      } else if (authUser) {
         user = authUser;
       }
     }
@@ -57,25 +118,15 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
       return;
     }
 
-    // 4. Query user_roles table for user's assigned role
-    let role: 'admin' | 'superadmin' = 'admin';
-    let rawDbRole: string | null = null;
+    // 4. Query user_roles table for user's assigned role with retry
+    const { role, rawDbRole, error: roleFetchError } = await fetchUserRole(user.id, user.email);
 
-    const { data: roleData, error: roleError } = await supabaseAdmin
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', user.id)
-      .maybeSingle();
-
-    if (roleError) {
-      console.error(`[auth:db] query error for user_id=${user.id} email=${user.email}:`, roleError.message);
-    }
-
-    if (roleData) {
-      rawDbRole = roleData.role;
-      if (roleData.role) {
-        role = (roleData.role.trim().toLowerCase() === 'superadmin') ? 'superadmin' : 'admin';
-      }
+    if (roleFetchError) {
+      console.error(
+        `[auth:db:fatal] Failed all retries querying user_roles for user_id=${user.id} email=${user.email}: ${roleFetchError.message || roleFetchError}`
+      );
+      res.status(503).json({ error: 'Service Unavailable: Role authorization lookup failed, please retry' });
+      return;
     }
 
     console.warn(`[authn] user_id=${user.id} email=${user.email} rawDbRole=${rawDbRole} parsedRole=${role}`);

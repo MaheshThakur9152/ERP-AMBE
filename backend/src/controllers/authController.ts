@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
 import { COOKIE_OPTIONS, ACCESS_TOKEN_MAX_AGE, REFRESH_TOKEN_MAX_AGE } from '../config/constants';
+import { fetchUserRole } from '../middlewares/authMiddleware';
 
 export class AuthController {
   /**
@@ -45,17 +46,9 @@ export class AuthController {
         maxAge: REFRESH_TOKEN_MAX_AGE,
       });
 
-      // Fetch user role from user_roles table
-      let role: 'admin' | 'superadmin' = 'admin';
-      const { data: roleData } = await supabaseAdmin
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', data.user.id)
-        .maybeSingle();
+      // Fetch user role from user_roles table with retry
+      const { role } = await fetchUserRole(data.user.id, data.user.email);
 
-      if (roleData?.role) {
-        role = roleData.role as 'admin' | 'superadmin';
-      }
 
       res.status(200).json({
         success: true,
