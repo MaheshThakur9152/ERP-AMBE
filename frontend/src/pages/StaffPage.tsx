@@ -23,6 +23,23 @@ import {
 import { AddStaffModal } from '@/features/attendance/components/AddStaffModal';
 import { supabase } from '@/lib/supabase';
 
+export const isMatchingDocType = (docType?: string | null, category?: string | null): boolean => {
+  if (!docType || !category) return false;
+  const cleanDoc = docType.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const cleanCat = category.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  if (cleanCat.includes('aadhaar') || cleanCat.includes('aadhar')) {
+    return cleanDoc.includes('aadhaar') || cleanDoc.includes('aadhar');
+  }
+  if (cleanCat.includes('pan')) {
+    return cleanDoc.includes('pan');
+  }
+  if (cleanCat.includes('bank') || cleanCat.includes('passbook')) {
+    return cleanDoc.includes('bank') || cleanDoc.includes('passbook');
+  }
+  return cleanDoc === cleanCat;
+};
+
 interface StaffDocument {
   name: string;
   url: string;
@@ -161,7 +178,7 @@ export const StaffPage: React.FC = () => {
     const fetchStaff = async () => {
       const { data, error } = await supabase
         .from('staff')
-        .select('*, sites(site_name, code_name, companies(name)), rate_cards(*), employee_documents(id)')
+        .select('*, sites(site_name, code_name, companies(name)), rate_cards(*), employee_documents(*)')
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -501,20 +518,37 @@ export const StaffPage: React.FC = () => {
                       {/* KYC Documents Badge */}
                       <td className="py-4 px-4 text-center">
                         <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                          {staff.aadharNo ? (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-green-50 text-green-700 border border-green-200">
-                              Aadhar ✓
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-gray-50 text-gray-400 border border-gray-200">
-                              No Aadhar
-                            </span>
-                          )}
-                          {staff.panNo ? (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                              PAN ✓
-                            </span>
-                          ) : null}
+                          {(() => {
+                            const hasAadhaar = Boolean(
+                              staff.aadharNo ||
+                              staff.aadhar_no ||
+                              (staff.employee_documents && staff.employee_documents.some((d: any) => isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'Aadhaar Card')))
+                            );
+                            const hasPan = Boolean(
+                              staff.panNo ||
+                              staff.pan_no ||
+                              (staff.employee_documents && staff.employee_documents.some((d: any) => isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'PAN Card')))
+                            );
+
+                            return (
+                              <>
+                                {hasAadhaar ? (
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-green-50 text-green-700 border border-green-200">
+                                    Aadhar ✓
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-gray-50 text-gray-400 border border-gray-200">
+                                    No Aadhar
+                                  </span>
+                                )}
+                                {hasPan ? (
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                    PAN ✓
+                                  </span>
+                                ) : null}
+                              </>
+                            );
+                          })()}
                           <button
                             type="button"
                             onClick={async () => {
@@ -797,11 +831,8 @@ export const StaffPage: React.FC = () => {
                 <div className="grid grid-cols-3 gap-3 pt-2">
                   {/* Aadhaar Card */}
                   {(() => {
-                    const aadhaarDoc = staffDocs.find(
-                      (d) =>
-                        d.document_type === 'Aadhaar Card' ||
-                        d.document_type === 'Aadhaar' ||
-                        d.document_type === 'Aadhar'
+                    const aadhaarDoc = staffDocs.find((d) =>
+                      isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'Aadhaar Card')
                     );
                     if (aadhaarDoc) {
                       return (
@@ -861,8 +892,8 @@ export const StaffPage: React.FC = () => {
 
                   {/* PAN Card */}
                   {(() => {
-                    const panDoc = staffDocs.find(
-                      (d) => d.document_type === 'PAN Card' || d.document_type === 'PAN'
+                    const panDoc = staffDocs.find((d) =>
+                      isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'PAN Card')
                     );
                     if (panDoc) {
                       return (
@@ -922,11 +953,8 @@ export const StaffPage: React.FC = () => {
 
                   {/* Bank Passbook */}
                   {(() => {
-                    const bankDoc = staffDocs.find(
-                      (d) =>
-                        d.document_type === 'Bank Details' ||
-                        d.document_type === 'Bank Passbook' ||
-                        d.document_type === 'Bank'
+                    const bankDoc = staffDocs.find((d) =>
+                      isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'Bank Passbook')
                     );
                     if (bankDoc) {
                       return (
@@ -1065,12 +1093,8 @@ export const StaffPage: React.FC = () => {
             {/* Document List */}
             <div className="p-5 space-y-3">
               {['Aadhaar Card', 'PAN Card', 'Bank Passbook'].map((docType) => {
-                const uploadedDoc = viewerDocs.find(
-                  (d) =>
-                    d.document_type === docType ||
-                    (docType === 'Aadhaar Card' && (d.document_type === 'Aadhaar' || d.document_type === 'Aadhar')) ||
-                    (docType === 'PAN Card' && d.document_type === 'PAN') ||
-                    (docType === 'Bank Passbook' && (d.document_type === 'Bank Details' || d.document_type === 'Bank'))
+                const uploadedDoc = viewerDocs.find((d) =>
+                  isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, docType)
                 );
 
                 return (
