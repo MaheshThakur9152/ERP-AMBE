@@ -89,9 +89,9 @@ function mapRowToSite(rawRow: any): Site {
     rateCards: row.rateCards || row.rate_cards || [],
     is_locked: Boolean(row.is_locked),
     isLocked: Boolean(row.is_locked),
-    createdAt: row.createdAt || row.created_at,
-    created_at: row.created_at || row.createdAt,
-    updated_at: row.updated_at,
+    createdAt: (row.createdAt || row.created_at) ?? undefined,
+    created_at: (row.created_at || row.createdAt) ?? undefined,
+    updated_at: row.updated_at ?? undefined,
   };
 }
 
