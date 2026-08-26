@@ -458,61 +458,26 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
     try {
       const isProforma = invoiceType === 'Proforma Invoice';
       
-      // 2. Explicitly bind root-level keys so DB / Table Maps / PDF Viewer never fail
+      // Flat, consistent payload matching the invoices schema
       const recordPayload = {
         company_id: currentCompany?.id,
         site_id: selectedSite?.id,
-        companyId: currentCompany?.id,
-        siteId: selectedSite?.id,
-        
-        // Ensure PDF top-left company rendering always has a target
-        companyName: compName,
-        company_name: compName,
-        
-        invoiceNo: generatedInvoice.meta.invoiceNo,
         invoice_no: generatedInvoice.meta.invoiceNo,
-        date: generatedInvoice.meta.invoiceDate,
+        type: isProforma ? ('Proforma Invoice' as const) : ('Tax Invoice' as const),
+        status: isProforma ? ('Draft' as const) : ('Pending' as const),
         invoice_date: generatedInvoice.meta.invoiceDate,
-        monthYear: generatedInvoice.meta.billingPeriod,
         billing_period: generatedInvoice.meta.billingPeriod,
-        
-        // Fix for "NAME & ADD OF PARTY"
-        clientName: partyName,
-        client_name: partyName,
-        siteName: partySite,
-        site_name: partySite,
-        
         line_items: lineItems,
         sub_total: calc.subTotal,
         tax_total: calc.cgstAmount + calc.sgstAmount,
         grand_total: calc.grandTotal,
-        amount: calc.grandTotal,
-        mgmt_percent: dynamicMgmtPercent,
-        mgmtPercent: dynamicMgmtPercent,
         management_fee_percent: dynamicMgmtPercent,
+        mgmt_percent: dynamicMgmtPercent,
+        machinery_charges: 0,
+        material_charges: 0,
         additional_charges: additionalCharges,
-        additionalCharges,
-        type: isProforma ? ('Proforma Invoice' as const) : ('Tax Invoice' as const),
-        status: isProforma ? ('Draft' as const) : ('Pending' as const),
-        itemsCount: generatedInvoice.items.length,
-        payload: {
-          ...generatedInvoice,
-          company_id: currentCompany?.id,
-          site_id: selectedSite?.id,
-          mgmtPercent: dynamicMgmtPercent,
-          additionalCharges,
-          additional_charges: additionalCharges,
-          company: {
-            ...generatedInvoice.company,
-            id: currentCompany?.id,
-            code: currentCompany?.code,
-          },
-        },
+        is_material: false,
       };
-
-      console.log('🔵 STEP 1 - additionalCharges state:', additionalCharges);
-      console.log('🔵 STEP 1 - recordPayload.additional_charges:', recordPayload.additional_charges);
-      console.log('🔵 STEP 1 - recordPayload.payload.additionalCharges:', recordPayload.payload?.additionalCharges);
 
       const targetId = initialRecord?.id || editId;
       const res = targetId

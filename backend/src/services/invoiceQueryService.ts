@@ -268,6 +268,44 @@ export class InvoiceQueryService {
   }
 
   /**
+   * Validate required NOT NULL columns before DB insert or update
+   */
+  static validateRequiredColumns(row: Record<string, any>): void {
+    const missing: string[] = [];
+    if (!row.invoice_no || typeof row.invoice_no !== 'string' || !row.invoice_no.trim()) {
+      missing.push('invoice_no');
+    }
+    if (!row.type || typeof row.type !== 'string' || !row.type.trim()) {
+      missing.push('type');
+    }
+    if (!row.invoice_date || typeof row.invoice_date !== 'string' || !row.invoice_date.trim()) {
+      missing.push('invoice_date');
+    }
+    if (!row.billing_period || typeof row.billing_period !== 'string' || !row.billing_period.trim()) {
+      missing.push('billing_period');
+    }
+    if (!row.line_items || !Array.isArray(row.line_items)) {
+      missing.push('line_items');
+    }
+    if (row.sub_total === undefined || row.sub_total === null || isNaN(Number(row.sub_total))) {
+      missing.push('sub_total');
+    }
+    if (row.tax_total === undefined || row.tax_total === null || isNaN(Number(row.tax_total))) {
+      missing.push('tax_total');
+    }
+    if (row.grand_total === undefined || row.grand_total === null || isNaN(Number(row.grand_total))) {
+      missing.push('grand_total');
+    }
+
+    if (missing.length > 0) {
+      const err: any = new Error(`Missing or invalid required NOT NULL field(s): ${missing.join(', ')}`);
+      err.statusCode = 400;
+      err.missingFields = missing;
+      throw err;
+    }
+  }
+
+  /**
    * Create invoice in DB strictly using PostgreSQL columns & auto UUID
    */
   static async createInvoice(payload: any, user?: AuthUser): Promise<InvoiceRecord> {
@@ -278,7 +316,9 @@ export class InvoiceQueryService {
       payload.payload?.company?.id;
 
     if (user && user.role !== 'superadmin' && user.company_id && companyId && companyId !== user.company_id) {
-      throw new Error('FORBIDDEN_TENANT_ACCESS: Cannot create invoices for another company entity');
+      const err: any = new Error('FORBIDDEN_TENANT_ACCESS: Cannot create invoices for another company entity');
+      err.statusCode = 403;
+      throw err;
     }
 
     const siteId =
@@ -293,14 +333,14 @@ export class InvoiceQueryService {
       company_id: companyId,
       site_id: siteId,
       invoice_no: payload.invoice_no || payload.invoiceNo || payload.meta?.invoiceNo || '',
-      type: payload.type || 'Tax Invoice',
+      type: payload.type || payload.payload?.meta?.invoiceType || 'Tax Invoice',
       status: payload.status || 'Pending',
       invoice_date: payload.invoice_date || payload.date || payload.meta?.invoiceDate || now.split('T')[0],
-      billing_period: payload.billing_period || payload.monthYear || payload.meta?.billingPeriod || '',
+      billing_period: payload.billing_period || payload.billingPeriod || payload.monthYear || payload.meta?.billingPeriod || '',
       line_items: payload.line_items || payload.items || payload.payload?.items || [],
-      sub_total: payload.sub_total || payload.subTotal || 0,
-      tax_total: payload.tax_total || payload.taxTotal || 0,
-      grand_total: payload.grand_total || payload.amount || 0,
+      sub_total: payload.sub_total !== undefined ? Number(payload.sub_total) : (payload.subTotal !== undefined ? Number(payload.subTotal) : 0),
+      tax_total: payload.tax_total !== undefined ? Number(payload.tax_total) : (payload.taxTotal !== undefined ? Number(payload.taxTotal) : 0),
+      grand_total: payload.grand_total !== undefined ? Number(payload.grand_total) : (payload.amount !== undefined ? Number(payload.amount) : (payload.grandTotal !== undefined ? Number(payload.grandTotal) : 0)),
       management_fee_percent: payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? payload.payload?.mgmtPercent ?? DEFAULT_MGMT_FEE_PERCENT,
       mgmt_percent: payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? payload.payload?.mgmtPercent ?? DEFAULT_MGMT_FEE_PERCENT,
       machinery_charges: payload.machinery_charges ?? payload.machineryCharges ?? payload.payload?.machineryCharges ?? 0,
@@ -313,12 +353,15 @@ export class InvoiceQueryService {
       dispatched_through: payload.dispatched_through || payload.dispatchedThrough || payload.meta?.dispatchedThrough || '',
       destination: payload.destination || payload.meta?.destination || '',
       terms_of_delivery: payload.terms_of_delivery || payload.termsOfDelivery || payload.meta?.termsOfDelivery || '',
-      is_material: payload.is_material || payload.isMaterial || false,
+      is_material: payload.is_material ?? payload.isMaterial ?? false,
       previous_version_id: payload.previous_version_id || payload.previousVersionId || null,
       certified_doc_url: payload.certified_doc_url || payload.certifiedDocUrl || null,
       certified_attendance_url: payload.certified_attendance_url || payload.certifiedAttendanceUrl || null,
       created_at: now,
     };
+
+    // Server-side NOT NULL validation before DB write
+    this.validateRequiredColumns(insertRow);
 
     const { data, error } = await supabaseAdmin
       .from('invoices')
@@ -327,8 +370,13 @@ export class InvoiceQueryService {
       .single();
 
     if (error) {
-      console.error('❌ Supabase insert invoice error:', error.message);
-      throw new Error(`Database insert failed: ${error.message}`);
+      console.error('❌ Supabase insert invoice error:', error);
+      const dbErr: any = new Error(`Database insert failed: ${error.message}`);
+      dbErr.statusCode = 500;
+      dbErr.details = error.details || error.hint || error.message;
+      dbErr.hint = error.hint;
+      dbErr.code = error.code;
+      throw dbErr;
     }
 
     if (data) {
@@ -361,8 +409,13 @@ export class InvoiceQueryService {
       .eq('id', id);
 
     if (error) {
-      console.error('❌ Supabase delete invoice error:', error.message);
-      throw new Error(`Database delete failed: ${error.message}`);
+      console.error('❌ Supabase delete invoice error:', error);
+      const dbErr: any = new Error(`Database delete failed: ${error.message}`);
+      dbErr.statusCode = 500;
+      dbErr.details = error.details || error.hint || error.message;
+      dbErr.hint = error.hint;
+      dbErr.code = error.code;
+      throw dbErr;
     }
 
     return true;
@@ -389,14 +442,15 @@ export class InvoiceQueryService {
     const updateRow: any = {
       company_id: companyId,
       site_id: siteId,
-      type: payload.type || 'Tax Invoice',
+      invoice_no: payload.invoice_no || payload.invoiceNo || payload.meta?.invoiceNo,
+      type: payload.type || payload.payload?.meta?.invoiceType || (payload.payload?.terms?.[0]?.type),
       status: payload.status || 'Pending',
       invoice_date: payload.invoice_date || payload.date || payload.meta?.invoiceDate,
-      billing_period: payload.billing_period || payload.monthYear || payload.meta?.billingPeriod,
-      line_items: payload.line_items || payload.items || payload.payload?.items || [],
-      sub_total: payload.sub_total || payload.subTotal || 0,
-      tax_total: payload.tax_total || payload.taxTotal || 0,
-      grand_total: payload.grand_total || payload.amount || 0,
+      billing_period: payload.billing_period || payload.billingPeriod || payload.monthYear || payload.meta?.billingPeriod,
+      line_items: payload.line_items || payload.items || payload.payload?.items || (payload.payload?.terms?.[0]?.payload?.items),
+      sub_total: payload.sub_total !== undefined ? Number(payload.sub_total) : (payload.subTotal !== undefined ? Number(payload.subTotal) : undefined),
+      tax_total: payload.tax_total !== undefined ? Number(payload.tax_total) : (payload.taxTotal !== undefined ? Number(payload.taxTotal) : undefined),
+      grand_total: payload.grand_total !== undefined ? Number(payload.grand_total) : (payload.amount !== undefined ? Number(payload.amount) : (payload.grandTotal !== undefined ? Number(payload.grandTotal) : undefined)),
       management_fee_percent: payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? payload.payload?.mgmtPercent ?? DEFAULT_MGMT_FEE_PERCENT,
       mgmt_percent: payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? payload.payload?.mgmtPercent ?? DEFAULT_MGMT_FEE_PERCENT,
       machinery_charges: payload.machinery_charges ?? payload.machineryCharges ?? payload.payload?.machineryCharges ?? 0,
@@ -409,13 +463,12 @@ export class InvoiceQueryService {
       dispatched_through: payload.dispatched_through || payload.dispatchedThrough || payload.meta?.dispatchedThrough,
       destination: payload.destination || payload.meta?.destination,
       terms_of_delivery: payload.terms_of_delivery || payload.termsOfDelivery || payload.meta?.termsOfDelivery,
-      is_material: payload.is_material || payload.isMaterial || false,
+      is_material: payload.is_material ?? payload.isMaterial ?? false,
       updated_at: new Date().toISOString(),
     };
 
-    if (payload.invoice_no || payload.invoiceNo || payload.meta?.invoiceNo) {
-      updateRow.invoice_no = payload.invoice_no || payload.invoiceNo || payload.meta?.invoiceNo;
-    }
+    // Server-side NOT NULL validation before DB write
+    this.validateRequiredColumns(updateRow);
 
     const { data, error } = await supabaseAdmin
       .from('invoices')
@@ -425,8 +478,13 @@ export class InvoiceQueryService {
       .single();
 
     if (error) {
-      console.error('❌ Supabase update invoice error:', error.message);
-      throw new Error(`Database update failed: ${error.message}`);
+      console.error('❌ Supabase update invoice error:', error);
+      const dbErr: any = new Error(`Database update failed: ${error.message}`);
+      dbErr.statusCode = 500;
+      dbErr.details = error.details || error.hint || error.message;
+      dbErr.hint = error.hint;
+      dbErr.code = error.code;
+      throw dbErr;
     }
 
     if (data) {
