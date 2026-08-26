@@ -464,7 +464,6 @@ export class InvoiceQueryService {
       destination: payload.destination || payload.meta?.destination,
       terms_of_delivery: payload.terms_of_delivery || payload.termsOfDelivery || payload.meta?.termsOfDelivery,
       is_material: payload.is_material ?? payload.isMaterial ?? false,
-      updated_at: new Date().toISOString(),
     };
 
     // Server-side NOT NULL validation before DB write
