@@ -17,12 +17,24 @@ import {
 import { useAuth } from '@/features/auth/context/AuthContext';
 
 export const Sidebar: React.FC = () => {
-  const { signOut, isSuperAdmin, role, user } = useAuth();
+  const { signOut, isSuperAdmin, role, user, switchRole } = useAuth();
+  const [isSwitchingRole, setIsSwitchingRole] = useState(false);
   const [invoicesExpanded, setInvoicesExpanded] = useState(true);
   const [officeEmployeeExpanded, setOfficeEmployeeExpanded] = useState(true);
 
   const roleLabel = isSuperAdmin ? 'SUPERADMIN' : 'ADMIN';
   const displayEmail = user?.email || (isSuperAdmin ? 'superadmin@facility.com' : 'admin@facility.com');
+
+  const handleToggleRole = async () => {
+    if (isSwitchingRole) return;
+    setIsSwitchingRole(true);
+    try {
+      const nextRole = isSuperAdmin ? 'admin' : 'superadmin';
+      await switchRole(nextRole);
+    } finally {
+      setIsSwitchingRole(false);
+    }
+  };
 
   return (
     <aside className="w-72 bg-[#34495E] text-white flex flex-col h-screen sticky top-0 shadow-2xl z-40 select-none flex-shrink-0">
@@ -38,20 +50,28 @@ export const Sidebar: React.FC = () => {
           </div>
         </div>
 
-        {/* Clear Role Badge Indicator (No Confusion) */}
+        {/* Clear Role Badge Indicator (Interactive Toggle with DB Persistence) */}
         <div className="flex items-center justify-between bg-black/25 px-3 py-1.5 rounded-lg border border-white/10 mt-1">
-          <span className="text-[10px] font-mono text-gray-300 font-medium">Logged in as:</span>
-          {isSuperAdmin ? (
-            <span className="text-[10px] font-extrabold font-mono tracking-wider px-2 py-0.5 rounded bg-indigo-600 text-white shadow-xs flex items-center gap-1 border border-indigo-400/30">
-              <ShieldAlert size={11} />
-              <span>SUPERADMIN</span>
-            </span>
-          ) : (
-            <span className="text-[10px] font-extrabold font-mono tracking-wider px-2 py-0.5 rounded bg-teal-600 text-white shadow-xs flex items-center gap-1 border border-teal-400/30">
-              <ShieldCheck size={11} />
-              <span>ADMIN</span>
-            </span>
-          )}
+          <span className="text-[10px] font-mono text-gray-300 font-medium">Role (click to switch):</span>
+          <button
+            type="button"
+            onClick={handleToggleRole}
+            disabled={isSwitchingRole}
+            title="Click to toggle Admin / SuperAdmin role (persists to database)"
+            className="cursor-pointer transition-transform hover:scale-105 active:scale-95 disabled:opacity-50"
+          >
+            {isSuperAdmin ? (
+              <span className="text-[10px] font-extrabold font-mono tracking-wider px-2 py-0.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white shadow-xs flex items-center gap-1 border border-indigo-400/30">
+                <ShieldAlert size={11} />
+                <span>{isSwitchingRole ? 'SAVING...' : 'SUPERADMIN'}</span>
+              </span>
+            ) : (
+              <span className="text-[10px] font-extrabold font-mono tracking-wider px-2 py-0.5 rounded bg-teal-600 hover:bg-teal-500 text-white shadow-xs flex items-center gap-1 border border-teal-400/30">
+                <ShieldCheck size={11} />
+                <span>{isSwitchingRole ? 'SAVING...' : 'ADMIN'}</span>
+              </span>
+            )}
+          </button>
         </div>
       </div>
 

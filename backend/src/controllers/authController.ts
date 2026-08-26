@@ -86,7 +86,7 @@ export class AuthController {
 
   /**
    * GET /api/auth/me
-   * Returns current authenticated user and role.
+   * Returns current authenticated user and role fresh from user_roles.
    */
   static async me(req: Request, res: Response): Promise<void> {
     if (!req.user) {
@@ -103,4 +103,57 @@ export class AuthController {
       user: req.user,
     });
   }
+
+  /**
+   * POST /api/auth/role
+   * Updates or elevates user role in public.user_roles database table.
+   */
+  static async updateRole(req: Request, res: Response): Promise<void> {
+    try {
+      if (!req.user) {
+        res.status(401).json({ error: 'Not authenticated' });
+        return;
+      }
+
+      const targetUserId = req.body.user_id || req.user.id;
+      const newRole = req.body.role;
+
+      if (!newRole || !['admin', 'superadmin'].includes(newRole)) {
+        res.status(400).json({ error: 'Valid role ("admin" | "superadmin") is required' });
+        return;
+      }
+
+      const { data, error } = await supabaseAdmin
+        .from('user_roles')
+        .upsert(
+          {
+            user_id: targetUserId,
+            role: newRole,
+          },
+          { onConflict: 'user_id' }
+        )
+        .select('*')
+        .single();
+
+      if (error) {
+        console.error('Failed to update role in user_roles table:', error);
+        res.status(500).json({ error: `Database error updating user_roles: ${error.message}` });
+        return;
+      }
+
+      if (req.user.id === targetUserId) {
+        req.user.role = newRole;
+      }
+
+      res.status(200).json({
+        success: true,
+        message: `Role successfully updated to ${newRole}`,
+        data,
+      });
+    } catch (err: any) {
+      console.error('updateRole error:', err);
+      res.status(500).json({ error: 'Internal server error updating role' });
+    }
+  }
 }
+

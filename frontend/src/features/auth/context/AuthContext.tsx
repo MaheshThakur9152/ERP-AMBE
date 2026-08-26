@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { UserProfile, UserRole } from '../types';
-import { loginApi, logoutApi, fetchMeApi, fetchUserProfile } from '../api/authApi';
+import { loginApi, logoutApi, fetchMeApi, fetchUserProfile, updateUserRoleApi } from '../api/authApi';
 
 interface AuthContextType {
   user: User | null;
@@ -14,6 +14,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   loginAsAdmin: (customEmail?: string, customRole?: UserRole) => void;
+  switchRole: (newRole: UserRole) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -142,6 +143,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setProfile(createMockProfile(email, customRole));
   };
 
+  const switchRole = async (newRole: UserRole) => {
+    try {
+      await updateUserRoleApi(newRole);
+      setRole(newRole);
+      localStorage.setItem(ROLE_STORAGE_KEY, newRole);
+      if (user) {
+        setUser(createMockUser(user.email, newRole));
+      }
+      if (profile) {
+        setProfile({ ...profile, role: newRole });
+      }
+    } catch (err) {
+      console.error('Failed to switch role in database:', err);
+      setRole(newRole);
+      localStorage.setItem(ROLE_STORAGE_KEY, newRole);
+    }
+  };
+
   const signOut = async () => {
     localStorage.removeItem(DEMO_USER_KEY);
     localStorage.removeItem(ROLE_STORAGE_KEY);
@@ -167,6 +186,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         login,
         signOut,
         loginAsAdmin,
+        switchRole,
       }}
     >
       {children}

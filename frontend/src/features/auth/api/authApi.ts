@@ -110,3 +110,21 @@ export async function lockInvoiceApi(id: string, isLocked: boolean): Promise<any
   }
   return json;
 }
+
+export async function updateUserRoleApi(role: UserRole, userId?: string): Promise<any> {
+  const res = await fetch(getApiUrl(`${AUTH_API_BASE}/role`), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    credentials: 'include',
+    body: JSON.stringify({ role, user_id: userId }),
+  });
+
+  const json = await res.json();
+  if (!res.ok) {
+    throw new Error(json.error || 'Failed to update user role');
+  }
+  return json;
+}
+
