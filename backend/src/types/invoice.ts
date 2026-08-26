@@ -1,10 +1,10 @@
 export interface InvoiceRecord {
   id: string;
   invoiceNo: string;
-  companyId?: string;
-  siteId?: string;
-  company_id?: string;
-  site_id?: string;
+  companyId?: string | null;
+  siteId?: string | null;
+  company_id?: string | null;
+  site_id?: string | null;
   date: string;
   invoice_date?: string;
   monthYear: string;
