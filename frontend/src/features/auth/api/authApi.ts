@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { getApiUrl, setInMemoryToken } from '@/lib/apiClient';
+import { fetchWithRetry, setInMemoryToken } from '@/lib/apiClient';
 import { UserProfile, UserRole } from '../types';
 
 const AUTH_API_BASE = '/api/auth';
@@ -24,12 +24,11 @@ export interface MeResponse {
 }
 
 export async function loginApi(email: string, password: string): Promise<LoginResponse> {
-  const res = await fetch(getApiUrl(`${AUTH_API_BASE}/login`), {
+  const res = await fetchWithRetry(`${AUTH_API_BASE}/login`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    credentials: 'include',
     body: JSON.stringify({ email, password }),
   });
 
@@ -56,17 +55,15 @@ export async function loginApi(email: string, password: string): Promise<LoginRe
 
 export async function logoutApi(): Promise<void> {
   setInMemoryToken(null);
-  await fetch(getApiUrl(`${AUTH_API_BASE}/logout`), {
+  await fetchWithRetry(`${AUTH_API_BASE}/logout`, {
     method: 'POST',
-    credentials: 'include',
-  });
+  }).catch(() => {});
 }
 
 export async function fetchMeApi(): Promise<MeResponse | null> {
   try {
-    const res = await fetch(getApiUrl(`${AUTH_API_BASE}/me`), {
+    const res = await fetchWithRetry(`${AUTH_API_BASE}/me`, {
       method: 'GET',
-      credentials: 'include',
     });
     if (!res.ok) return null;
     const json = await res.json();
@@ -95,12 +92,11 @@ export async function fetchUserProfile(userId: string): Promise<UserProfile | nu
 }
 
 export async function lockInvoiceApi(id: string, isLocked: boolean): Promise<any> {
-  const res = await fetch(getApiUrl(`/api/invoices/${id}/lock`), {
+  const res = await fetchWithRetry(`/api/invoices/${id}/lock`, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
     },
-    credentials: 'include',
     body: JSON.stringify({ is_locked: isLocked }),
   });
 
@@ -111,20 +107,4 @@ export async function lockInvoiceApi(id: string, isLocked: boolean): Promise<any
   return json;
 }
 
-export async function updateUserRoleApi(role: UserRole, userId?: string): Promise<any> {
-  const res = await fetch(getApiUrl(`${AUTH_API_BASE}/role`), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    credentials: 'include',
-    body: JSON.stringify({ role, user_id: userId }),
-  });
-
-  const json = await res.json();
-  if (!res.ok) {
-    throw new Error(json.error || 'Failed to update user role');
-  }
-  return json;
-}
 

@@ -105,8 +105,10 @@ export class AuthController {
   }
 
   /**
-   * POST /api/auth/role
-   * Updates or elevates user role in public.user_roles database table.
+   * PATCH /api/auth/role
+   * Protected: SuperAdmin only.
+   * Updates user role in public.user_roles database table for another user.
+   * Disallows editing own role to prevent self-privilege tampering or accidental lockouts.
    */
   static async updateRole(req: Request, res: Response): Promise<void> {
     try {
@@ -115,8 +117,22 @@ export class AuthController {
         return;
       }
 
-      const targetUserId = req.body.user_id || req.user.id;
-      const newRole = req.body.role;
+      if (req.user.role !== 'superadmin') {
+        res.status(403).json({ error: 'Forbidden: Superadmin access required' });
+        return;
+      }
+
+      const { user_id: targetUserId, role: newRole } = req.body;
+
+      if (!targetUserId) {
+        res.status(400).json({ error: 'Target user_id is required' });
+        return;
+      }
+
+      if (req.user.id === targetUserId) {
+        res.status(403).json({ error: 'Forbidden: SuperAdmin cannot edit their own role' });
+        return;
+      }
 
       if (!newRole || !['admin', 'superadmin'].includes(newRole)) {
         res.status(400).json({ error: 'Valid role ("admin" | "superadmin") is required' });
@@ -141,13 +157,9 @@ export class AuthController {
         return;
       }
 
-      if (req.user.id === targetUserId) {
-        req.user.role = newRole;
-      }
-
       res.status(200).json({
         success: true,
-        message: `Role successfully updated to ${newRole}`,
+        message: `Role for user ${targetUserId} successfully updated to ${newRole}`,
         data,
       });
     } catch (err: any) {
@@ -156,4 +168,5 @@ export class AuthController {
     }
   }
 }
+
 
