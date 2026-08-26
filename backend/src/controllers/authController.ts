@@ -59,6 +59,9 @@ export class AuthController {
 
       res.status(200).json({
         success: true,
+        token: accessToken,
+        access_token: accessToken,
+        refresh_token: refreshToken,
         user: {
           id: data.user.id,
           email: data.user.email,
@@ -91,8 +94,12 @@ export class AuthController {
       return;
     }
 
+    const token = req.cookies?.access_token || req.headers.authorization?.replace(/^Bearer\s+/i, '');
+
     res.status(200).json({
       success: true,
+      token,
+      access_token: token,
       user: req.user,
     });
   }

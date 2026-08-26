@@ -57,8 +57,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const initAuth = async () => {
       try {
         // 1. Try backend HTTP-only cookie session check first (/api/auth/me)
-        const backendUser = await fetchMeApi();
-        if (backendUser) {
+        const meData = await fetchMeApi();
+        if (meData?.user) {
+          const backendUser = meData.user;
           const userObj = createMockUser(backendUser.email, backendUser.role);
           setUser(userObj);
           setRole(backendUser.role);

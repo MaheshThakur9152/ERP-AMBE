@@ -9,7 +9,8 @@ export const DEFAULT_MGMT_FEE_PERCENT = 5;
 export const COOKIE_OPTIONS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
-  sameSite: (process.env.NODE_ENV === 'production' ? 'strict' : 'lax') as 'strict' | 'lax',
+  sameSite: 'lax' as const,
+  ...(process.env.NODE_ENV === 'production' ? { domain: '.ambeservice.com' } : {}),
 };
 
 export const ACCESS_TOKEN_MAX_AGE = 3600000; // 1 hour in ms

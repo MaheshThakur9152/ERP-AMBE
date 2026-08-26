@@ -1,17 +1,26 @@
 import { supabase } from '@/lib/supabase';
-import { getApiUrl } from '@/lib/apiClient';
+import { getApiUrl, setInMemoryToken } from '@/lib/apiClient';
 import { UserProfile, UserRole } from '../types';
 
 const AUTH_API_BASE = '/api/auth';
 
 export interface LoginResponse {
   success: boolean;
+  token?: string;
+  access_token?: string;
+  refresh_token?: string;
   user: {
     id: string;
     email: string;
     role: UserRole;
   };
   error?: string;
+}
+
+export interface MeResponse {
+  user: LoginResponse['user'];
+  token?: string;
+  access_token?: string;
 }
 
 export async function loginApi(email: string, password: string): Promise<LoginResponse> {
@@ -29,17 +38,31 @@ export async function loginApi(email: string, password: string): Promise<LoginRe
     throw new Error(data.error || 'Login failed');
   }
 
+  const token = data.token || data.access_token;
+  if (token) {
+    setInMemoryToken(token);
+    if (data.refresh_token) {
+      await supabase.auth
+        .setSession({
+          access_token: token,
+          refresh_token: data.refresh_token,
+        })
+        .catch(() => {});
+    }
+  }
+
   return data;
 }
 
 export async function logoutApi(): Promise<void> {
+  setInMemoryToken(null);
   await fetch(getApiUrl(`${AUTH_API_BASE}/logout`), {
     method: 'POST',
     credentials: 'include',
   });
 }
 
-export async function fetchMeApi(): Promise<LoginResponse['user'] | null> {
+export async function fetchMeApi(): Promise<MeResponse | null> {
   try {
     const res = await fetch(getApiUrl(`${AUTH_API_BASE}/me`), {
       method: 'GET',
@@ -47,7 +70,11 @@ export async function fetchMeApi(): Promise<LoginResponse['user'] | null> {
     });
     if (!res.ok) return null;
     const json = await res.json();
-    return json.user || null;
+    const token = json.token || json.access_token;
+    if (token) {
+      setInMemoryToken(token);
+    }
+    return json.user ? { user: json.user, token } : null;
   } catch (err) {
     return null;
   }

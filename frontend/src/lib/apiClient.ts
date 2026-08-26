@@ -22,6 +22,16 @@ export function getApiUrl(path: string): string {
   return `${envUrl}${cleanPath}`;
 }
 
+let inMemoryAccessToken: string | null = null;
+
+export function setInMemoryToken(token: string | null): void {
+  inMemoryAccessToken = token;
+}
+
+export function getInMemoryToken(): string | null {
+  return inMemoryAccessToken;
+}
+
 /**
  * Custom fetch wrapper that automatically retries failed GET/5xx requests with exponential backoff.
  * Automatically attaches credentials: 'include' and Authorization Bearer header if session exists.
@@ -40,14 +50,17 @@ export async function fetchWithRetry(
   // Attach Authorization header if available and not already set
   const headers = new Headers(fetchOptions.headers || {});
   if (!headers.has('Authorization')) {
-    try {
-      const { data } = await supabase.auth.getSession();
-      const token = data?.session?.access_token;
-      if (token) {
-        headers.set('Authorization', `Bearer ${token}`);
+    let token = inMemoryAccessToken;
+    if (!token) {
+      try {
+        const { data } = await supabase.auth.getSession();
+        token = data?.session?.access_token || null;
+      } catch {
+        // Ignore session fetch failures
       }
-    } catch {
-      // Ignore session fetch failures
+    }
+    if (token) {
+      headers.set('Authorization', `Bearer ${token}`);
     }
   }
   fetchOptions.headers = headers;
