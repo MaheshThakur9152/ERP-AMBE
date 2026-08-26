@@ -288,39 +288,57 @@ export class AdminController {
    * Locks or unlocks a specific entity item.
    */
   static async lockItem(req: Request, res: Response): Promise<void> {
+    const userEmail = (req as any).user?.email || (req as any).user?.id || 'unknown';
+    console.warn(`[admin:lock-item:start] user=${userEmail} body=${JSON.stringify(req.body)}`);
+
     try {
       const { entityType, id, is_locked } = req.body;
 
       if (!entityType || !id) {
+        console.error(`[admin:lock-item:invalid-payload] user=${userEmail} missing entityType or id:`, req.body);
         res.status(400).json({ error: 'entityType and id are required' });
         return;
       }
 
       const validTables = ['companies', 'sites', 'invoices', 'attendance_sheets', 'payroll_records', 'materials', 'staff', 'employee_documents', 'company_documents'];
       if (!validTables.includes(entityType)) {
-        res.status(400).json({ error: 'Invalid entityType table name' });
+        console.error(`[admin:lock-item:invalid-table] user=${userEmail} invalid table=${entityType}`);
+        res.status(400).json({ error: `Invalid entityType table name: ${entityType}` });
         return;
       }
 
-      const lockStatus = is_locked ?? true;
+      const lockStatus = is_locked !== undefined ? Boolean(is_locked) : true;
 
-      const { error } = await supabaseAdmin
+      // 1. Try update with updated_at
+      let { error } = await supabaseAdmin
         .from(entityType)
         .update({ is_locked: lockStatus, updated_at: new Date().toISOString() })
         .eq('id', id);
 
+      // 2. If updated_at column does not exist on table, fallback to is_locked only
       if (error) {
-        res.status(500).json({ error: 'Failed to update lock status', ...(process.env.NODE_ENV === 'development' && { details: error.message }) });
+        console.warn(`[admin:lock-item:warn] update with updated_at failed for ${entityType} id=${id}: ${error.message}. Retrying with is_locked only...`);
+        const retryRes = await supabaseAdmin
+          .from(entityType)
+          .update({ is_locked: lockStatus })
+          .eq('id', id);
+        error = retryRes.error;
+      }
+
+      if (error) {
+        console.error(`[admin:lock-item:db-error] table=${entityType} id=${id} lockStatus=${lockStatus} error:`, error.message, error);
+        res.status(500).json({ error: `Database lock update failed: ${error.message}`, details: error.message });
         return;
       }
 
+      console.warn(`[admin:lock-item:success] table=${entityType} id=${id} lockStatus=${lockStatus}`);
       res.status(200).json({
         success: true,
         message: `Item ${id} in ${entityType} ${lockStatus ? 'locked' : 'unlocked'} successfully`,
       });
     } catch (err: any) {
-      console.error('[AdminController.lockItem] Error:', err);
-      res.status(500).json({ error: 'Failed to update lock status', ...(process.env.NODE_ENV === 'development' && { details: err.message }) });
+      console.error(`[admin:lock-item:fatal-error] body=${JSON.stringify(req.body)} error:`, err.message, err.stack);
+      res.status(500).json({ error: 'Failed to update lock status', details: err.message });
     }
   }
 
@@ -330,6 +348,9 @@ export class AdminController {
    * Bulk locks or unlocks multiple entities in parallel.
    */
   static async lockBulk(req: Request, res: Response): Promise<void> {
+    const userEmail = (req as any).user?.email || (req as any).user?.id || 'unknown';
+    console.warn(`[admin:lock-bulk:start] user=${userEmail} body=${JSON.stringify(req.body)}`);
+
     try {
       const { items, is_locked } = req.body;
 
@@ -347,27 +368,36 @@ export class AdminController {
           return null;
         }
 
-        const { error } = await supabaseAdmin
+        let { error } = await supabaseAdmin
           .from(table)
           .update({ is_locked: lockStatus, updated_at: new Date().toISOString() })
           .eq('id', item.id);
 
         if (error) {
-          console.error(`Error updating lock status on ${table} id ${item.id}:`, error.message);
+          const retryRes = await supabaseAdmin
+            .from(table)
+            .update({ is_locked: lockStatus })
+            .eq('id', item.id);
+          error = retryRes.error;
+        }
+
+        if (error) {
+          console.error(`[admin:lock-bulk:item-error] table=${table} id=${item.id} error:`, error.message);
         }
         return !error;
       });
 
       await Promise.all(lockPromises);
 
+      console.warn(`[admin:lock-bulk:success] count=${items.length} lockStatus=${lockStatus}`);
       res.status(200).json({
         success: true,
         count: items.length,
         message: `Bulk ${lockStatus ? 'lock' : 'unlock'} completed for ${items.length} items`,
       });
     } catch (err: any) {
-      console.error('[AdminController.lockBulk] Error:', err);
-      res.status(500).json({ error: 'Failed to process bulk lock', ...(process.env.NODE_ENV === 'development' && { details: err.message }) });
+      console.error('[admin:lock-bulk:fatal-error] Error:', err.message, err.stack);
+      res.status(500).json({ error: 'Failed to process bulk lock', details: err.message });
     }
   }
 }

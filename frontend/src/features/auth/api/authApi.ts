@@ -102,35 +102,6 @@ export async function setEntityLockApi(
   id: string,
   locked: boolean
 ): Promise<any> {
-  const pathMap: Record<LockableEntityType, string> = {
-    invoices: 'invoices',
-    companies: 'companies',
-    sites: 'sites',
-    attendance: 'attendance',
-    staff: 'attendance/staff',
-    payroll: 'excel/payroll',
-  };
-
-  const path = pathMap[entityType] || entityType;
-
-  // 1. Try dedicated entity lock route
-  try {
-    const res = await fetchWithRetry(`/api/${path}/${id}/lock`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ is_locked: locked, locked }),
-    });
-
-    if (res.ok) {
-      return res.json();
-    }
-  } catch (err) {
-    // Fall back to unified admin lock-item endpoint
-  }
-
-  // 2. Fallback to unified SuperAdmin lock-item endpoint
   const adminTableMap: Record<LockableEntityType, string> = {
     invoices: 'invoices',
     companies: 'companies',
@@ -140,19 +111,23 @@ export async function setEntityLockApi(
     payroll: 'payroll_records',
   };
 
-  const adminRes = await fetchWithRetry(`/api/admin/lock-item`, {
+  const table = adminTableMap[entityType] || entityType;
+
+  console.warn(`[setEntityLockApi] entityType=${entityType} table=${table} id=${id} locked=${locked}`);
+
+  const adminRes = await fetchWithRetry('/api/admin/lock-item', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      entityType: adminTableMap[entityType] || entityType,
+      entityType: table,
       id,
       is_locked: locked,
     }),
   });
 
-  const json = await adminRes.json();
+  const json = await adminRes.json().catch(() => ({}));
   if (!adminRes.ok) {
     throw new Error(json.error || `Failed to ${locked ? 'lock' : 'unlock'} ${entityType}`);
   }
