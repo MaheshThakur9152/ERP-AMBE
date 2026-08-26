@@ -59,6 +59,7 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
 
     // 4. Query user_roles table for user's assigned role
     let role: 'admin' | 'superadmin' = 'admin';
+    let rawDbRole: string | null = null;
     let companyId: string | undefined = undefined;
 
     const { data: roleData, error: roleError } = await supabaseAdmin
@@ -67,14 +68,21 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
       .eq('user_id', user.id)
       .maybeSingle();
 
-    if (!roleError && roleData) {
+    if (roleError) {
+      console.error(`[auth:db] query error for user_id=${user.id} email=${user.email}:`, roleError.message);
+    }
+
+    if (roleData) {
+      rawDbRole = roleData.role;
       if (roleData.role) {
-        role = roleData.role as 'admin' | 'superadmin';
+        role = (roleData.role.trim().toLowerCase() === 'superadmin') ? 'superadmin' : 'admin';
       }
       if (roleData.company_id) {
         companyId = roleData.company_id;
       }
     }
+
+    console.warn(`[authn] user_id=${user.id} email=${user.email} rawDbRole=${rawDbRole} parsedRole=${role}`);
 
     // 5. Attach user object to request
     req.user = {
@@ -98,11 +106,15 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
  */
 export const requireAdmin = (req: Request, res: Response, next: NextFunction): void => {
   if (!req.user) {
+    console.warn(`[authz:admin] path=${req.originalUrl} method=${req.method} user=null decision=DENY reason=unauthenticated`);
     res.status(401).json({ error: 'Unauthorized: User not authenticated' });
     return;
   }
 
-  if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
+  const allowed = req.user.role === 'admin' || req.user.role === 'superadmin';
+  console.warn(`[authz:admin] path=${req.originalUrl} method=${req.method} user=${req.user.id} email=${req.user.email} role=${req.user.role} requiredRole=admin|superadmin decision=${allowed ? 'ALLOW' : 'DENY'}`);
+
+  if (!allowed) {
     res.status(403).json({ error: 'Forbidden: Admin access required' });
     return;
   }
@@ -117,11 +129,15 @@ export const requireAdmin = (req: Request, res: Response, next: NextFunction): v
  */
 export const requireSuperAdmin = (req: Request, res: Response, next: NextFunction): void => {
   if (!req.user) {
+    console.warn(`[authz:superadmin] path=${req.originalUrl} method=${req.method} user=null decision=DENY reason=unauthenticated`);
     res.status(401).json({ error: 'Unauthorized: User not authenticated' });
     return;
   }
 
-  if (req.user.role !== 'superadmin') {
+  const allowed = req.user.role === 'superadmin';
+  console.warn(`[authz:superadmin] path=${req.originalUrl} method=${req.method} user=${req.user.id} email=${req.user.email} dbRole=${req.user.role} requiredRole=superadmin decision=${allowed ? 'ALLOW' : 'DENY'}`);
+
+  if (!allowed) {
     res.status(403).json({ error: 'Forbidden: Superadmin access required' });
     return;
   }
