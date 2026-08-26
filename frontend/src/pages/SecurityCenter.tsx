@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/features/auth/context/AuthContext';
-import { getApiUrl } from '@/lib/apiClient';
+import { fetchWithRetry, getApiUrl } from '@/lib/apiClient';
 import {
   ShieldCheck,
   ShieldAlert,
@@ -42,11 +42,13 @@ export interface PendingLockItem {
 
 export const SecurityCenter: React.FC = () => {
   const { isSuperAdmin, role, user } = useAuth();
-  const [items, setItems] = useState<PendingLockItem[]>([]);
+  const [viewMode, setViewMode] = useState<'pending' | 'locked'>('pending');
+  const [pendingItems, setPendingItems] = useState<PendingLockItem[]>([]);
+  const [lockedItems, setLockedItems] = useState<PendingLockItem[]>([]);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [isLockingBulk, setIsLockingBulk] = useState<boolean>(false);
-  const [lockingSingleId, setLockingSingleId] = useState<string | null>(null);
+  const [isProcessingBulk, setIsProcessingBulk] = useState<boolean>(false);
+  const [processingSingleId, setProcessingSingleId] = useState<string | null>(null);
 
   // Filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -55,139 +57,35 @@ export const SecurityCenter: React.FC = () => {
   // In-Page Preview Modal state (NO routing/redirects)
   const [previewItem, setPreviewItem] = useState<EntityPreviewData | null>(null);
 
-  const fetchPendingLocks = async () => {
+  const fetchLocksData = async () => {
     if (!isSuperAdmin) return;
     setLoading(true);
     try {
-      const res = await fetch(getApiUrl('/api/admin/pending-locks'), {
-        method: 'GET',
-        credentials: 'include',
-      });
+      const [pendingRes, lockedRes] = await Promise.all([
+        fetchWithRetry('/api/admin/pending-locks', { method: 'GET' }).catch(() => null),
+        fetchWithRetry('/api/admin/locked-items', { method: 'GET' }).catch(() => null),
+      ]);
 
-      if (res.ok) {
-        const json = await res.json();
-        setItems(json.data || []);
-      } else {
-        // High density demo records for offline fallback
-        setItems([
-          {
-            id: 'comp-100-demo',
-            entityType: 'companies',
-            title: 'AMBE SERVICES & FACILITY MANAGEMENT',
-            subtitle: 'GSTIN: 27AKEPT3788G1ZU | Code: AMBE',
-            createdAt: new Date(Date.now() - 240 * 60 * 60 * 1000).toISOString(),
-            hoursOld: 240,
-            is_locked: false,
-            details: {
-              company_name: 'M/S AMBE SERVICES & FACILITY MANAGEMENT',
-              entity_code: 'AMBE',
-              gstin: '27AKEPT3788G1ZU',
-              cin: 'U74999MH2018PTC305882',
-              tax_prefix: 'AS/26-27/',
-            },
-          },
-          {
-            id: 'site-101-demo',
-            entityType: 'sites',
-            title: 'rajabhai',
-            subtitle: 'Client: kaka | Location: Mumbai West',
-            createdAt: new Date(Date.now() - 235 * 60 * 60 * 1000).toISOString(),
-            hoursOld: 235,
-            is_locked: false,
-            uploadedDocUrl: 'https://placeholder.co/site_doc.pdf',
-            details: {
-              site_name: 'rajabhai',
-              client_name: 'kaka',
-              gstin: '27AKEPT3788G1ZU',
-              work_order_ref: 'WO-2026-992',
-              rate_cards_count: 3,
-              status: 'Active',
-              address: 'Plot 42, Industrial Zone, Goregaon East, Mumbai',
-            },
-          },
-          {
-            id: 'inv-102-demo',
-            entityType: 'invoices',
-            title: 'Invoice #AS/26-27/70074',
-            subtitle: 'Tax Invoice - ₹30,975',
-            createdAt: new Date(Date.now() - 235 * 60 * 60 * 1000).toISOString(),
-            hoursOld: 235,
-            is_locked: false,
-            uploadedDocUrl: 'https://placeholder.co/signed_invoice.pdf',
-            details: {
-              invoice_no: 'AS/26-27/70074',
-              type: 'Tax Invoice',
-              grand_total: 30975,
-              taxable_amount: 26250,
-              cgst: 2362.5,
-              sgst: 2362.5,
-              client_name: 'M/S AJMERA REALTY & INFRA INDIA LTD',
-              site_name: 'Ajmera Greenfinity',
-            },
-          },
-          {
-            id: 'inv-103-demo',
-            entityType: 'invoices',
-            title: 'Invoice #AS/26-27/70075',
-            subtitle: 'Tax Invoice - ₹30,975',
-            createdAt: new Date(Date.now() - 235 * 60 * 60 * 1000).toISOString(),
-            hoursOld: 235,
-            is_locked: false,
-            details: {
-              invoice_no: 'AS/26-27/70075',
-              type: 'Tax Invoice',
-              grand_total: 30975,
-              taxable_amount: 26250,
-              cgst: 2362.5,
-              sgst: 2362.5,
-              client_name: 'M/S AJMERA REALTY & INFRA INDIA LTD',
-              site_name: 'Ajmera Manhattan',
-            },
-          },
-          {
-            id: 'att-107-demo',
-            entityType: 'attendance_sheets',
-            title: 'Ajmera Greenfinity - July Attendance',
-            subtitle: '34 Staff Members | Certified Attendance',
-            createdAt: new Date(Date.now() - 228 * 60 * 60 * 1000).toISOString(),
-            hoursOld: 228,
-            is_locked: false,
-            uploadedDocUrl: 'https://placeholder.co/certified_attendance.pdf',
-            details: {
-              month_year: 'July 2026',
-              site_name: 'Ajmera Greenfinity',
-              total_staff: 34,
-              total_shifts: 980,
-              certified: true,
-            },
-          },
-          {
-            id: 'pr-108-demo',
-            entityType: 'payroll_records',
-            title: 'Facility Division Payroll - June 2026',
-            subtitle: 'NEFT Batch Total: ₹8,45,000',
-            createdAt: new Date(Date.now() - 220 * 60 * 60 * 1000).toISOString(),
-            hoursOld: 220,
-            is_locked: false,
-            details: {
-              month_year: 'June 2026',
-              total_payout: 845000,
-              staff_count: 42,
-              neft_status: 'Generated',
-            },
-          },
-        ]);
+      if (pendingRes && pendingRes.ok) {
+        const json = await pendingRes.json();
+        setPendingItems(json.data || []);
+      }
+      if (lockedRes && lockedRes.ok) {
+        const json = await lockedRes.json();
+        setLockedItems(json.data || []);
       }
     } catch (err) {
-      console.warn('Pending locks fetch error:', err);
+      console.warn('Locks fetch error:', err);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchPendingLocks();
+    fetchLocksData();
   }, [isSuperAdmin]);
+
+  const items = viewMode === 'pending' ? pendingItems : lockedItems;
 
   const getItemKey = (item: PendingLockItem) => `${item.entityType}:${item.id}`;
 
@@ -224,60 +122,72 @@ export const SecurityCenter: React.FC = () => {
     setPreviewItem({ ...item, mode: 'uploaded' });
   };
 
-  // Lock Single Item
-  const handleLockSingle = async (item: PendingLockItem) => {
-    setLockingSingleId(item.id);
+  // Toggle Lock/Unlock Single Item
+  const handleToggleSingle = async (item: PendingLockItem, targetLockState: boolean) => {
+    if (!targetLockState) {
+      if (!window.confirm(`Unlock "${item.title}"? Admins will be able to edit this record again.`)) {
+        return;
+      }
+    }
+
+    setProcessingSingleId(item.id);
     try {
-      const res = await fetch(getApiUrl('/api/admin/lock-item'), {
+      const res = await fetchWithRetry('/api/admin/lock-item', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({
           entityType: item.entityType,
           id: item.id,
-          is_locked: true,
+          is_locked: targetLockState,
         }),
       });
 
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
-        throw new Error(json.error || 'Failed to lock item');
+        throw new Error(json.error || `Failed to ${targetLockState ? 'lock' : 'unlock'} item`);
       }
 
-      setItems((prev) => prev.filter((i) => i.id !== item.id));
+      if (targetLockState) {
+        setPendingItems((prev) => prev.filter((i) => i.id !== item.id));
+        setLockedItems((prev) => [{ ...item, is_locked: true }, ...prev]);
+      } else {
+        setLockedItems((prev) => prev.filter((i) => i.id !== item.id));
+        setPendingItems((prev) => [{ ...item, is_locked: false }, ...prev]);
+      }
+
       setSelectedKeys((prev) => prev.filter((k) => k !== getItemKey(item)));
       if (previewItem?.id === item.id) setPreviewItem(null);
-      toast.success(`Locked "${item.title}" successfully`);
+      toast.success(`Record "${item.title}" ${targetLockState ? 'locked' : 'unlocked'} successfully`);
     } catch (err: any) {
-      setItems((prev) => prev.filter((i) => i.id !== item.id));
-      setSelectedKeys((prev) => prev.filter((k) => k !== getItemKey(item)));
-      if (previewItem?.id === item.id) setPreviewItem(null);
-      toast.success(`Locked "${item.title}" successfully`);
+      toast.error(err.message || `Failed to ${targetLockState ? 'lock' : 'unlock'} item`);
     } finally {
-      setLockingSingleId(null);
+      setProcessingSingleId(null);
     }
   };
 
   const handleModalLock = async (itemData: EntityPreviewData) => {
     const targetItem = items.find((i) => i.id === itemData.id);
+    const targetLockState = !(itemData.is_locked ?? true);
     if (targetItem) {
-      await handleLockSingle(targetItem);
-    } else {
-      setItems((prev) => prev.filter((i) => i.id !== itemData.id));
-      setSelectedKeys((prev) => prev.filter((k) => k !== `${itemData.entityType}:${itemData.id}`));
-      toast.success(`Locked "${itemData.title}" successfully`);
+      await handleToggleSingle(targetItem, targetLockState);
     }
     setPreviewItem(null);
   };
 
-  // Lock Bulk Selected Items
-  const handleLockBulk = async () => {
+  // Bulk Lock or Unlock Selected Items
+  const handleBulkAction = async (targetLockState: boolean) => {
     if (selectedKeys.length === 0) {
-      toast.error('Please select at least one item to lock.');
+      toast.error(`Please select at least one item to ${targetLockState ? 'lock' : 'unlock'}.`);
       return;
     }
 
-    setIsLockingBulk(true);
+    if (!targetLockState) {
+      if (!window.confirm(`Unlock all ${selectedKeys.length} selected records? Admins will be able to edit them again.`)) {
+        return;
+      }
+    }
+
+    setIsProcessingBulk(true);
 
     const payloadItems = selectedKeys.map((key) => {
       const [entityType, id] = key.split(':');
@@ -285,29 +195,31 @@ export const SecurityCenter: React.FC = () => {
     });
 
     try {
-      const res = await fetch(getApiUrl('/api/admin/lock-bulk'), {
+      const res = await fetchWithRetry('/api/admin/lock-bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ items: payloadItems }),
+        body: JSON.stringify({ items: payloadItems, is_locked: targetLockState }),
       });
 
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
-        throw new Error(json.error || 'Failed to execute bulk lock');
+        throw new Error(json.error || `Failed to execute bulk ${targetLockState ? 'lock' : 'unlock'}`);
       }
 
-      const lockedIds = payloadItems.map((p) => p.id);
-      setItems((prev) => prev.filter((i) => !lockedIds.includes(i.id)));
+      const affectedIds = payloadItems.map((p) => p.id);
+      if (targetLockState) {
+        setPendingItems((prev) => prev.filter((i) => !affectedIds.includes(i.id)));
+      } else {
+        setLockedItems((prev) => prev.filter((i) => !affectedIds.includes(i.id)));
+      }
+
       setSelectedKeys([]);
-      toast.success(`Bulk locked ${payloadItems.length} records successfully!`);
+      await fetchLocksData();
+      toast.success(`Bulk ${targetLockState ? 'lock' : 'unlock'} completed for ${payloadItems.length} records!`);
     } catch (err: any) {
-      const lockedIds = payloadItems.map((p) => p.id);
-      setItems((prev) => prev.filter((i) => !lockedIds.includes(i.id)));
-      setSelectedKeys([]);
-      toast.success(`Bulk locked ${payloadItems.length} records successfully!`);
+      toast.error(err.message || `Failed to process bulk ${targetLockState ? 'lock' : 'unlock'}`);
     } finally {
-      setIsLockingBulk(false);
+      setIsProcessingBulk(false);
     }
   };
 
@@ -401,7 +313,9 @@ export const SecurityCenter: React.FC = () => {
           {/* Metrics & Main Bulk Action */}
           <div className="flex items-center gap-3 self-start lg:self-auto">
             <div className="bg-black/30 border border-white/10 px-3.5 py-2 rounded-xl text-center">
-              <span className="block text-[9px] font-bold text-teal-300 uppercase font-mono tracking-wider">Pending Locks</span>
+              <span className="block text-[9px] font-bold text-teal-300 uppercase font-mono tracking-wider">
+                {viewMode === 'pending' ? 'Pending' : 'Locked'}
+              </span>
               <span className="text-lg font-black text-white font-mono">{items.length}</span>
             </div>
 
@@ -412,7 +326,7 @@ export const SecurityCenter: React.FC = () => {
 
             <button
               type="button"
-              onClick={fetchPendingLocks}
+              onClick={fetchLocksData}
               disabled={loading}
               className="p-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs transition-colors border border-white/10 cursor-pointer"
               title="Refresh Records"
@@ -422,15 +336,62 @@ export const SecurityCenter: React.FC = () => {
 
             <button
               type="button"
-              onClick={handleLockBulk}
-              disabled={selectedKeys.length === 0 || isLockingBulk}
-              className="px-5 py-2.5 bg-[#20B2AA] hover:bg-[#1ca19a] active:bg-[#188e88] text-white font-bold rounded-xl text-xs shadow-md transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => handleBulkAction(viewMode === 'pending')}
+              disabled={selectedKeys.length === 0 || isProcessingBulk}
+              className={`px-5 py-2.5 font-bold rounded-xl text-xs shadow-md transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                viewMode === 'pending'
+                  ? 'bg-[#20B2AA] hover:bg-[#1ca19a] active:bg-[#188e88] text-white'
+                  : 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white'
+              }`}
             >
-              {isLockingBulk ? <Loader2 size={15} className="animate-spin" /> : <Lock size={15} />}
-              <span>Lock Selected ({selectedKeys.length})</span>
+              {isProcessingBulk ? <Loader2 size={15} className="animate-spin" /> : <Lock size={15} />}
+              <span>
+                {viewMode === 'pending' ? 'Lock Selected' : 'Unlock Selected'} ({selectedKeys.length})
+              </span>
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Main Section Mode Tabs (Pending Locks vs Currently Locked) */}
+      <div className="flex items-center gap-2 border-b border-gray-200 pb-2">
+        <button
+          type="button"
+          onClick={() => {
+            setViewMode('pending');
+            setSelectedKeys([]);
+          }}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+            viewMode === 'pending'
+              ? 'bg-[#2C3E50] text-white shadow-md'
+              : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'
+          }`}
+        >
+          <Clock size={14} />
+          <span>Pending Locks (&gt;24h)</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${viewMode === 'pending' ? 'bg-[#20B2AA] text-white' : 'bg-gray-200 text-gray-700'}`}>
+            {pendingItems.length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setViewMode('locked');
+            setSelectedKeys([]);
+          }}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+            viewMode === 'locked'
+              ? 'bg-[#2C3E50] text-white shadow-md'
+              : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'
+          }`}
+        >
+          <Lock size={14} />
+          <span>Currently Locked</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${viewMode === 'locked' ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-700'}`}>
+            {lockedItems.length}
+          </span>
+        </button>
       </div>
 
       {/* Control Bar: Compact Search & Type Filter Tabs */}
@@ -456,6 +417,7 @@ export const SecurityCenter: React.FC = () => {
             { id: 'invoices', label: 'Invoices' },
             { id: 'attendance_sheets', label: 'Attendance' },
             { id: 'payroll_records', label: 'Payroll' },
+            { id: 'staff', label: 'Staff' },
           ].map((tab) => {
             const count = tab.id === 'all' ? items.length : items.filter((i) => i.entityType === tab.id).length;
             return (
@@ -500,7 +462,7 @@ export const SecurityCenter: React.FC = () => {
                 </th>
                 <th className="p-3">Entity Type</th>
                 <th className="p-3">Details & Reference</th>
-                <th className="p-3">Age / Duration</th>
+                <th className="p-3">{viewMode === 'pending' ? 'Age / Duration' : 'Status'}</th>
                 <th className="p-3 text-right">Actions</th>
               </tr>
             </thead>
@@ -518,9 +480,13 @@ export const SecurityCenter: React.FC = () => {
                     <div className="w-12 h-12 rounded-xl bg-teal-50 text-[#20B2AA] flex items-center justify-center mx-auto mb-2 border border-teal-100">
                       <CheckCircle2 size={24} />
                     </div>
-                    <h3 className="font-bold text-gray-900 text-sm">No Pending Locks</h3>
+                    <h3 className="font-bold text-gray-900 text-sm">
+                      {viewMode === 'pending' ? 'No Pending Locks' : 'No Locked Records'}
+                    </h3>
                     <p className="text-xs text-gray-400 mt-0.5">
-                      All records older than 24 hours are locked and protected.
+                      {viewMode === 'pending'
+                        ? 'All records older than 24 hours are locked and protected.'
+                        : 'No records are currently locked across companies, sites, invoices, staff, attendance, or payroll.'}
                     </p>
                   </td>
                 </tr>
@@ -565,12 +531,19 @@ export const SecurityCenter: React.FC = () => {
                         <div className="text-[11px] text-gray-400 font-mono mt-0.5">{item.subtitle}</div>
                       </td>
 
-                      {/* Age Duration */}
+                      {/* Age / Lock Status */}
                       <td className="p-3 py-2.5 font-mono">
-                        <div className="inline-flex items-center gap-1 text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-[11px] font-bold">
-                          <Clock size={12} className="text-slate-500" />
-                          <span>{item.hoursOld} hours ago</span>
-                        </div>
+                        {viewMode === 'pending' ? (
+                          <div className="inline-flex items-center gap-1 text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-[11px] font-bold">
+                            <Clock size={12} className="text-slate-500" />
+                            <span>{item.hoursOld} hours ago</span>
+                          </div>
+                        ) : (
+                          <div className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded text-[11px] font-bold">
+                            <Lock size={12} className="text-emerald-600" />
+                            <span>Locked by SuperAdmin</span>
+                          </div>
+                        )}
                       </td>
 
                       {/* Action Buttons: ZERO page redirects */}
@@ -598,19 +571,23 @@ export const SecurityCenter: React.FC = () => {
                             <span>Software Copy</span>
                           </button>
 
-                          {/* Lock Record Button */}
+                          {/* Lock / Unlock Record Button */}
                           <button
                             type="button"
-                            disabled={lockingSingleId === item.id}
-                            onClick={() => handleLockSingle(item)}
-                            className="px-3 py-1 bg-[#20B2AA] hover:bg-[#1ca19a] active:bg-[#188e88] text-white font-bold rounded-lg text-xs transition-colors shadow-2xs inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                            disabled={processingSingleId === item.id}
+                            onClick={() => handleToggleSingle(item, viewMode === 'pending')}
+                            className={`px-3 py-1 font-bold rounded-lg text-xs transition-colors shadow-2xs inline-flex items-center gap-1 cursor-pointer disabled:opacity-50 ${
+                              viewMode === 'pending'
+                                ? 'bg-[#20B2AA] hover:bg-[#1ca19a] active:bg-[#188e88] text-white'
+                                : 'bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white'
+                            }`}
                           >
-                            {lockingSingleId === item.id ? (
+                            {processingSingleId === item.id ? (
                               <Loader2 size={13} className="animate-spin" />
                             ) : (
                               <Lock size={13} />
                             )}
-                            <span>Lock Record</span>
+                            <span>{viewMode === 'pending' ? 'Lock Record' : 'Unlock Record'}</span>
                           </button>
                         </div>
                       </td>
@@ -629,10 +606,11 @@ export const SecurityCenter: React.FC = () => {
         onClose={() => setPreviewItem(null)}
         entityData={previewItem}
         onLockConfirm={handleModalLock}
-        isLocking={lockingSingleId === previewItem?.id}
+        isLocking={processingSingleId === previewItem?.id}
       />
     </div>
   );
 };
 
 export default SecurityCenter;
+

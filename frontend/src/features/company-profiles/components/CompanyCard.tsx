@@ -40,10 +40,29 @@ export const CompanyCard: React.FC<CompanyCardProps> = ({ company, onEdit, onLoc
 
           {/* Action Buttons / Lock Badge */}
           {isLocked ? (
-            <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold flex items-center gap-1 shrink-0">
-              <Lock className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Locked by SuperAdmin</span>
-            </span>
+            <div className="flex items-center gap-1 shrink-0">
+              {isSuperAdmin ? (
+                <button
+                  type="button"
+                  disabled={isLocking}
+                  onClick={() => onLock && onLock(company)}
+                  className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-red-50 hover:text-red-700 hover:border-red-200 border border-emerald-200 text-[11px] font-bold flex items-center gap-1 shrink-0 cursor-pointer transition-all disabled:opacity-50"
+                  title="Unlock Entity (SuperAdmin)"
+                >
+                  {isLocking ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
+                  ) : (
+                    <Lock className="w-3.5 h-3.5 text-emerald-600" />
+                  )}
+                  <span>{isLocking ? 'Unlocking...' : 'Unlock'}</span>
+                </button>
+              ) : (
+                <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px] font-bold flex items-center gap-1 shrink-0">
+                  <Lock className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Locked by SuperAdmin</span>
+                </span>
+              )}
+            </div>
           ) : (
             <div className="flex items-center gap-1 shrink-0">
               <button

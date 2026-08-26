@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { getApiUrl } from '@/lib/apiClient';
 import { CompanyProfile, CreateCompanyInput } from '../types';
 import { fetchCompanies, createCompany, updateCompany } from '../api/companyApi';
+import { setEntityLockApi } from '@/features/auth/api/authApi';
 import { CompanyCard } from './CompanyCard';
 import { CompanyFormModal } from './CompanyFormModal';
 import { toast, ToastContainer } from '@/components/ui/toast';
@@ -51,33 +52,23 @@ export const CompanyList: React.FC = () => {
   };
 
   const handleLock = async (c: CompanyProfile) => {
+    const targetState = !c.is_locked;
+    if (!targetState) {
+      if (!window.confirm('Unlock this company profile? Admins will be able to edit it again.')) {
+        return;
+      }
+    }
+
     setLockingId(c.id);
     try {
-      const res = await fetch(getApiUrl('/api/admin/lock-item'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          entityType: 'companies',
-          id: c.id,
-          is_locked: true,
-        }),
-      });
-
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        throw new Error(json.error || 'Failed to lock company profile');
-      }
+      await setEntityLockApi('companies', c.id, targetState);
 
       setCompanies((prev) =>
-        prev.map((comp) => (comp.id === c.id ? { ...comp, is_locked: true } : comp))
+        prev.map((comp) => (comp.id === c.id ? { ...comp, is_locked: targetState } : comp))
       );
-      toast.success(`Company entity "${c.name}" locked successfully`);
+      toast.success(`Company entity "${c.name}" ${targetState ? 'locked' : 'unlocked'} successfully`);
     } catch (err: any) {
-      setCompanies((prev) =>
-        prev.map((comp) => (comp.id === c.id ? { ...comp, is_locked: true } : comp))
-      );
-      toast.success(`Company entity "${c.name}" locked successfully`);
+      toast.error(err.message || `Failed to ${targetState ? 'lock' : 'unlock'} company profile`);
     } finally {
       setLockingId(null);
     }

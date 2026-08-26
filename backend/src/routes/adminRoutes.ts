@@ -8,6 +8,7 @@ const router = Router();
 router.use(requireAuth, requireSuperAdmin);
 
 router.get('/pending-locks', AdminController.getPendingLocks);
+router.get('/locked-items', AdminController.getLockedItems);
 router.post('/lock-item', AdminController.lockItem);
 router.post('/lock-bulk', AdminController.lockBulk);
 
