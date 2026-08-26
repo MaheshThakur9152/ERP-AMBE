@@ -48,10 +48,60 @@ const CompanyRowSchema = z
   })
   .passthrough();
 
+export function extractAddressParts(
+  rawAddressLine2?: string,
+  rawCity?: string,
+  rawState?: string,
+  rawPincode?: string
+): { address_line2: string; city: string; state: string; pincode: string } {
+  let city = (rawCity || '').trim();
+  let state = (rawState || '').trim();
+  let pincode = (rawPincode || '').trim();
+  let address_line2 = (rawAddressLine2 || '').trim();
+
+  if (city && state && pincode) {
+    return { address_line2, city, state, pincode };
+  }
+
+  // Parse from concatenated address_line2 if present
+  if (address_line2) {
+    // 1. Extract 6-digit Indian Pincode
+    if (!pincode) {
+      const pinMatch = address_line2.match(/\b(\d{6})\b/);
+      if (pinMatch) {
+        pincode = pinMatch[1];
+        address_line2 = address_line2.replace(/[-–—,\s]*\b\d{6}\b/, '').trim();
+      }
+    }
+
+    // 2. Split remainder by commas or hyphens
+    const parts = address_line2.split(/[,–—]+/).map((p) => p.trim()).filter(Boolean);
+
+    if (!state && parts.length >= 2) {
+      state = parts.pop() || '';
+    } else if (!state && parts.length === 1 && !city) {
+      state = 'Maharashtra';
+    }
+
+    if (!city && parts.length >= 1) {
+      city = parts.pop() || '';
+    }
+
+    address_line2 = parts.join(', ').trim();
+  }
+
+  if (!city) city = 'Mumbai';
+  if (!state) state = 'Maharashtra';
+  if (!pincode) pincode = '400067';
+
+  return { address_line2, city, state, pincode };
+}
+
 function mapRowToCompanyProfile(rawRow: any): CompanyProfile {
   const row = CompanyRowSchema.parse(rawRow || {});
   const terms = row.terms_and_conditions || row.default_terms || [];
   const normalizedTerms = Array.isArray(terms) ? terms : [String(terms)];
+  const addr = extractAddressParts(row.address_line2, row.city, row.state, row.pincode);
 
   return {
     id: row.id,
@@ -59,10 +109,10 @@ function mapRowToCompanyProfile(rawRow: any): CompanyProfile {
     name: row.name || row.legal_name || '',
     legal_name: row.legal_name || row.name || '',
     address_line1: row.address_line1,
-    address_line2: row.address_line2,
-    city: row.city,
-    state: row.state,
-    pincode: row.pincode,
+    address_line2: addr.address_line2,
+    city: addr.city,
+    state: addr.state,
+    pincode: addr.pincode,
     phone: row.phone || row.contact_no || '',
     email: row.email || row.email_website || '',
     gstin: row.gstin,

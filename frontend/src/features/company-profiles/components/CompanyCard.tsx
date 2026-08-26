@@ -3,6 +3,7 @@ import { CompanyProfile } from '../types';
 import { Badge } from '@/components/ui/badge';
 import { Pencil, Building2, CreditCard, FileText, MapPin, Hash, CheckCircle2, Lock, Loader2 } from 'lucide-react';
 import { useAuth } from '@/features/auth/context/AuthContext';
+import { extractAddressParts } from './CompanyFormModal';
 
 interface CompanyCardProps {
   company: CompanyProfile;
@@ -14,6 +15,7 @@ interface CompanyCardProps {
 export const CompanyCard: React.FC<CompanyCardProps> = ({ company, onEdit, onLock, isLocking = false }) => {
   const { isSuperAdmin } = useAuth();
   const isLocked = Boolean(company.is_locked);
+  const addr = extractAddressParts(company.address_line2, company.city, company.state, company.pincode);
 
   return (
     <div className="bg-white border border-gray-200 rounded-2xl shadow-sm hover:shadow-md hover:border-[#20B2AA]/50 transition-all duration-200 overflow-hidden flex flex-col justify-between">
@@ -116,10 +118,10 @@ export const CompanyCard: React.FC<CompanyCardProps> = ({ company, onEdit, onLoc
           </p>
           <p className="font-semibold text-gray-800 leading-snug">
             {company.address_line1}
-            {company.address_line2 ? `, ${company.address_line2}` : ''}
+            {addr.address_line2 ? `, ${addr.address_line2}` : ''}
           </p>
           <p className="text-gray-500 font-medium">
-            {company.city}, {company.state} — {company.pincode}
+            {addr.city}, {addr.state} — {addr.pincode}
           </p>
         </div>
 

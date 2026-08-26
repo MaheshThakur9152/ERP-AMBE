@@ -42,6 +42,55 @@ interface Props {
   initialData?: CompanyProfile | null;
 }
 
+export function extractAddressParts(
+  rawAddressLine2?: string,
+  rawCity?: string,
+  rawState?: string,
+  rawPincode?: string
+): { address_line2: string; city: string; state: string; pincode: string } {
+  let city = (rawCity || '').trim();
+  let state = (rawState || '').trim();
+  let pincode = (rawPincode || '').trim();
+  let address_line2 = (rawAddressLine2 || '').trim();
+
+  if (city && state && pincode) {
+    return { address_line2, city, state, pincode };
+  }
+
+  // Parse from concatenated address_line2 if present
+  if (address_line2) {
+    // 1. Extract 6-digit Indian Pincode
+    if (!pincode) {
+      const pinMatch = address_line2.match(/\b(\d{6})\b/);
+      if (pinMatch) {
+        pincode = pinMatch[1];
+        address_line2 = address_line2.replace(/[-–—,\s]*\b\d{6}\b/, '').trim();
+      }
+    }
+
+    // 2. Split remainder by commas or hyphens
+    const parts = address_line2.split(/[,–—]+/).map((p) => p.trim()).filter(Boolean);
+
+    if (!state && parts.length >= 2) {
+      state = parts.pop() || '';
+    } else if (!state && parts.length === 1 && !city) {
+      state = 'Maharashtra';
+    }
+
+    if (!city && parts.length >= 1) {
+      city = parts.pop() || '';
+    }
+
+    address_line2 = parts.join(', ').trim();
+  }
+
+  if (!city) city = 'Mumbai';
+  if (!state) state = 'Maharashtra';
+  if (!pincode) pincode = '400067';
+
+  return { address_line2, city, state, pincode };
+}
+
 export const CompanyFormModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialData }) => {
   const {
     register,
@@ -86,6 +135,13 @@ export const CompanyFormModal: React.FC<Props> = ({ isOpen, onClose, onSave, ini
 
   useEffect(() => {
     if (initialData) {
+      const addr = extractAddressParts(
+        initialData.address_line2,
+        initialData.city,
+        initialData.state,
+        initialData.pincode
+      );
+
       reset({
         code: initialData.code || 'AMBE',
         name: initialData.name || '',
@@ -95,10 +151,10 @@ export const CompanyFormModal: React.FC<Props> = ({ isOpen, onClose, onSave, ini
         phone: initialData.phone || '',
         email: initialData.email || '',
         address_line1: initialData.address_line1 || '',
-        address_line2: initialData.address_line2 || '',
-        city: initialData.city || '',
-        state: initialData.state || '',
-        pincode: initialData.pincode || '',
+        address_line2: addr.address_line2,
+        city: addr.city,
+        state: addr.state,
+        pincode: addr.pincode,
         bank_name: initialData.bank_name || '',
         bank_account_no: initialData.bank_account_no || '',
         bank_ifsc: initialData.bank_ifsc || '',
