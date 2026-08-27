@@ -76,12 +76,19 @@ interface StaffMember {
   created_at?: string;
   photoUrl?: string;
   aadharNo?: string;
+  aadhar_no?: string;
   panNo?: string;
+  pan_no?: string;
+  bank_account_no?: string;
   bankAccountNo?: string;
+  bank_ifsc_code?: string;
   bankIfsc?: string;
+  bank_name?: string;
   bankName?: string;
+  payee_name?: string;
+  payeeName?: string;
   documents?: StaffDocument[];
-  employee_documents?: { id: string }[];
+  employee_documents?: { id: string; document_type?: string; gcp_file_url?: string; file_name?: string }[];
 }
 
 export const StaffPage: React.FC = () => {
@@ -134,6 +141,7 @@ export const StaffPage: React.FC = () => {
       return;
     }
     try {
+      let list: any[] = [];
       let query = supabase.from('rate_cards').select('*');
       if (sId && sName) {
         query = query.or(`site_id.eq.${sId},site_name.eq.${sName}`);
@@ -144,10 +152,29 @@ export const StaffPage: React.FC = () => {
       }
       const { data, error } = await query;
       if (!error && data) {
-        setRateCardsOptions(data);
-      } else {
-        setRateCardsOptions([]);
+        list = [...data];
       }
+
+      // Also fallback to site's JSON rate_cards column if table is empty
+      if (list.length === 0 && sId) {
+        const { data: siteData } = await supabase
+          .from('sites')
+          .select('id, site_name, rate_cards')
+          .eq('id', sId)
+          .maybeSingle();
+
+        if (siteData?.rate_cards && Array.isArray(siteData.rate_cards) && siteData.rate_cards.length > 0) {
+          const siteJsonCards = siteData.rate_cards.map((rc: any, idx: number) => ({
+            id: rc.id || `site-rc-${idx}`,
+            post_name: rc.roleName || rc.post_name || rc.designation || 'Staff',
+            gross_salary: Number(rc.monthlyRate || rc.gross_salary || rc.grossSalary || 0),
+            is_flat_wage: Boolean(rc.is_flat_wage || rc.isFlatWage),
+          }));
+          list = siteJsonCards;
+        }
+      }
+
+      setRateCardsOptions(list);
     } catch (e) {
       console.warn('Error fetching rate cards for staff modal:', e);
       setRateCardsOptions([]);
@@ -191,6 +218,33 @@ export const StaffPage: React.FC = () => {
     fetchStaff();
   }, [refreshKey]);
 
+  // Distinct designations for dropdown
+  const allStaffDesignations = React.useMemo(() => {
+    const defaults = [
+      'Keyman',
+      'HK',
+      'Housekeeping',
+      'Janitor',
+      'Supervisor',
+      'HK Supervisor',
+      '(HK-SUP)',
+      'LIFT OPERATOR',
+      'Pantry',
+      '58th Pantry',
+      'Reliever',
+      'Security Guard',
+      'Store Assistant',
+      'Trainee Staff',
+      'HO - 58th',
+      'HK - HO',
+      'HK -P8',
+    ];
+    const fromStaff = staffList.map((s) => s.designation || s.role).filter(Boolean);
+    if (formData.designation) fromStaff.push(formData.designation);
+    if (formData.role) fromStaff.push(formData.role);
+    return Array.from(new Set([...fromStaff, ...defaults])).filter(Boolean);
+  }, [staffList, formData.designation, formData.role]);
+
   // Filtered staff list by search name, biometric code, site name
   const filteredStaff = staffList.filter((staff) => {
     const empName = (staff.employee_name || staff.name || '').toLowerCase();
@@ -220,12 +274,23 @@ export const StaffPage: React.FC = () => {
     setStaffDocs([]);
     setFormData({
       name: '',
+      employee_name: '',
       biometricCode: '',
+      biometric_code: '',
       phone: '',
       role: 'Janitor',
+      designation: 'Janitor',
+      gender: 'Male',
       siteName: '',
       site_id: '',
       rate_card_id: '',
+      monthly_incentive: 0,
+      bank_account_no: '',
+      bank_ifsc_code: '',
+      bank_name: '',
+      payee_name: '',
+      aadharNo: '',
+      panNo: '',
       status: 'Active',
       documents: [],
     });
@@ -236,16 +301,28 @@ export const StaffPage: React.FC = () => {
     setEditingStaff(staff);
     const sId = staff.site_id || '';
     const sName = staff.sites?.site_name || staff.site_name || staff.siteName || '';
+    const desig = staff.designation || staff.role || 'Janitor';
     setFormData({
       ...staff,
       name: staff.employee_name || staff.name || '',
+      employee_name: staff.employee_name || staff.name || '',
       biometricCode: staff.biometric_code || staff.biometricCode || '',
-      role: staff.designation || staff.role || 'Janitor',
+      biometric_code: staff.biometric_code || staff.biometricCode || '',
+      phone: staff.phone || '',
+      role: desig,
+      designation: desig,
       gender: staff.gender || 'Male',
-      monthly_incentive: staff.monthly_incentive || 0,
+      monthly_incentive: Number(staff.monthly_incentive || 0),
       site_id: sId,
       siteName: sName,
       rate_card_id: staff.rate_card_id || '',
+      bank_account_no: staff.bank_account_no || staff.bankAccountNo || '',
+      bank_ifsc_code: staff.bank_ifsc_code || staff.bankIfsc || '',
+      bank_name: staff.bank_name || staff.bankName || '',
+      payee_name: staff.payee_name || staff.payeeName || '',
+      aadharNo: staff.aadharNo || staff.aadhar_no || '',
+      panNo: staff.panNo || staff.pan_no || '',
+      status: staff.status || 'Active',
     });
     fetchDocsForStaff(staff.id);
     fetchRateCardsForSite(sId, sName);
@@ -331,16 +408,20 @@ export const StaffPage: React.FC = () => {
     }
 
     if (editingStaff) {
-      const payload = {
+      const payload: any = {
         employee_name: empName,
-        biometric_code: (formData.biometric_code || formData.biometricCode || '').trim(),
-        phone: (formData.phone || '').trim(),
-        designation: formData.designation || formData.role || 'Janitor',
+        biometric_code: (formData.biometric_code || formData.biometricCode || '').trim() || null,
+        phone: (formData.phone || '').trim() || null,
+        designation: (formData.designation || formData.role || 'Janitor').trim(),
         gender: formData.gender || 'Male',
         monthly_incentive: Number(formData.monthly_incentive) || 0,
         status: formData.status || 'Active',
         site_id: formData.site_id || null,
         rate_card_id: formData.rate_card_id || null,
+        bank_account_no: (formData.bank_account_no || formData.bankAccountNo || '').trim() || null,
+        bank_ifsc_code: (formData.bank_ifsc_code || formData.bankIfsc || '').trim() || null,
+        bank_name: (formData.bank_name || formData.bankName || '').trim() || null,
+        payee_name: (formData.payee_name || formData.payeeName || '').trim() || null,
       };
 
       const { error } = await supabase.from('staff').update(payload).eq('id', editingStaff.id);
@@ -685,21 +766,20 @@ export const StaffPage: React.FC = () => {
                       <input
                         type="text"
                         placeholder="e.g. Rahul Sharma"
-                        value={formData.name || ''}
-                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        value={formData.employee_name || formData.name || ''}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value, employee_name: e.target.value })}
                         className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-semibold focus:outline-none focus:border-[#20B2AA]"
                         required
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-bold text-gray-700 mb-1">Biometric Code *</label>
+                      <label className="block text-[11px] font-bold text-gray-700 mb-1">Biometric Code</label>
                       <input
                         type="text"
                         placeholder="e.g. 3765"
-                        value={formData.biometricCode || ''}
-                        onChange={(e) => setFormData({ ...formData, biometricCode: e.target.value })}
+                        value={formData.biometric_code || formData.biometricCode || ''}
+                        onChange={(e) => setFormData({ ...formData, biometricCode: e.target.value, biometric_code: e.target.value })}
                         className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-mono focus:outline-none focus:border-[#20B2AA]"
-                        required
                       />
                     </div>
                   </div>
@@ -732,14 +812,15 @@ export const StaffPage: React.FC = () => {
                   <div>
                     <label className="block text-[11px] font-bold text-gray-700 mb-1">Role / Designation</label>
                     <select
-                      value={formData.role || 'Janitor'}
-                      onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                      value={formData.designation || formData.role || 'Janitor'}
+                      onChange={(e) => setFormData({ ...formData, role: e.target.value, designation: e.target.value })}
                       className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-medium"
                     >
-                      <option value="Janitor">Janitor</option>
-                      <option value="Housekeeping">Housekeeping</option>
-                      <option value="Supervisor">Supervisor</option>
-                      <option value="Security Guard">Security Guard</option>
+                      {allStaffDesignations.map((desig) => (
+                        <option key={desig} value={desig}>
+                          {desig}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -768,7 +849,7 @@ export const StaffPage: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-700 mb-1">Assigned Rate Card *</label>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">Assigned Rate Card</label>
                     <select
                       value={formData.rate_card_id || ''}
                       onChange={(e) => setFormData({ ...formData, rate_card_id: e.target.value })}
@@ -791,6 +872,84 @@ export const StaffPage: React.FC = () => {
                       value={formData.monthly_incentive || 0}
                       onChange={(e) => setFormData({ ...formData, monthly_incentive: Number(e.target.value) })}
                       className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-mono font-bold"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Banking & Salary Payout Details Section */}
+              <div className="bg-white p-5 rounded-xl border border-gray-200 space-y-4 shadow-sm">
+                <h3 className="font-bold text-xs uppercase tracking-wider text-[#20B2AA] border-b border-gray-100 pb-2 flex items-center gap-1.5">
+                  <CreditCard className="w-4 h-4" />
+                  <span>Banking &amp; Salary Payout Details</span>
+                </h3>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">Bank Account Number</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 68036705039"
+                      value={formData.bank_account_no || formData.bankAccountNo || ''}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          bank_account_no: e.target.value,
+                          bankAccountNo: e.target.value,
+                        })
+                      }
+                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono text-gray-800"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">Bank IFSC Code</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. MAHB0000294"
+                      value={formData.bank_ifsc_code || formData.bankIfsc || ''}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          bank_ifsc_code: e.target.value,
+                          bankIfsc: e.target.value,
+                        })
+                      }
+                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono uppercase text-gray-800"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">Bank Name</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Bank of Maharashtra"
+                      value={formData.bank_name || formData.bankName || ''}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          bank_name: e.target.value,
+                          bankName: e.target.value,
+                        })
+                      }
+                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">Payee Name (as per Bank)</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Feroj Mohammad Shakeel Shaikh"
+                      value={formData.payee_name || formData.payeeName || ''}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          payee_name: e.target.value,
+                          payeeName: e.target.value,
+                        })
+                      }
+                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800"
                     />
                   </div>
                 </div>

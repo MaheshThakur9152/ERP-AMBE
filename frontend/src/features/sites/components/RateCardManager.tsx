@@ -41,6 +41,11 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  // Site-scoped designations state
+  const [siteDesignations, setSiteDesignations] = useState<string[]>([]);
+  const [isCustomPost, setIsCustomPost] = useState<boolean>(false);
+  const [customPostName, setCustomPostName] = useState<string>('');
+
   // New Rate Card Form State
   const [postName, setPostName] = useState('');
   const [grossSalary, setGrossSalary] = useState<number | ''>('');
@@ -51,11 +56,51 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
   const [incentiveAmount, setIncentiveAmount] = useState<number | ''>('');
   const [isFlatWage, setIsFlatWage] = useState<boolean>(false);
 
+  const fetchSiteDesignations = async () => {
+    if (!siteId) return;
+    try {
+      const roles = new Set<string>();
+
+      // 1. Fetch distinct designations from staff assigned to this site
+      const { data: staffData } = await supabase
+        .from('staff')
+        .select('designation')
+        .eq('site_id', siteId);
+
+      if (staffData) {
+        staffData.forEach((s: any) => {
+          if (s.designation?.trim()) roles.add(s.designation.trim());
+        });
+      }
+
+      // 2. Fetch designations from site's JSON rate_cards
+      const { data: siteRow } = await supabase
+        .from('sites')
+        .select('rate_cards')
+        .eq('id', siteId)
+        .maybeSingle();
+
+      if (siteRow?.rate_cards && Array.isArray(siteRow.rate_cards)) {
+        siteRow.rate_cards.forEach((rc: any) => {
+          const name = rc.roleName || rc.post_name || rc.designation;
+          if (name?.trim()) roles.add(name.trim());
+        });
+      }
+
+      setSiteDesignations(Array.from(roles));
+    } catch (e) {
+      console.warn('Could not fetch site designations:', e);
+    }
+  };
+
   const fetchRateCards = async () => {
     if (!siteId && !siteName) return;
     setLoading(true);
     setErrorMsg(null);
     try {
+      let list: RateCardRecord[] = [];
+
+      // 1. Fetch from rate_cards table
       let query = supabase.from('rate_cards').select('*');
       if (siteId) {
         query = query.or(`site_id.eq.${siteId},site_name.eq.${siteName}`);
@@ -63,14 +108,43 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
         query = query.eq('site_name', siteName);
       }
 
-      const { data, error } = await query.order('created_at', { ascending: false });
-
-      if (error) {
-        console.warn('Supabase rate_cards query:', error.message);
-        setRateCards([]);
-      } else {
-        setRateCards(data || []);
+      const { data: dbCards, error } = await query.order('created_at', { ascending: false });
+      if (!error && dbCards) {
+        list = [...dbCards];
       }
+
+      // 2. Also check sites table for JSON rate_cards column
+      if (siteId) {
+        const { data: siteRow } = await supabase
+          .from('sites')
+          .select('id, site_name, rate_cards')
+          .eq('id', siteId)
+          .maybeSingle();
+
+        if (siteRow?.rate_cards && Array.isArray(siteRow.rate_cards) && siteRow.rate_cards.length > 0) {
+          const siteJsonCards: RateCardRecord[] = siteRow.rate_cards.map((rc: any, idx: number) => ({
+            id: rc.id || `site-json-${idx}`,
+            site_id: siteId,
+            site_name: siteName,
+            post_name: rc.roleName || rc.post_name || rc.designation || 'Staff',
+            gross_salary: Number(rc.monthlyRate || rc.gross_salary || rc.grossSalary || 0),
+            basic_da: Number(rc.basic_da || 0),
+            hra: Number(rc.hra || 0),
+            other_allowance: Number(rc.other_allowance || 0),
+            is_flat_wage: Boolean(rc.is_flat_wage || rc.isFlatWage),
+          }));
+
+          // Merge without duplicate post_names
+          const existingPostNames = new Set(list.map((r) => r.post_name.toLowerCase()));
+          for (const sjc of siteJsonCards) {
+            if (!existingPostNames.has(sjc.post_name.toLowerCase())) {
+              list.push(sjc);
+            }
+          }
+        }
+      }
+
+      setRateCards(list);
     } catch (err: any) {
       console.error('Fetch rate cards failed:', err);
     } finally {
@@ -81,6 +155,10 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
   useEffect(() => {
     if (isOpen) {
       fetchRateCards();
+      fetchSiteDesignations();
+      setIsCustomPost(false);
+      setCustomPostName('');
+      setPostName('');
     }
   }, [isOpen, siteId, siteName]);
 
@@ -101,7 +179,8 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
 
   const handleAddRateCard = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!postName.trim() || !grossSalary) {
+    const effectivePostName = (isCustomPost ? customPostName : postName).trim();
+    if (!effectivePostName || !grossSalary) {
       setErrorMsg('Post Name and Gross Salary are required.');
       return;
     }
@@ -113,7 +192,7 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
     const payload: Record<string, any> = {
       site_id: siteId || null,
       site_name: siteName,
-      post_name: postName.trim(),
+      post_name: effectivePostName,
       gross_salary: Number(grossSalary),
       basic_da: isFlatWage ? 0 : Number(basicDa) || 0,
       hra: isFlatWage ? 0 : Number(hra) || 0,
@@ -134,7 +213,7 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
         const fallbackPayload = {
           site_id: siteId || null,
           site_name: siteName,
-          post_name: postName.trim(),
+          post_name: effectivePostName,
           gross_salary: Number(grossSalary),
           basic_da: isFlatWage ? 0 : Number(basicDa) || 0,
           hra: isFlatWage ? 0 : Number(hra) || 0,
@@ -152,8 +231,10 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
         console.error('Failed to insert rate_cards:', error.message);
         setErrorMsg(`Insert error: ${error.message}`);
       } else {
-        setSuccessMsg(`Rate Card "${postName}" created successfully!`);
+        setSuccessMsg(`Rate Card "${effectivePostName}" created successfully!`);
         setPostName('');
+        setIsCustomPost(false);
+        setCustomPostName('');
         setGrossSalary('');
         setBasicDa('');
         setHra('');
@@ -162,6 +243,7 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
         setIncentiveAmount('');
         setIsFlatWage(false);
         await fetchRateCards();
+        await fetchSiteDesignations();
         if (onRateCardUpdated) onRateCardUpdated();
       }
     } catch (err: any) {
@@ -171,6 +253,25 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
       setSaving(false);
     }
   };
+
+  const standardDesignations = [
+    'Housekeeping',
+    'Supervisor',
+    'HK Supervisor',
+    'Keyman',
+    'Key Person',
+    'Lift Operator',
+    'Pantry',
+    'Reliever',
+    'Janitor',
+    'Security Guard',
+    'Store Assistant',
+    'Trainee Staff',
+  ];
+
+  const remainingStandard = standardDesignations.filter(
+    (d) => !siteDesignations.some((sd) => sd.toLowerCase() === d.toLowerCase())
+  );
 
   const handleDeleteRateCard = async (id?: string) => {
     if (!id) return;
@@ -240,19 +341,51 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
               <div>
                 <label className="block text-[11px] font-bold text-gray-700 mb-1">Post Name *</label>
                 <select
-                  value={postName}
-                  onChange={(e) => setPostName(e.target.value)}
+                  value={isCustomPost ? '__custom__' : postName}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === '__custom__') {
+                      setIsCustomPost(true);
+                      setPostName('__custom__');
+                    } else {
+                      setIsCustomPost(false);
+                      setPostName(val);
+                      setCustomPostName('');
+                    }
+                  }}
                   className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-800 font-semibold focus:outline-none focus:border-[#20B2AA]"
-                  required
+                  required={!isCustomPost}
                 >
                   <option value="">Select Role / Designation...</option>
-                  <option value="Housekeeping">Housekeeping</option>
-                  <option value="Supervisor">Supervisor</option>
-                  <option value="Lift Operator">Lift Operator</option>
-                  <option value="Pantry">Pantry</option>
-                  <option value="Reliever">Reliever</option>
-                  <option value="Key Person">Key Person</option>
+                  {siteDesignations.length > 0 && (
+                    <optgroup label="⭐ Site Roles (Active at this Site)">
+                      {siteDesignations.map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  <optgroup label="Standard Designations">
+                    {remainingStandard.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <option value="__custom__">+ Enter Custom Designation...</option>
                 </select>
+
+                {isCustomPost && (
+                  <input
+                    type="text"
+                    placeholder="Type custom designation name..."
+                    value={customPostName}
+                    onChange={(e) => setCustomPostName(e.target.value)}
+                    className="w-full mt-2 bg-white border border-teal-400 rounded-lg px-3 py-1.5 text-xs text-gray-800 font-semibold focus:outline-none focus:ring-1 focus:ring-[#20B2AA]"
+                    required
+                  />
+                )}
               </div>
 
               <div>
