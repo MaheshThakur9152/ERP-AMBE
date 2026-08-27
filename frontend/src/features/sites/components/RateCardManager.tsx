@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Plus, CreditCard, Loader2, Trash2, CheckCircle, AlertCircle } from 'lucide-react';
+import { X, Plus, CreditCard, Loader2, Trash2, CheckCircle, AlertCircle, Info } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
 export interface RateCardRecord {
@@ -8,6 +8,7 @@ export interface RateCardRecord {
   site_name?: string;
   post_name: string;
   gross_salary: number;
+  committed_salary?: number | null;
   basic_da: number;
   hra: number;
   washing_allowance?: number;
@@ -46,15 +47,30 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
   const [isCustomPost, setIsCustomPost] = useState<boolean>(false);
   const [customPostName, setCustomPostName] = useState<string>('');
 
-  // New Rate Card Form State
+  // New Rate Card Form State (Starts Empty, NOT 0)
   const [postName, setPostName] = useState('');
   const [grossSalary, setGrossSalary] = useState<number | ''>('');
+  const [committedSalary, setCommittedSalary] = useState<number | ''>('');
   const [basicDa, setBasicDa] = useState<number | ''>('');
   const [hra, setHra] = useState<number | ''>('');
   const [otherAllowance, setOtherAllowance] = useState<number | ''>('');
   const [conveyanceAllowance, setConveyanceAllowance] = useState<number | ''>('');
   const [incentiveAmount, setIncentiveAmount] = useState<number | ''>('');
   const [isFlatWage, setIsFlatWage] = useState<boolean>(false);
+
+  const resetForm = () => {
+    setPostName('');
+    setIsCustomPost(false);
+    setCustomPostName('');
+    setGrossSalary('');
+    setCommittedSalary('');
+    setBasicDa('');
+    setHra('');
+    setOtherAllowance('');
+    setConveyanceAllowance('');
+    setIncentiveAmount('');
+    setIsFlatWage(false);
+  };
 
   const fetchSiteDesignations = async () => {
     if (!siteId) return;
@@ -128,6 +144,7 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
             site_name: siteName,
             post_name: rc.roleName || rc.post_name || rc.designation || 'Staff',
             gross_salary: Number(rc.monthlyRate || rc.gross_salary || rc.grossSalary || 0),
+            committed_salary: rc.committed_salary ? Number(rc.committed_salary) : null,
             basic_da: Number(rc.basic_da || 0),
             hra: Number(rc.hra || 0),
             other_allowance: Number(rc.other_allowance || 0),
@@ -156,15 +173,24 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
     if (isOpen) {
       fetchRateCards();
       fetchSiteDesignations();
-      setIsCustomPost(false);
-      setCustomPostName('');
-      setPostName('');
+      resetForm();
     }
   }, [isOpen, siteId, siteName]);
 
   // Auto-calculate Basic, HRA, Other Allowance, Conveyance when Gross Salary is entered if blank
-  const handleGrossChange = (val: number) => {
-    setGrossSalary(val);
+  const handleGrossChange = (valStr: string) => {
+    if (valStr === '') {
+      setGrossSalary('');
+      if (!isFlatWage) {
+        setBasicDa('');
+        setHra('');
+        setOtherAllowance('');
+        setConveyanceAllowance('');
+      }
+      return;
+    }
+    const val = Number(valStr);
+    setGrossSalary(isNaN(val) ? '' : val);
     if (val > 0 && !isFlatWage) {
       const b = Math.round(val * 0.5);
       const h = Math.round(val * 0.2);
@@ -180,9 +206,20 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
   const handleAddRateCard = async (e: React.FormEvent) => {
     e.preventDefault();
     const effectivePostName = (isCustomPost ? customPostName : postName).trim();
-    if (!effectivePostName || !grossSalary) {
+    if (!effectivePostName || grossSalary === '') {
       setErrorMsg('Post Name and Gross Salary are required.');
       return;
+    }
+
+    // Lighter duplicate validation
+    const duplicateExists = rateCards.some(
+      (rc) => rc.post_name.trim().toLowerCase() === effectivePostName.toLowerCase()
+    );
+    if (duplicateExists) {
+      const proceed = window.confirm(
+        `A rate card for "${effectivePostName}" already exists for this site. Are you sure you want to add another rate card for this role?`
+      );
+      if (!proceed) return;
     }
 
     setSaving(true);
@@ -193,14 +230,15 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
       site_id: siteId || null,
       site_name: siteName,
       post_name: effectivePostName,
-      gross_salary: Number(grossSalary),
-      basic_da: isFlatWage ? 0 : Number(basicDa) || 0,
-      hra: isFlatWage ? 0 : Number(hra) || 0,
-      other_allowance: isFlatWage ? 0 : Number(otherAllowance) || 0,
-      washing_allowance: isFlatWage ? 0 : Number(otherAllowance) || 0,
-      conveyance_allowance: isFlatWage ? 0 : Number(conveyanceAllowance) || 0,
-      incentive_amount: Number(incentiveAmount) || 0,
-      incentive: Number(incentiveAmount) || 0,
+      gross_salary: Number(grossSalary) || 0,
+      committed_salary: committedSalary === '' ? null : Number(committedSalary),
+      basic_da: isFlatWage ? 0 : (basicDa === '' ? 0 : Number(basicDa)),
+      hra: isFlatWage ? 0 : (hra === '' ? 0 : Number(hra)),
+      other_allowance: isFlatWage ? 0 : (otherAllowance === '' ? 0 : Number(otherAllowance)),
+      washing_allowance: isFlatWage ? 0 : (otherAllowance === '' ? 0 : Number(otherAllowance)),
+      conveyance_allowance: isFlatWage ? 0 : (conveyanceAllowance === '' ? 0 : Number(conveyanceAllowance)),
+      incentive_amount: incentiveAmount === '' ? 0 : Number(incentiveAmount),
+      incentive: incentiveAmount === '' ? 0 : Number(incentiveAmount),
       is_flat_wage: isFlatWage,
     };
 
@@ -214,12 +252,13 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
           site_id: siteId || null,
           site_name: siteName,
           post_name: effectivePostName,
-          gross_salary: Number(grossSalary),
-          basic_da: isFlatWage ? 0 : Number(basicDa) || 0,
-          hra: isFlatWage ? 0 : Number(hra) || 0,
-          other_allowance: isFlatWage ? 0 : Number(otherAllowance) || 0,
-          conveyance_allowance: isFlatWage ? 0 : Number(conveyanceAllowance) || 0,
-          incentive_amount: Number(incentiveAmount) || 0,
+          gross_salary: Number(grossSalary) || 0,
+          committed_salary: committedSalary === '' ? null : Number(committedSalary),
+          basic_da: isFlatWage ? 0 : (basicDa === '' ? 0 : Number(basicDa)),
+          hra: isFlatWage ? 0 : (hra === '' ? 0 : Number(hra)),
+          other_allowance: isFlatWage ? 0 : (otherAllowance === '' ? 0 : Number(otherAllowance)),
+          conveyance_allowance: isFlatWage ? 0 : (conveyanceAllowance === '' ? 0 : Number(conveyanceAllowance)),
+          incentive_amount: incentiveAmount === '' ? 0 : Number(incentiveAmount),
           is_flat_wage: isFlatWage,
         };
         const retry = await supabase.from('rate_cards').insert([fallbackPayload]).select();
@@ -232,16 +271,7 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
         setErrorMsg(`Insert error: ${error.message}`);
       } else {
         setSuccessMsg(`Rate Card "${effectivePostName}" created successfully!`);
-        setPostName('');
-        setIsCustomPost(false);
-        setCustomPostName('');
-        setGrossSalary('');
-        setBasicDa('');
-        setHra('');
-        setOtherAllowance('');
-        setConveyanceAllowance('');
-        setIncentiveAmount('');
-        setIsFlatWage(false);
+        resetForm();
         await fetchRateCards();
         await fetchSiteDesignations();
         if (onRateCardUpdated) onRateCardUpdated();
@@ -337,7 +367,8 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
               <Plus className="w-4 h-4" /> Add New Designation Rate Card
             </h4>
 
-            <div className="grid grid-cols-2 gap-3">
+            {/* Row 1: Post Name, Gross Salary, Committed Salary */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div>
                 <label className="block text-[11px] font-bold text-gray-700 mb-1">Post Name *</label>
                 <select
@@ -393,11 +424,29 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
                 <input
                   type="number"
                   placeholder="e.g. 15000"
-                  value={grossSalary}
-                  onChange={(e) => handleGrossChange(Number(e.target.value))}
+                  value={grossSalary === '' ? '' : grossSalary}
+                  onChange={(e) => handleGrossChange(e.target.value)}
                   className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-800 font-mono font-bold focus:outline-none focus:border-[#20B2AA]"
                   required
                 />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[11px] font-bold text-gray-700">Committed Salary (₹)</label>
+                  <span className="text-[9px] text-gray-400 font-medium">Ref Only</span>
+                </div>
+                <input
+                  type="number"
+                  placeholder="e.g. 15000"
+                  value={committedSalary === '' ? '' : committedSalary}
+                  onChange={(e) => setCommittedSalary(e.target.value === '' ? '' : Number(e.target.value))}
+                  className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-800 font-mono font-bold focus:outline-none focus:border-[#20B2AA]"
+                />
+                <p className="text-[9.5px] text-gray-500 mt-1 flex items-center gap-1">
+                  <Info className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                  <span>For reference only — not used in payroll calculations.</span>
+                </p>
               </div>
             </div>
 
@@ -414,6 +463,11 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
                     setHra(0);
                     setOtherAllowance(0);
                     setConveyanceAllowance(0);
+                  } else {
+                    setBasicDa('');
+                    setHra('');
+                    setOtherAllowance('');
+                    setConveyanceAllowance('');
                   }
                 }}
                 className="w-4 h-4 rounded text-[#20B2AA] focus:ring-[#20B2AA]"
@@ -431,10 +485,10 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
                 <label className="block text-[10px] font-bold text-gray-700 mb-1">Basic + DA (₹)</label>
                 <input
                   type="number"
-                  placeholder="7500"
+                  placeholder="0"
                   disabled={isFlatWage}
-                  value={basicDa}
-                  onChange={(e) => setBasicDa(Number(e.target.value))}
+                  value={basicDa === '' ? '' : basicDa}
+                  onChange={(e) => setBasicDa(e.target.value === '' ? '' : Number(e.target.value))}
                   className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-800 font-mono disabled:bg-gray-100"
                 />
               </div>
@@ -443,10 +497,10 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
                 <label className="block text-[10px] font-bold text-gray-700 mb-1">HRA (₹)</label>
                 <input
                   type="number"
-                  placeholder="3000"
+                  placeholder="0"
                   disabled={isFlatWage}
-                  value={hra}
-                  onChange={(e) => setHra(Number(e.target.value))}
+                  value={hra === '' ? '' : hra}
+                  onChange={(e) => setHra(e.target.value === '' ? '' : Number(e.target.value))}
                   className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-800 font-mono disabled:bg-gray-100"
                 />
               </div>
@@ -455,10 +509,10 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
                 <label className="block text-[10px] font-bold text-gray-700 mb-1">Other Allow (₹)</label>
                 <input
                   type="number"
-                  placeholder="2250"
+                  placeholder="0"
                   disabled={isFlatWage}
-                  value={otherAllowance}
-                  onChange={(e) => setOtherAllowance(Number(e.target.value))}
+                  value={otherAllowance === '' ? '' : otherAllowance}
+                  onChange={(e) => setOtherAllowance(e.target.value === '' ? '' : Number(e.target.value))}
                   className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-800 font-mono disabled:bg-gray-100"
                 />
               </div>
@@ -467,10 +521,10 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
                 <label className="block text-[10px] font-bold text-gray-700 mb-1">Conveyance (₹)</label>
                 <input
                   type="number"
-                  placeholder="2250"
+                  placeholder="0"
                   disabled={isFlatWage}
-                  value={conveyanceAllowance}
-                  onChange={(e) => setConveyanceAllowance(Number(e.target.value))}
+                  value={conveyanceAllowance === '' ? '' : conveyanceAllowance}
+                  onChange={(e) => setConveyanceAllowance(e.target.value === '' ? '' : Number(e.target.value))}
                   className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-800 font-mono disabled:bg-gray-100"
                 />
               </div>
@@ -480,8 +534,8 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
                 <input
                   type="number"
                   placeholder="0"
-                  value={incentiveAmount}
-                  onChange={(e) => setIncentiveAmount(Number(e.target.value))}
+                  value={incentiveAmount === '' ? '' : incentiveAmount}
+                  onChange={(e) => setIncentiveAmount(e.target.value === '' ? '' : Number(e.target.value))}
                   className="w-full bg-white border border-indigo-300 rounded-lg px-2.5 py-1.5 text-xs text-indigo-900 font-mono font-bold focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
@@ -522,11 +576,31 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
                     className="bg-white p-3.5 rounded-xl border border-gray-200 flex items-center justify-between shadow-2xs hover:border-teal-200 transition-colors"
                   >
                     <div>
-                      <div className="font-bold text-gray-900 text-sm">{rc.post_name}</div>
-                      <div className="text-[11px] text-gray-500 font-mono mt-0.5 space-x-3">
+                      <div className="font-bold text-gray-900 text-sm flex items-center gap-2">
+                        <span>{rc.post_name}</span>
+                        {rc.is_flat_wage && (
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-amber-50 text-amber-700 font-semibold border border-amber-200">
+                            Flat Wage
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-gray-500 font-mono mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
                         <span>Basic+DA: <strong>₹{rc.basic_da}</strong></span>
                         <span>HRA: <strong>₹{rc.hra}</strong></span>
                         <span>Other: <strong>₹{rc.other_allowance}</strong></span>
+                        {rc.conveyance_allowance ? (
+                          <span>Conveyance: <strong>₹{rc.conveyance_allowance}</strong></span>
+                        ) : null}
+                        {(rc.incentive_amount || rc.incentive) ? (
+                          <span className="text-indigo-600 font-semibold">
+                            Incentive: ₹{rc.incentive_amount || rc.incentive}
+                          </span>
+                        ) : null}
+                        {rc.committed_salary != null && Number(rc.committed_salary) > 0 && (
+                          <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-sans text-[10.5px] border border-slate-200">
+                            Ref Committed: <strong>₹{Number(rc.committed_salary).toLocaleString('en-IN')}</strong>
+                          </span>
+                        )}
                       </div>
                     </div>
 
@@ -539,7 +613,7 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
                       <button
                         type="button"
                         onClick={() => handleDeleteRateCard(rc.id)}
-                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded-lg transition-colors"
+                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
                         title="Delete Rate Card"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -555,3 +629,4 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
     </div>
   );
 };
+
