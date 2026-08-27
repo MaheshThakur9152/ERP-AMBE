@@ -160,16 +160,14 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
     try {
       const recordPayload = {
         staff_id: empId,
-        site_id: selectedSiteFilter === 'all' ? null : selectedSiteFilter,
-        date,
+        site_id: selectedSiteFilter === 'all' ? (emp?.siteId || null) : selectedSiteFilter,
+        record_date: date,
+        shift_type: overtimeVal ? 'overtime' : 'regular',
         status: targetStatus,
-        overtime_status: overtimeVal || null,
-        remarks: targetStatus === 'WOP' ? 'Present on Weekly Off' : 'Added by Admin',
-        updated_at: new Date().toISOString(),
       };
       supabase
         .from('attendance_records')
-        .upsert([recordPayload], { onConflict: 'staff_id,date' })
+        .upsert([recordPayload], { onConflict: 'staff_id,record_date' })
         .then(({ error }) => {
           if (error) console.warn('⚠️ Error upserting attendance_record to Supabase:', error.message);
         });
@@ -218,11 +216,11 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
         if (!staffErr && dbStaff) {
           const mappedStaff: EmployeeAttendanceData[] = dbStaff.map((st: any) => ({
             id: st.id,
-            name: st.name || st.employee_name || st.employeeName || '',
+            name: st.employee_name || st.name || st.employeeName || '',
             biometricCode: st.biometric_code || st.biometricCode || '',
             phone: st.phone || st.contact_no || '',
-            role: st.role || st.designation || 'Janitor',
-            shift: st.shift || st.role || 'KEYMAN',
+            role: st.designation || st.role || 'Janitor',
+            shift: st.designation || st.shift || st.role || 'KEYMAN',
             siteId: st.site_id || st.siteId || '',
             siteName: st.site_name || st.siteName || '',
             weeklyOff: (st.weekly_off || st.weeklyOff || 'SUN').toUpperCase(),
@@ -242,8 +240,8 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
         let recQuery = supabase
           .from('attendance_records')
           .select('*')
-          .gte('date', startDateStr)
-          .lte('date', endDateStr);
+          .gte('record_date', startDateStr)
+          .lte('record_date', endDateStr);
 
         if (selectedSiteFilter && selectedSiteFilter !== 'all') {
           recQuery = recQuery.eq('site_id', selectedSiteFilter);
@@ -255,10 +253,10 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
           const mappedRecords: AttendanceRecord[] = dbRecords.map((r: any) => ({
             id: r.id,
             employeeId: r.staff_id || r.employee_id || r.employeeId || r.staffId || '',
-            date: r.date,
+            date: r.record_date || r.date,
             status: r.status,
-            overtimeStatus: r.overtime_status || r.overtimeStatus || '',
-            remarks: r.remarks,
+            overtimeStatus: r.shift_type === 'overtime' ? 'P' : (r.overtime_status || ''),
+            remarks: r.remarks || '',
           }));
 
           if (isMounted) {
