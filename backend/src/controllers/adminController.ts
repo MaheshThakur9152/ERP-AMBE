@@ -17,28 +17,39 @@ interface EntityLockConfig {
   table: PendingLockItem['entityType'];
   select: string;
   useCutoff?: boolean;
+  timeColumn?: string;
   mapFn: (row: any, hoursOld: number, createdAt: string) => PendingLockItem;
 }
 
 async function fetchEntityPendingLocks(config: EntityLockConfig): Promise<PendingLockItem[]> {
-  const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  let query = supabaseAdmin
-    .from(config.table)
-    .select(config.select)
-    .or('is_locked.eq.false,is_locked.is.null');
+  try {
+    const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const timeCol = config.timeColumn || 'created_at';
+    let query = supabaseAdmin
+      .from(config.table)
+      .select(config.select)
+      .or('is_locked.eq.false,is_locked.is.null');
 
-  if (config.useCutoff !== false) {
-    query = query.lt('created_at', cutoffTime);
+    if (config.useCutoff !== false) {
+      query = query.lt(timeCol, cutoffTime);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      console.error(`[fetchEntityPendingLocks] Error querying ${config.table}:`, error.message);
+      return [];
+    }
+    if (!data) return [];
+
+    return data.map((row: any) => {
+      const createdAt = row[timeCol] || row.created_at || new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+      const hoursOld = Math.floor((Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60));
+      return config.mapFn(row, hoursOld, createdAt);
+    });
+  } catch (err: any) {
+    console.error(`[fetchEntityPendingLocks] Unhandled exception querying ${config.table}:`, err.message);
+    return [];
   }
-
-  const { data, error } = await query;
-  if (error || !data) return [];
-
-  return data.map((row: any) => {
-    const createdAt = row.created_at || new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
-    const hoursOld = Math.floor((Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60));
-    return config.mapFn(row, hoursOld, createdAt);
-  });
 }
 
 export class AdminController {
@@ -49,33 +60,34 @@ export class AdminController {
    */
   static async getPendingLocks(req: Request, res: Response): Promise<void> {
     try {
-      const results = await Promise.all([
+      const lockConfigs: EntityLockConfig[] = [
         // 0. Companies
-        fetchEntityPendingLocks({
+        {
           table: 'companies',
-          select: '*',
+          select: 'id, name, entity_code, gstin, cin_no, tax_prefix, created_at, is_locked',
           useCutoff: false,
           mapFn: (comp, hoursOld, createdAt) => ({
             id: comp.id,
             entityType: 'companies',
-            title: comp.name || comp.legal_name || comp.entity_code || 'Company Entity Profile',
-            subtitle: `GSTIN: ${comp.gstin || 'N/A'} | Code: ${comp.entity_code || comp.code || 'COMP'}`,
+            title: comp.name || comp.entity_code || 'Company Entity Profile',
+            subtitle: `GSTIN: ${comp.gstin || 'N/A'} | Code: ${comp.entity_code || 'COMP'}`,
             createdAt,
             hoursOld,
             is_locked: false,
             details: {
-              company_name: comp.name || comp.legal_name,
-              entity_code: comp.entity_code || comp.code,
+              company_name: comp.name,
+              entity_code: comp.entity_code,
               gstin: comp.gstin,
-              cin: comp.cin_no || comp.cin,
+              cin: comp.cin_no,
               tax_prefix: comp.tax_prefix,
             },
           }),
-        }),
+        },
         // 1. Sites
-        fetchEntityPendingLocks({
+        {
           table: 'sites',
-          select: 'id, site_name, client_name, created_at, is_locked',
+          select: 'id, site_name, client_name, created_at, updated_at, is_locked',
+          timeColumn: 'updated_at',
           mapFn: (st, hoursOld, createdAt) => ({
             id: st.id,
             entityType: 'sites',
@@ -85,9 +97,9 @@ export class AdminController {
             hoursOld,
             is_locked: false,
           }),
-        }),
+        },
         // 2. Invoices
-        fetchEntityPendingLocks({
+        {
           table: 'invoices',
           select: 'id, invoice_no, type, grand_total, created_at, is_locked, certified_doc_url, certified_attendance_url, sites(site_name)',
           mapFn: (inv, hoursOld, createdAt) => ({
@@ -100,40 +112,63 @@ export class AdminController {
             is_locked: false,
             uploadedDocUrl: inv.certified_doc_url || inv.certified_attendance_url || null,
           }),
-        }),
+        },
         // 3. Attendance Sheets
-        fetchEntityPendingLocks({
+        {
           table: 'attendance_sheets',
-          select: 'id, month_year, site_id, created_at, is_locked, file_url, sites(site_name)',
-          mapFn: (att, hoursOld, createdAt) => ({
-            id: att.id,
-            entityType: 'attendance_sheets',
-            title: `${att.sites?.site_name || 'Site Attendance'} - ${att.month_year || 'Attendance'}`,
-            subtitle: `Attendance Sheet`,
-            createdAt,
-            hoursOld,
-            is_locked: false,
-            uploadedDocUrl: att.file_url || null,
-          }),
-        }),
+          select: 'id, month, year, site_id, created_at, is_locked, sites(site_name)',
+          mapFn: (att, hoursOld, createdAt) => {
+            const monthYear = [att.month, att.year].filter(Boolean).join(' ') || 'Attendance';
+            return {
+              id: att.id,
+              entityType: 'attendance_sheets',
+              title: `${att.sites?.site_name || 'Site Attendance'} - ${monthYear}`,
+              subtitle: `Attendance Sheet`,
+              createdAt,
+              hoursOld,
+              is_locked: false,
+              details: { month_year: monthYear },
+            };
+          },
+        },
         // 4. Payroll Records
-        fetchEntityPendingLocks({
+        {
           table: 'payroll_records',
-          select: 'id, month_year, created_at, is_locked, excel_url',
+          select: 'id, month_year, created_at, is_locked, staff(employee_name)',
           mapFn: (pr, hoursOld, createdAt) => ({
             id: pr.id,
             entityType: 'payroll_records',
             title: `Payroll Record - ${pr.month_year || 'Monthly'}`,
-            subtitle: `Payroll Batch`,
+            subtitle: pr.staff?.employee_name ? `Staff: ${pr.staff.employee_name}` : 'Payroll Record',
             createdAt,
             hoursOld,
             is_locked: false,
-            uploadedDocUrl: pr.excel_url || null,
+            details: { month_year: pr.month_year },
           }),
-        }),
-      ]);
+        },
+        // 5. Staff
+        {
+          table: 'staff',
+          select: 'id, employee_name, biometric_code, designation, created_at, is_locked, sites(site_name)',
+          mapFn: (st, hoursOld, createdAt) => ({
+            id: st.id,
+            entityType: 'staff',
+            title: st.employee_name || 'Staff Member',
+            subtitle: `Designation: ${st.designation || 'Staff'} | Bio Code: ${st.biometric_code || 'N/A'}`,
+            createdAt,
+            hoursOld,
+            is_locked: false,
+          }),
+        },
+      ];
 
-      const pendingItems = results.flat().sort((a, b) => b.hoursOld - a.hoursOld);
+      const settleResults = await Promise.allSettled(
+        lockConfigs.map((cfg) => fetchEntityPendingLocks(cfg))
+      );
+
+      const pendingItems = settleResults
+        .flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
+        .sort((a, b) => b.hoursOld - a.hoursOld);
 
       res.status(200).json({
         success: true,
@@ -158,38 +193,47 @@ export class AdminController {
         select: string;
         mapFn: (row: any, hoursOld: number, createdAt: string) => PendingLockItem;
       }): Promise<PendingLockItem[]> => {
-        const { data, error } = await supabaseAdmin
-          .from(config.table)
-          .select(config.select)
-          .eq('is_locked', true);
+        try {
+          const { data, error } = await supabaseAdmin
+            .from(config.table)
+            .select(config.select)
+            .eq('is_locked', true);
 
-        if (error || !data) return [];
+          if (error) {
+            console.error(`[fetchEntityLocked] Error querying ${config.table}:`, error.message);
+            return [];
+          }
+          if (!data) return [];
 
-        return data.map((row: any) => {
-          const createdAt = row.created_at || new Date().toISOString();
-          const hoursOld = Math.floor((Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60));
-          return config.mapFn(row, hoursOld, createdAt);
-        });
+          return data.map((row: any) => {
+            const createdAt = row.updated_at || row.created_at || new Date().toISOString();
+            const hoursOld = Math.floor((Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60));
+            return config.mapFn(row, hoursOld, createdAt);
+          });
+        } catch (err: any) {
+          console.error(`[fetchEntityLocked] Unhandled exception querying ${config.table}:`, err.message);
+          return [];
+        }
       };
 
-      const results = await Promise.all([
+      const lockedConfigs = [
         // 0. Companies
         fetchEntityLocked({
           table: 'companies',
-          select: '*',
+          select: 'id, name, entity_code, gstin, cin_no, tax_prefix, created_at, is_locked',
           mapFn: (comp, hoursOld, createdAt) => ({
             id: comp.id,
             entityType: 'companies',
-            title: comp.name || comp.legal_name || comp.entity_code || 'Company Entity Profile',
-            subtitle: `GSTIN: ${comp.gstin || 'N/A'} | Code: ${comp.entity_code || comp.code || 'COMP'}`,
+            title: comp.name || comp.entity_code || 'Company Entity Profile',
+            subtitle: `GSTIN: ${comp.gstin || 'N/A'} | Code: ${comp.entity_code || 'COMP'}`,
             createdAt,
             hoursOld,
             is_locked: true,
             details: {
-              company_name: comp.name || comp.legal_name,
-              entity_code: comp.entity_code || comp.code,
+              company_name: comp.name,
+              entity_code: comp.entity_code,
               gstin: comp.gstin,
-              cin: comp.cin_no || comp.cin,
+              cin: comp.cin_no,
               tax_prefix: comp.tax_prefix,
             },
           }),
@@ -226,50 +270,56 @@ export class AdminController {
         // 3. Attendance Sheets
         fetchEntityLocked({
           table: 'attendance_sheets',
-          select: 'id, month_year, site_id, created_at, updated_at, is_locked, file_url, sites(site_name)',
-          mapFn: (att, hoursOld, createdAt) => ({
-            id: att.id,
-            entityType: 'attendance_sheets',
-            title: `${att.sites?.site_name || 'Site Attendance'} - ${att.month_year || 'Attendance'}`,
-            subtitle: `Attendance Sheet`,
-            createdAt,
-            hoursOld,
-            is_locked: true,
-            uploadedDocUrl: att.file_url || null,
-          }),
+          select: 'id, month, year, site_id, created_at, updated_at, is_locked, sites(site_name)',
+          mapFn: (att, hoursOld, createdAt) => {
+            const monthYear = [att.month, att.year].filter(Boolean).join(' ') || 'Attendance';
+            return {
+              id: att.id,
+              entityType: 'attendance_sheets',
+              title: `${att.sites?.site_name || 'Site Attendance'} - ${monthYear}`,
+              subtitle: `Attendance Sheet`,
+              createdAt,
+              hoursOld,
+              is_locked: true,
+              details: { month_year: monthYear },
+            };
+          },
         }),
         // 4. Payroll Records
         fetchEntityLocked({
           table: 'payroll_records',
-          select: 'id, month_year, created_at, updated_at, is_locked, excel_url',
+          select: 'id, month_year, created_at, updated_at, is_locked, staff(employee_name)',
           mapFn: (pr, hoursOld, createdAt) => ({
             id: pr.id,
             entityType: 'payroll_records',
             title: `Payroll Record - ${pr.month_year || 'Monthly'}`,
-            subtitle: `Payroll Batch`,
+            subtitle: pr.staff?.employee_name ? `Staff: ${pr.staff.employee_name}` : 'Payroll Record',
             createdAt,
             hoursOld,
             is_locked: true,
-            uploadedDocUrl: pr.excel_url || null,
+            details: { month_year: pr.month_year },
           }),
         }),
         // 5. Staff
         fetchEntityLocked({
           table: 'staff',
-          select: 'id, name, full_name, employee_code, designation, created_at, updated_at, is_locked, sites(site_name)',
+          select: 'id, employee_name, biometric_code, designation, created_at, is_locked, sites(site_name)',
           mapFn: (st, hoursOld, createdAt) => ({
             id: st.id,
             entityType: 'staff',
-            title: st.full_name || st.name || `Staff #${st.employee_code || st.id}`,
-            subtitle: `Designation: ${st.designation || 'Staff'} | Code: ${st.employee_code || 'N/A'}`,
+            title: st.employee_name || 'Staff Member',
+            subtitle: `Designation: ${st.designation || 'Staff'} | Code: ${st.biometric_code || 'N/A'}`,
             createdAt,
             hoursOld,
             is_locked: true,
           }),
         }),
-      ]);
+      ];
 
-      const lockedItems = results.flat().sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      const settleLocked = await Promise.allSettled(lockedConfigs);
+      const lockedItems = settleLocked
+        .flatMap((r) => (r.status === 'fulfilled' ? r.value : []))
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
       res.status(200).json({
         success: true,
