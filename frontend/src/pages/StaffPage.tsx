@@ -37,6 +37,12 @@ export const isMatchingDocType = (docType?: string | null, category?: string | n
   if (cleanCat.includes('bank') || cleanCat.includes('passbook')) {
     return cleanDoc.includes('bank') || cleanDoc.includes('passbook');
   }
+  if (cleanCat.includes('uan')) {
+    return cleanDoc.includes('uan');
+  }
+  if (cleanCat.includes('esic') || cleanCat.includes('esi')) {
+    return cleanDoc.includes('esic') || cleanDoc.includes('esi');
+  }
   return cleanDoc === cleanCat;
 };
 
@@ -79,6 +85,8 @@ interface StaffMember {
   aadhar_no?: string;
   panNo?: string;
   pan_no?: string;
+  uan_no?: string;
+  esic_no?: string;
   bank_account_no?: string;
   bankAccountNo?: string;
   bank_ifsc_code?: string;
@@ -96,6 +104,8 @@ export const StaffPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('All');
   const [statusFilter, setStatusFilter] = useState<string>('All');
+  const [filterMissingUan, setFilterMissingUan] = useState<boolean>(false);
+  const [filterMissingEsic, setFilterMissingEsic] = useState<boolean>(false);
 
   const [showAddModal, setShowAddModal] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -123,6 +133,8 @@ export const StaffPage: React.FC = () => {
     site_id: '',
     rate_card_id: '',
     status: 'Active',
+    uan_no: '',
+    esic_no: '',
     documents: [],
   });
 
@@ -245,7 +257,16 @@ export const StaffPage: React.FC = () => {
     return Array.from(new Set([...fromStaff, ...defaults])).filter(Boolean);
   }, [staffList, formData.designation, formData.role]);
 
-  // Filtered staff list by search name, biometric code, site name
+  // Missing UAN & ESIC count metrics
+  const missingUanCount = React.useMemo(() => {
+    return staffList.filter((s) => !s.uan_no || s.uan_no.trim() === '').length;
+  }, [staffList]);
+
+  const missingEsicCount = React.useMemo(() => {
+    return staffList.filter((s) => !s.esic_no || s.esic_no.trim() === '').length;
+  }, [staffList]);
+
+  // Filtered staff list by search name, biometric code, site name, role, status, missing uan/esic
   const filteredStaff = staffList.filter((staff) => {
     const empName = (staff.employee_name || staff.name || '').toLowerCase();
     const bioCode = (staff.biometric_code || staff.biometricCode || '').toLowerCase();
@@ -266,7 +287,10 @@ export const StaffPage: React.FC = () => {
     const roleName = staff.designation || staff.role || '';
     const matchesRole = roleFilter === 'All' || roleName === roleFilter;
     const matchesStatus = statusFilter === 'All' || staff.status === statusFilter;
-    return matchesSearch && matchesRole && matchesStatus;
+    const matchesUan = !filterMissingUan || !staff.uan_no || staff.uan_no.trim() === '';
+    const matchesEsic = !filterMissingEsic || !staff.esic_no || staff.esic_no.trim() === '';
+
+    return matchesSearch && matchesRole && matchesStatus && matchesUan && matchesEsic;
   });
 
   const handleOpenAddModal = () => {
@@ -291,6 +315,8 @@ export const StaffPage: React.FC = () => {
       payee_name: '',
       aadharNo: '',
       panNo: '',
+      uan_no: '',
+      esic_no: '',
       status: 'Active',
       documents: [],
     });
@@ -322,6 +348,8 @@ export const StaffPage: React.FC = () => {
       payee_name: staff.payee_name || staff.payeeName || '',
       aadharNo: staff.aadharNo || staff.aadhar_no || '',
       panNo: staff.panNo || staff.pan_no || '',
+      uan_no: staff.uan_no || '',
+      esic_no: staff.esic_no || '',
       status: staff.status || 'Active',
     });
     fetchDocsForStaff(staff.id);
@@ -422,6 +450,8 @@ export const StaffPage: React.FC = () => {
         bank_ifsc_code: (formData.bank_ifsc_code || formData.bankIfsc || '').trim() || null,
         bank_name: (formData.bank_name || formData.bankName || '').trim() || null,
         payee_name: (formData.payee_name || formData.payeeName || '').trim() || null,
+        uan_no: (formData.uan_no || '').trim() || null,
+        esic_no: (formData.esic_no || '').trim() || null,
       };
 
       const { error } = await supabase.from('staff').update(payload).eq('id', editingStaff.id);
@@ -509,6 +539,48 @@ export const StaffPage: React.FC = () => {
               <option value="On Leave">On Leave</option>
               <option value="Inactive">Inactive</option>
             </select>
+
+            {/* Missing UAN Filter Toggle Button */}
+            <button
+              type="button"
+              onClick={() => setFilterMissingUan((prev) => !prev)}
+              className={`px-3 py-2 text-xs font-semibold rounded-lg border transition-all flex items-center gap-1.5 cursor-pointer ${
+                filterMissingUan
+                  ? 'bg-amber-500 text-white border-amber-600 shadow-xs ring-2 ring-amber-500/20'
+                  : 'bg-white text-gray-700 border-gray-200 hover:bg-amber-50 hover:text-amber-800 hover:border-amber-300'
+              }`}
+              title="Filter employees without UAN Number"
+            >
+              <span>Missing UAN</span>
+              <span
+                className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                  filterMissingUan ? 'bg-white/25 text-white' : 'bg-amber-100 text-amber-800'
+                }`}
+              >
+                {missingUanCount}
+              </span>
+            </button>
+
+            {/* Missing ESIC Filter Toggle Button */}
+            <button
+              type="button"
+              onClick={() => setFilterMissingEsic((prev) => !prev)}
+              className={`px-3 py-2 text-xs font-semibold rounded-lg border transition-all flex items-center gap-1.5 cursor-pointer ${
+                filterMissingEsic
+                  ? 'bg-orange-500 text-white border-orange-600 shadow-xs ring-2 ring-orange-500/20'
+                  : 'bg-white text-gray-700 border-gray-200 hover:bg-orange-50 hover:text-orange-800 hover:border-orange-300'
+              }`}
+              title="Filter employees without ESIC Number"
+            >
+              <span>Missing ESIC</span>
+              <span
+                className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                  filterMissingEsic ? 'bg-white/25 text-white' : 'bg-orange-100 text-orange-800'
+                }`}
+              >
+                {missingEsicCount}
+              </span>
+            </button>
           </div>
 
           <div className="text-xs text-gray-500 font-mono">
@@ -610,6 +682,14 @@ export const StaffPage: React.FC = () => {
                               staff.pan_no ||
                               (staff.employee_documents && staff.employee_documents.some((d: any) => isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'PAN Card')))
                             );
+                            const hasUan = Boolean(
+                              staff.uan_no ||
+                              (staff.employee_documents && staff.employee_documents.some((d: any) => isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'UAN Card')))
+                            );
+                            const hasEsic = Boolean(
+                              staff.esic_no ||
+                              (staff.employee_documents && staff.employee_documents.some((d: any) => isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'ESIC Card')))
+                            );
 
                             return (
                               <>
@@ -625,6 +705,16 @@ export const StaffPage: React.FC = () => {
                                 {hasPan ? (
                                   <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
                                     PAN ✓
+                                  </span>
+                                ) : null}
+                                {hasUan ? (
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                                    UAN ✓
+                                  </span>
+                                ) : null}
+                                {hasEsic ? (
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-orange-50 text-orange-700 border border-orange-200">
+                                    ESIC ✓
                                   </span>
                                 ) : null}
                               </>
@@ -962,14 +1052,14 @@ export const StaffPage: React.FC = () => {
                   <span>KYC Vault &amp; Employee Document Upload</span>
                 </h3>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div>
                     <label className="block text-[11px] font-bold text-gray-700 mb-1">Aadhar Card Number</label>
                     <input
                       type="text"
                       placeholder="4839-2938-1928"
-                      value={formData.aadharNo || ''}
-                      onChange={(e) => setFormData({ ...formData, aadharNo: e.target.value })}
+                      value={formData.aadharNo || formData.aadhar_no || ''}
+                      onChange={(e) => setFormData({ ...formData, aadharNo: e.target.value, aadhar_no: e.target.value })}
                       className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono text-gray-800"
                     />
                   </div>
@@ -979,15 +1069,37 @@ export const StaffPage: React.FC = () => {
                     <input
                       type="text"
                       placeholder="ABCDE1234F"
-                      value={formData.panNo || ''}
-                      onChange={(e) => setFormData({ ...formData, panNo: e.target.value })}
+                      value={formData.panNo || formData.pan_no || ''}
+                      onChange={(e) => setFormData({ ...formData, panNo: e.target.value, pan_no: e.target.value })}
                       className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono uppercase text-gray-800"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">UAN Number</label>
+                    <input
+                      type="text"
+                      placeholder="100123456789"
+                      value={formData.uan_no || ''}
+                      onChange={(e) => setFormData({ ...formData, uan_no: e.target.value })}
+                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono text-gray-800"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">ESIC Number</label>
+                    <input
+                      type="text"
+                      placeholder="31001234560000001"
+                      value={formData.esic_no || ''}
+                      onChange={(e) => setFormData({ ...formData, esic_no: e.target.value })}
+                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono text-gray-800"
                     />
                   </div>
                 </div>
 
                 {/* Upload / View / Replace Buttons */}
-                <div className="grid grid-cols-3 gap-3 pt-2">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 pt-2">
                   {/* Aadhaar Card */}
                   {(() => {
                     const aadhaarDoc = staffDocs.find((d) =>
@@ -1035,8 +1147,8 @@ export const StaffPage: React.FC = () => {
                         ) : (
                           <Upload className="w-5 h-5 text-[#20B2AA] mb-1" />
                         )}
-                        <span className="text-[11px] font-bold text-gray-700">
-                          {uploadingType === 'Aadhaar Card' ? 'Uploading...' : 'Upload Aadhaar PDF'}
+                        <span className="text-[11px] font-bold text-gray-700 text-center">
+                          {uploadingType === 'Aadhaar Card' ? 'Uploading...' : 'Upload Aadhaar'}
                         </span>
                         <input
                           type="file"
@@ -1096,8 +1208,8 @@ export const StaffPage: React.FC = () => {
                         ) : (
                           <Upload className="w-5 h-5 text-indigo-600 mb-1" />
                         )}
-                        <span className="text-[11px] font-bold text-gray-700">
-                          {uploadingType === 'PAN Card' ? 'Uploading...' : 'Upload PAN Image'}
+                        <span className="text-[11px] font-bold text-gray-700 text-center">
+                          {uploadingType === 'PAN Card' ? 'Uploading...' : 'Upload PAN'}
                         </span>
                         <input
                           type="file"
@@ -1157,7 +1269,7 @@ export const StaffPage: React.FC = () => {
                         ) : (
                           <Upload className="w-5 h-5 text-purple-600 mb-1" />
                         )}
-                        <span className="text-[11px] font-bold text-gray-700">
+                        <span className="text-[11px] font-bold text-gray-700 text-center">
                           {uploadingType === 'Bank Details' ? 'Uploading...' : 'Upload Passbook'}
                         </span>
                         <input
@@ -1165,6 +1277,128 @@ export const StaffPage: React.FC = () => {
                           accept=".pdf,.png,.jpg,.jpeg"
                           className="hidden"
                           onChange={(e) => handleUploadStaffDoc(e, 'Bank Details')}
+                          disabled={!editingStaff || !!uploadingType}
+                        />
+                      </label>
+                    );
+                  })()}
+
+                  {/* UAN Card */}
+                  {(() => {
+                    const uanDoc = staffDocs.find((d) =>
+                      isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'UAN Card')
+                    );
+                    if (uanDoc) {
+                      return (
+                        <div className="flex items-center gap-2 p-2.5 border border-amber-200 rounded-xl bg-amber-50/50">
+                          <a
+                            href={uanDoc.gcp_file_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex-1 text-center text-xs font-bold text-amber-700 hover:text-amber-900 truncate"
+                          >
+                            View UAN
+                          </a>
+                          <label
+                            className="p-1 text-gray-500 hover:text-amber-600 cursor-pointer rounded transition-colors"
+                            title="Replace Document"
+                          >
+                            {uploadingType === 'UAN Card' ? (
+                              <RefreshCw className="w-4 h-4 animate-spin text-amber-600" />
+                            ) : (
+                              <Upload className="w-4 h-4" />
+                            )}
+                            <input
+                              type="file"
+                              accept=".pdf,.png,.jpg,.jpeg"
+                              className="hidden"
+                              onChange={(e) => handleUploadStaffDoc(e, 'UAN Card')}
+                              disabled={!editingStaff || !!uploadingType}
+                            />
+                          </label>
+                        </div>
+                      );
+                    }
+                    return (
+                      <label
+                        className={`border border-dashed border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center transition-colors ${
+                          editingStaff ? 'cursor-pointer hover:border-amber-400 hover:bg-amber-50/50' : 'opacity-50 cursor-not-allowed'
+                        }`}
+                      >
+                        {uploadingType === 'UAN Card' ? (
+                          <RefreshCw className="w-5 h-5 text-amber-600 mb-1 animate-spin" />
+                        ) : (
+                          <Upload className="w-5 h-5 text-amber-600 mb-1" />
+                        )}
+                        <span className="text-[11px] font-bold text-gray-700 text-center">
+                          {uploadingType === 'UAN Card' ? 'Uploading...' : 'Upload UAN Card'}
+                        </span>
+                        <input
+                          type="file"
+                          accept=".pdf,.png,.jpg,.jpeg"
+                          className="hidden"
+                          onChange={(e) => handleUploadStaffDoc(e, 'UAN Card')}
+                          disabled={!editingStaff || !!uploadingType}
+                        />
+                      </label>
+                    );
+                  })()}
+
+                  {/* ESIC Card */}
+                  {(() => {
+                    const esicDoc = staffDocs.find((d) =>
+                      isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'ESIC Card')
+                    );
+                    if (esicDoc) {
+                      return (
+                        <div className="flex items-center gap-2 p-2.5 border border-orange-200 rounded-xl bg-orange-50/50">
+                          <a
+                            href={esicDoc.gcp_file_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex-1 text-center text-xs font-bold text-orange-700 hover:text-orange-900 truncate"
+                          >
+                            View ESIC
+                          </a>
+                          <label
+                            className="p-1 text-gray-500 hover:text-orange-600 cursor-pointer rounded transition-colors"
+                            title="Replace Document"
+                          >
+                            {uploadingType === 'ESIC Card' ? (
+                              <RefreshCw className="w-4 h-4 animate-spin text-orange-600" />
+                            ) : (
+                              <Upload className="w-4 h-4" />
+                            )}
+                            <input
+                              type="file"
+                              accept=".pdf,.png,.jpg,.jpeg"
+                              className="hidden"
+                              onChange={(e) => handleUploadStaffDoc(e, 'ESIC Card')}
+                              disabled={!editingStaff || !!uploadingType}
+                            />
+                          </label>
+                        </div>
+                      );
+                    }
+                    return (
+                      <label
+                        className={`border border-dashed border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center transition-colors ${
+                          editingStaff ? 'cursor-pointer hover:border-orange-400 hover:bg-orange-50/50' : 'opacity-50 cursor-not-allowed'
+                        }`}
+                      >
+                        {uploadingType === 'ESIC Card' ? (
+                          <RefreshCw className="w-5 h-5 text-orange-600 mb-1 animate-spin" />
+                        ) : (
+                          <Upload className="w-5 h-5 text-orange-600 mb-1" />
+                        )}
+                        <span className="text-[11px] font-bold text-gray-700 text-center">
+                          {uploadingType === 'ESIC Card' ? 'Uploading...' : 'Upload ESIC Card'}
+                        </span>
+                        <input
+                          type="file"
+                          accept=".pdf,.png,.jpg,.jpeg"
+                          className="hidden"
+                          onChange={(e) => handleUploadStaffDoc(e, 'ESIC Card')}
                           disabled={!editingStaff || !!uploadingType}
                         />
                       </label>
@@ -1251,7 +1485,7 @@ export const StaffPage: React.FC = () => {
 
             {/* Document List */}
             <div className="p-5 space-y-3">
-              {['Aadhaar Card', 'PAN Card', 'Bank Passbook'].map((docType) => {
+              {['Aadhaar Card', 'PAN Card', 'Bank Passbook', 'UAN Card', 'ESIC Card'].map((docType) => {
                 const uploadedDoc = viewerDocs.find((d) =>
                   isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, docType)
                 );
