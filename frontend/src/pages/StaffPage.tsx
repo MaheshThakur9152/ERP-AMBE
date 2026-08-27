@@ -113,6 +113,7 @@ export const StaffPage: React.FC = () => {
   // Modal State for edit
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
+  const [isCustomDesignationModal, setIsCustomDesignationModal] = useState(false);
   const [staffDocs, setStaffDocs] = useState<any[]>([]);
   const [uploadingType, setUploadingType] = useState<string | null>(null);
   const [sitesList, setSitesList] = useState<any[]>([]);
@@ -296,6 +297,7 @@ export const StaffPage: React.FC = () => {
   const handleOpenAddModal = () => {
     setEditingStaff(null);
     setStaffDocs([]);
+    setIsCustomDesignationModal(false);
     setFormData({
       name: '',
       employee_name: '',
@@ -325,6 +327,7 @@ export const StaffPage: React.FC = () => {
 
   const handleOpenEditModal = (staff: StaffMember) => {
     setEditingStaff(staff);
+    setIsCustomDesignationModal(false);
     const sId = staff.site_id || '';
     const sName = staff.sites?.site_name || staff.site_name || staff.siteName || '';
     const desig = staff.designation || staff.role || 'Janitor';
@@ -522,10 +525,11 @@ export const StaffPage: React.FC = () => {
               className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 shadow-sm font-medium"
             >
               <option value="All">All Roles</option>
-              <option value="Janitor">Janitor</option>
-              <option value="Housekeeping">Housekeeping</option>
-              <option value="Supervisor">Supervisor</option>
-              <option value="Security Guard">Security Guard</option>
+              {allStaffDesignations.map((desig) => (
+                <option key={desig} value={desig}>
+                  {desig}
+                </option>
+              ))}
             </select>
 
             {/* Status Filter */}
@@ -901,17 +905,52 @@ export const StaffPage: React.FC = () => {
 
                   <div>
                     <label className="block text-[11px] font-bold text-gray-700 mb-1">Role / Designation</label>
-                    <select
-                      value={formData.designation || formData.role || 'Janitor'}
-                      onChange={(e) => setFormData({ ...formData, role: e.target.value, designation: e.target.value })}
-                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-medium"
-                    >
-                      {allStaffDesignations.map((desig) => (
-                        <option key={desig} value={desig}>
-                          {desig}
-                        </option>
-                      ))}
-                    </select>
+                    {isCustomDesignationModal ? (
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          autoFocus
+                          placeholder="Enter new designation..."
+                          value={formData.designation || formData.role || ''}
+                          onChange={(e) => setFormData({ ...formData, role: e.target.value, designation: e.target.value })}
+                          className="w-full bg-white border border-[#20B2AA] rounded-lg px-3 py-2 text-xs text-gray-800 font-medium focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsCustomDesignationModal(false);
+                            if (allStaffDesignations.length > 0) {
+                              setFormData({ ...formData, role: allStaffDesignations[0], designation: allStaffDesignations[0] });
+                            }
+                          }}
+                          className="px-2 py-2 text-[10px] font-bold text-gray-600 hover:text-gray-800 bg-gray-100 hover:bg-gray-200 rounded-lg whitespace-nowrap cursor-pointer"
+                          title="Switch back to dropdown list"
+                        >
+                          List
+                        </button>
+                      </div>
+                    ) : (
+                      <select
+                        value={formData.designation || formData.role || 'Janitor'}
+                        onChange={(e) => {
+                          if (e.target.value === '__custom__') {
+                            setIsCustomDesignationModal(true);
+                            setFormData({ ...formData, role: '', designation: '' });
+                          } else {
+                            setIsCustomDesignationModal(false);
+                            setFormData({ ...formData, role: e.target.value, designation: e.target.value });
+                          }
+                        }}
+                        className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-medium"
+                      >
+                        {allStaffDesignations.map((desig) => (
+                          <option key={desig} value={desig}>
+                            {desig}
+                          </option>
+                        ))}
+                        <option value="__custom__">+ Add New Designation...</option>
+                      </select>
+                    )}
                   </div>
                 </div>
 

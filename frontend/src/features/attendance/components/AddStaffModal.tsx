@@ -19,7 +19,10 @@ export const AddStaffModal: React.FC<AddStaffModalProps> = ({
   const [employeeName, setEmployeeName] = useState('');
   const [biometricCode, setBiometricCode] = useState('');
   const [phone, setPhone] = useState('');
-  const [designation, setDesignation] = useState('Janitor');
+  const [designation, setDesignation] = useState('');
+  const [isCustomDesignation, setIsCustomDesignation] = useState(false);
+  const [customDesignation, setCustomDesignation] = useState('');
+  const [availableDesignations, setAvailableDesignations] = useState<string[]>([]);
   const [weeklyOff, setWeeklyOff] = useState('Sunday');
   const [siteId, setSiteId] = useState(defaultSiteId);
   const [rateCardId, setRateCardId] = useState('');
@@ -28,25 +31,43 @@ export const AddStaffModal: React.FC<AddStaffModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Fetch sites for dropdown
+  // Fetch sites and distinct designations for dropdowns
   useEffect(() => {
-    async function fetchSites() {
+    async function fetchInitialData() {
       try {
-        const { data, error } = await supabase
-          .from('sites')
-          .select('id, site_name, code_name, companies(name)')
-          .order('site_name', { ascending: true });
+        const [sitesRes, desigRes] = await Promise.all([
+          supabase
+            .from('sites')
+            .select('id, site_name, code_name, companies(name)')
+            .order('site_name', { ascending: true }),
+          supabase
+            .from('staff')
+            .select('designation')
+            .not('designation', 'is', null)
+            .neq('designation', '')
+            .order('designation', { ascending: true }),
+        ]);
 
-        if (!error && data) {
-          setAvailableSites(data);
+        if (!sitesRes.error && sitesRes.data) {
+          setAvailableSites(sitesRes.data);
+        }
+
+        if (!desigRes.error && desigRes.data) {
+          const distinct = Array.from(
+            new Set(desigRes.data.map((d: any) => d.designation?.trim()).filter(Boolean))
+          ) as string[];
+          setAvailableDesignations(distinct);
+          if (distinct.length > 0 && !designation) {
+            setDesignation(distinct[0]);
+          }
         }
       } catch (err) {
-        console.warn('Could not fetch sites for AddStaffModal:', err);
+        console.warn('Could not fetch initial data for AddStaffModal:', err);
       }
     }
 
     if (isOpen) {
-      fetchSites();
+      fetchInitialData();
       if (defaultSiteId) {
         setSiteId(defaultSiteId);
       }
@@ -102,13 +123,15 @@ export const AddStaffModal: React.FC<AddStaffModalProps> = ({
     setErrorMsg('');
 
     try {
+      const finalDesignation = (isCustomDesignation ? customDesignation : designation).trim() || 'Janitor';
+
       const payload = {
         site_id: siteId || null,
         rate_card_id: rateCardId || null,
         employee_name: employeeName.trim(),
         biometric_code: biometricCode.trim(),
         phone: phone.trim(),
-        designation: designation,
+        designation: finalDesignation,
         weekly_off: weeklyOff,
         status: 'Active',
       };
@@ -122,7 +145,8 @@ export const AddStaffModal: React.FC<AddStaffModalProps> = ({
         setEmployeeName('');
         setBiometricCode('');
         setPhone('');
-        setDesignation('Janitor');
+        setIsCustomDesignation(false);
+        setCustomDesignation('');
         setWeeklyOff('Sunday');
         setRateCardId('');
         onSuccess();
@@ -214,17 +238,55 @@ export const AddStaffModal: React.FC<AddStaffModalProps> = ({
                 <Briefcase size={13} />
                 Designation
               </label>
-              <select
-                value={designation}
-                onChange={(e) => setDesignation(e.target.value)}
-                className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#FF5722] outline-none font-medium bg-white"
-              >
-                <option value="Janitor">Janitor</option>
-                <option value="Supervisor">Supervisor</option>
-                <option value="Keyman">Keyman</option>
-                <option value="Housekeeping">Housekeeping</option>
-                <option value="Admin">Admin</option>
-              </select>
+              {isCustomDesignation ? (
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    autoFocus
+                    placeholder="Enter new designation..."
+                    value={customDesignation}
+                    onChange={(e) => {
+                      setCustomDesignation(e.target.value);
+                      setDesignation(e.target.value);
+                    }}
+                    className="w-full px-3 py-2 text-xs border border-[#FF5722] rounded-lg focus:ring-2 focus:ring-[#FF5722] outline-none font-medium bg-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCustomDesignation(false);
+                      if (availableDesignations.length > 0) {
+                        setDesignation(availableDesignations[0]);
+                      }
+                    }}
+                    className="px-2.5 py-2 text-[11px] font-bold text-gray-600 hover:text-gray-800 bg-gray-100 hover:bg-gray-200 rounded-lg whitespace-nowrap cursor-pointer"
+                    title="Switch to existing designations dropdown"
+                  >
+                    List
+                  </button>
+                </div>
+              ) : (
+                <select
+                  value={designation}
+                  onChange={(e) => {
+                    if (e.target.value === '__custom__') {
+                      setIsCustomDesignation(true);
+                      setCustomDesignation('');
+                    } else {
+                      setIsCustomDesignation(false);
+                      setDesignation(e.target.value);
+                    }
+                  }}
+                  className="w-full px-3.5 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#FF5722] outline-none font-medium bg-white"
+                >
+                  {availableDesignations.map((desig) => (
+                    <option key={desig} value={desig}>
+                      {desig}
+                    </option>
+                  ))}
+                  <option value="__custom__">+ Add New Designation...</option>
+                </select>
+              )}
             </div>
           </div>
 
