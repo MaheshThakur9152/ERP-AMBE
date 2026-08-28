@@ -117,7 +117,7 @@ export async function uploadSiteDocumentApi(
   file: File,
   documentType: string,
   documentLabel?: string
-): Promise<{ success: boolean; file_name: string; gcp_file_url: string; document: SiteDocument }> {
+): Promise<{ success: boolean; file_name: string; view_url?: string; gcp_file_url: string; document: SiteDocument }> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('document_type', documentType);

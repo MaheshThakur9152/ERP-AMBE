@@ -299,7 +299,7 @@ export const DocumentsMasterPage: React.FC = () => {
                   const siteName = site.site_name || site.siteName || 'Facility Site';
                   const codeName = site.code_name || site.codeName;
                   const clientName = site.client_name || site.clientName || '—';
-                  const docUrl = doc.gcp_file_url || doc.drive_web_view_link;
+                  const docUrl = doc.view_url || doc.gcp_file_url || doc.drive_web_view_link;
                   const isDeleting = deletingId === doc.id;
 
                   return (

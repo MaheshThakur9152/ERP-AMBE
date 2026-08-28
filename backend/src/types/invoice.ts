@@ -45,6 +45,16 @@ export interface InvoiceRecord {
     legal_name?: string;
   };
   payload?: any;
+  storage_provider?: string | null;
+  storage_key?: string | null;
+  invoice_storage_provider?: string | null;
+  certified_doc_storage_key?: string | null;
+  generated_pdf_storage_key?: string | null;
+  certified_attendance_storage_key?: string | null;
+  view_url?: string | null;
+  certified_doc_view_url?: string | null;
+  generated_pdf_view_url?: string | null;
+  certified_attendance_view_url?: string | null;
   certified_doc_url?: string | null;
   certifiedDocUrl?: string | null;
   certified_attendance_url?: string | null;

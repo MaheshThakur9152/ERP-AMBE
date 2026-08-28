@@ -23,6 +23,15 @@ export interface InvoiceRecord {
   is_material?: boolean;
   code_name?: string;
   codeName?: string;
+  view_url?: string;
+  certified_doc_view_url?: string;
+  generated_pdf_view_url?: string;
+  certified_attendance_view_url?: string;
+  storage_provider?: string;
+  invoice_storage_provider?: string;
+  certified_doc_storage_key?: string;
+  generated_pdf_storage_key?: string;
+  certified_attendance_storage_key?: string;
   certified_doc_url?: string;
   certifiedDocUrl?: string;
   certified_attendance_url?: string;

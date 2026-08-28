@@ -29,7 +29,10 @@ interface EmployeeDocument {
   staff_id: string;
   document_type: string;
   file_name: string;
-  gcp_file_url: string;
+  view_url?: string;
+  gcp_file_url?: string | null;
+  storage_provider?: string | null;
+  storage_key?: string | null;
   uploaded_at: string;
   staff?: {
     employee_name?: string;
@@ -96,6 +99,16 @@ export const EmployeeDocuments: React.FC = () => {
   const fetchDocuments = async () => {
     setLoadingDocs(true);
     try {
+      const response = await fetchWithRetry('/api/documents/employee');
+      if (response.ok) {
+        const json = await response.json();
+        if (json.success && Array.isArray(json.data)) {
+          setDocuments(json.data as EmployeeDocument[]);
+          return;
+        }
+      }
+
+      // Fallback to Supabase direct query
       const { data, error } = await supabase
         .from('employee_documents')
         .select('*, staff:staff_id(employee_name, designation)')
@@ -194,7 +207,7 @@ export const EmployeeDocuments: React.FC = () => {
 
       const uploadResult = await response.json();
 
-      if (!uploadResult.gcp_file_url) {
+      if (!uploadResult.view_url && !uploadResult.gcp_file_url) {
         throw new Error('Backend did not return a valid file URL.');
       }
 
@@ -204,7 +217,7 @@ export const EmployeeDocuments: React.FC = () => {
       }
       setUploadMessage({
         type: 'success',
-        text: `Document "${uploadResult.file_name || selectedFile.name}" successfully uploaded to Google Drive!`,
+        text: `Document "${uploadResult.file_name || selectedFile.name}" successfully uploaded to secure storage!`,
       });
 
       await fetchDocuments();
@@ -522,7 +535,7 @@ export const EmployeeDocuments: React.FC = () => {
                     <td className="py-3 px-4 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <a
-                          href={doc.gcp_file_url}
+                          href={doc.view_url || doc.gcp_file_url || undefined}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="px-2.5 py-1.5 rounded-lg bg-teal-50 hover:bg-teal-100 text-[#20B2AA] border border-[#20B2AA]/30 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer"

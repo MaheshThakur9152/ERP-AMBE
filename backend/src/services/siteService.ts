@@ -3,8 +3,9 @@ import { supabaseAdmin } from '../config/supabase';
 import { Site } from '../types/site';
 import { CompanyService } from './companyService';
 import { DEFAULT_MGMT_FEE_PERCENT } from '../config/constants';
-import { GCPStorageService } from './gcpStorageService';
-import { GoogleDriveService } from './googleDriveService';
+import { OracleStorageService } from './oracleStorageService';
+import { buildSiteStorageKey } from '../utils/storageKeys';
+import { enrichDocumentsWithViewUrl, enrichDocumentWithViewUrl } from '../utils/documentViewHelper';
 import { CompressionService } from './compressionService';
 import { buildFileName } from '../utils/fileUtils';
 
@@ -321,11 +322,12 @@ export class SiteService {
       data = fallback.data;
     }
 
-    return data || [];
+    const list = data || [];
+    return enrichDocumentsWithViewUrl(list);
   }
 
   /**
-   * Upload, compress, and store a site document in GCP & Google Drive
+   * Upload, compress, and store a site document in Oracle/MinIO Storage
    */
   static async uploadSiteDocument(
     siteId: string,
@@ -336,7 +338,7 @@ export class SiteService {
   ): Promise<any> {
     await this.verifySiteOwnership(siteId, user);
 
-    // 1. Fetch site and company info for building file name
+    // 1. Fetch site and company info for building file name and storage key
     const site = await this.getSiteById(siteId, user);
     let entityCode = 'AMBE';
     if (site?.company_id || site?.companyId) {
@@ -352,8 +354,9 @@ export class SiteService {
     }
 
     const siteCodeName = site?.code_name || site?.codeName || site?.siteName || 'SITE';
+    const rawSiteName = site?.siteName || site?.codeName || siteCodeName;
 
-    // 2. Compress file
+    // 2. Compress file (unchanged)
     const compressed = await CompressionService.compressFile(file.buffer, file.mimetype);
 
     // 3. Generate uniform filename using buildFileName()
@@ -365,43 +368,33 @@ export class SiteService {
       originalName: file.originalname,
     });
 
-    // 4. Upload to GCP Storage
-    let gcpFileUrl = '';
-    try {
-      const gcpRes = await GCPStorageService.uploadSiteDocument(
-        compressed.buffer,
-        fileName,
-        compressed.mimeType,
-        siteId
-      );
-      gcpFileUrl = gcpRes.gcp_file_url;
-    } catch (gcpErr: any) {
-      console.warn('⚠️ GCP upload failed:', gcpErr?.message || gcpErr);
-    }
+    // 4. Build object storage key convention: sites/{siteName}/{timestamp}-{fileName}
+    const storageKey = buildSiteStorageKey({
+      siteName: rawSiteName,
+      fileName,
+    });
 
-    // 5. Upload copy to Google Drive backup
-    let driveResult: { id?: string; name?: string; webViewLink?: string } | null = null;
-    try {
-      driveResult = await GoogleDriveService.uploadSiteDocumentFile({
-        fileBuffer: compressed.buffer,
-        fileName,
-        mimeType: compressed.mimeType,
-        siteName: site?.siteName,
-      });
-    } catch (driveErr: any) {
-      console.warn('⚠️ Google Drive backup upload failed:', driveErr?.message || driveErr);
-    }
+    // 5. Upload to Oracle/MinIO Storage
+    const storageResult = await OracleStorageService.uploadFile(
+      compressed.buffer,
+      storageKey,
+      compressed.mimeType
+    );
 
-    // 6. Insert metadata into public.site_documents
+    // 6. Generate signed read URL for immediate client preview
+    const viewUrl = await OracleStorageService.getSignedReadUrl(storageResult.storageKey);
+
+    // 7. Insert metadata into public.site_documents with storage_provider: 'minio' and storage_key
     const uploadedAt = new Date().toISOString();
-    const finalFileUrl = gcpFileUrl || driveResult?.webViewLink || '';
 
     const insertPayload: any = {
       site_id: siteId,
       document_type: documentType || 'Document',
       document_label: documentLabel || null,
       file_name: fileName,
-      gcp_file_url: finalFileUrl,
+      storage_provider: 'minio',
+      storage_key: storageResult.storageKey,
+      gcp_file_url: null,
       uploaded_at: uploadedAt,
     };
 
@@ -418,13 +411,17 @@ export class SiteService {
     }
 
     insertedRow = insertedData;
+    const enrichedRow = await enrichDocumentWithViewUrl(insertedRow || insertPayload);
 
     return {
       success: true,
       file_name: fileName,
-      gcp_file_url: finalFileUrl,
-      drive_web_view_link: driveResult?.webViewLink || null,
-      document: insertedRow,
+      storage_key: storageResult.storageKey,
+      storage_provider: 'minio',
+      view_url: viewUrl,
+      gcp_file_url: viewUrl, // Fallback compatibility
+      drive_web_view_link: null,
+      document: enrichedRow,
     };
   }
 }

@@ -161,12 +161,12 @@ export const InvoiceTracker: React.FC = () => {
       }
 
       const json = await res.json();
-      const docUrl = json.webViewLink || json.gcp_file_url || json.certified_doc_url;
+      const docUrl = json.view_url || json.webViewLink || json.gcp_file_url || json.certified_doc_url;
 
       setInvoices((prev) =>
         prev.map((item) =>
           item.id === inv.id
-            ? { ...item, certified_doc_url: docUrl, certifiedDocUrl: docUrl }
+            ? { ...item, certified_doc_url: docUrl, certifiedDocUrl: docUrl, certified_doc_view_url: docUrl }
             : item
         )
       );
@@ -201,12 +201,12 @@ export const InvoiceTracker: React.FC = () => {
       }
 
       const json = await res.json();
-      const attUrl = json.webViewLink || json.gcp_file_url || json.certified_attendance_url || json.certified_doc_url;
+      const attUrl = json.view_url || json.webViewLink || json.gcp_file_url || json.certified_attendance_url || json.certified_doc_url;
 
       setInvoices((prev) =>
         prev.map((item) =>
           item.id === inv.id
-            ? { ...item, certified_attendance_url: attUrl, certifiedAttendanceUrl: attUrl }
+            ? { ...item, certified_attendance_url: attUrl, certifiedAttendanceUrl: attUrl, certified_attendance_view_url: attUrl }
             : item
         )
       );
@@ -305,9 +305,9 @@ export const InvoiceTracker: React.FC = () => {
                 {group.invoices.map((inv) => {
                   const isProforma = inv.type === 'Proforma Invoice';
                   const isCancelled = inv.status === 'Cancelled';
-                  const genPdf = inv.generated_pdf_url || inv.generatedPdfUrl || (inv as any).generated_pdf_url || (inv as any).generatedPdfUrl;
-                  const certDoc = inv.certified_doc_url || inv.certifiedDocUrl || (inv as any).certified_doc_url || (inv as any).certifiedDocUrl;
-                  const certAtt = inv.certified_attendance_url || inv.certifiedAttendanceUrl || (inv as any).certified_attendance_url || (inv as any).certifiedAttendanceUrl;
+                  const genPdf = inv.generated_pdf_view_url || inv.generated_pdf_url || inv.generatedPdfUrl || (inv as any).view_url;
+                  const certDoc = inv.certified_doc_view_url || inv.certified_doc_url || inv.certifiedDocUrl || (inv as any).view_url;
+                  const certAtt = inv.certified_attendance_view_url || inv.certified_attendance_url || inv.certifiedAttendanceUrl;
 
                   return (
                     <div

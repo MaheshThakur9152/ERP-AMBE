@@ -7,6 +7,7 @@ import { InvoiceSequenceService } from './invoiceSequenceService';
 import { env } from '../config/env';
 import { DEFAULT_MGMT_FEE_PERCENT } from '../config/constants';
 import { AuthUser } from '../types/express';
+import { enrichInvoicesWithViewUrls, enrichInvoiceWithViewUrls } from '../utils/documentViewHelper';
 
 const InvoiceRowSchema = z.object({
   id: z.string().optional().nullable(),
@@ -195,6 +196,13 @@ export function mapRowToInvoiceRecord(rawRow: any): InvoiceRecord {
     is_material: row.is_material || row.payload?.isMaterial || false,
     is_locked: row.is_locked ?? false,
     isLocked: row.is_locked ?? false,
+    storage_provider: (row.storage_provider || row.storageProvider) ? String(row.storage_provider || row.storageProvider) : null,
+    storage_key: (row.storage_key || row.storageKey) ? String(row.storage_key || row.storageKey) : null,
+    invoice_storage_provider: (row.invoice_storage_provider || row.invoiceStorageProvider) ? String(row.invoice_storage_provider || row.invoiceStorageProvider) : null,
+    certified_doc_storage_key: (row.certified_doc_storage_key || row.certifiedDocStorageKey) ? String(row.certified_doc_storage_key || row.certifiedDocStorageKey) : null,
+    generated_pdf_storage_key: (row.generated_pdf_storage_key || row.generatedPdfStorageKey) ? String(row.generated_pdf_storage_key || row.generatedPdfStorageKey) : null,
+    certified_attendance_storage_key: (row.certified_attendance_storage_key || row.certifiedAttendanceStorageKey) ? String(row.certified_attendance_storage_key || row.certifiedAttendanceStorageKey) : null,
+    view_url: (row.view_url || row.viewUrl || row.certified_doc_url || row.certifiedDocUrl || row.generated_pdf_url || row.generatedPdfUrl || row.certified_attendance_url || row.certifiedAttendanceUrl) ? String(row.view_url || row.viewUrl || row.certified_doc_url || row.certifiedDocUrl || row.generated_pdf_url || row.generatedPdfUrl || row.certified_attendance_url || row.certifiedAttendanceUrl) : null,
     certified_doc_url: (row.certified_doc_url || row.certifiedDocUrl || row.payload?.certified_doc_url || row.payload?.certifiedDocUrl) ? String(row.certified_doc_url || row.certifiedDocUrl || row.payload?.certified_doc_url || row.payload?.certifiedDocUrl) : null,
     certifiedDocUrl: (row.certified_doc_url || row.certifiedDocUrl || row.payload?.certified_doc_url || row.payload?.certifiedDocUrl) ? String(row.certified_doc_url || row.certifiedDocUrl || row.payload?.certified_doc_url || row.payload?.certifiedDocUrl) : null,
     certified_attendance_url: (row.certified_attendance_url || row.certifiedAttendanceUrl || row.payload?.certified_attendance_url || row.payload?.certifiedAttendanceUrl) ? String(row.certified_attendance_url || row.certifiedAttendanceUrl || row.payload?.certified_attendance_url || row.payload?.certifiedAttendanceUrl) : null,
@@ -233,7 +241,7 @@ export class InvoiceQueryService {
         return [];
       }
 
-      return (data || [])
+      const mapped = (data || [])
         .map((row: any) => {
           try {
             return mapRowToInvoiceRecord(row);
@@ -246,6 +254,8 @@ export class InvoiceQueryService {
           }
         })
         .filter(Boolean) as InvoiceRecord[];
+
+      return await enrichInvoicesWithViewUrls(mapped);
     } catch (err: any) {
       console.error('getAllInvoices Error:', err);
       return [];
@@ -403,7 +413,7 @@ export class InvoiceQueryService {
       await InvoiceSequenceService.incrementSequence(companyId, insertRow.type);
     }
 
-    return mapRowToInvoiceRecord(data);
+    return await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(data));
   }
 
   /**
@@ -522,7 +532,7 @@ export class InvoiceQueryService {
       }
     }
 
-    return mapRowToInvoiceRecord(data);
+    return await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(data));
   }
 
   /**
@@ -553,7 +563,7 @@ export class InvoiceQueryService {
       throw new Error(`Invoice cancellation failed: ${error.message}`);
     }
 
-    return mapRowToInvoiceRecord(data);
+    return await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(data));
   }
 
   /**
@@ -576,6 +586,6 @@ export class InvoiceQueryService {
     }
 
     console.warn(`[invoice:lock:update:success] invoice_id=${id} db_is_locked=${data?.is_locked} updated_at=${data?.updated_at}`);
-    return mapRowToInvoiceRecord(data);
+    return await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(data));
   }
 }

@@ -316,12 +316,12 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
       }
 
       const result = await response.json();
-      const docUrl = result.webViewLink || result.gcp_file_url || result.certified_doc_url;
+      const docUrl = result.view_url || result.webViewLink || result.gcp_file_url || result.certified_doc_url;
 
       setInvoices((prev) =>
         prev.map((item) =>
           item.id === inv.id
-            ? { ...item, certified_doc_url: docUrl, certifiedDocUrl: docUrl }
+            ? { ...item, certified_doc_url: docUrl, certifiedDocUrl: docUrl, certified_doc_view_url: docUrl }
             : item
         )
       );
@@ -381,7 +381,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
       }
 
       const uploadResult = await uploadRes.json();
-      const driveUrl = uploadResult.webViewLink || uploadResult.gcp_file_url || uploadResult.certified_doc_url;
+      const driveUrl = uploadResult.view_url || uploadResult.webViewLink || uploadResult.gcp_file_url || uploadResult.certified_doc_url;
 
       // 2. Insert into Supabase (invoices table)
       const numericAmount = Number(legacyAmount) || 0;
@@ -1101,9 +1101,9 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                             </>
                           )}
                           {/* Certified Invoice Attachment UI (Paperclip vs Eye) */}
-                          {inv.certified_doc_url || inv.certifiedDocUrl || (inv as any).certified_doc_url ? (
+                          {inv.certified_doc_view_url || inv.certified_doc_url || inv.certifiedDocUrl || (inv as any).view_url ? (
                             <a
-                              href={inv.certified_doc_url || inv.certifiedDocUrl || (inv as any).certified_doc_url}
+                              href={inv.certified_doc_view_url || inv.certified_doc_url || inv.certifiedDocUrl || (inv as any).view_url}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-teal-600 hover:text-teal-800 transition-colors p-1"

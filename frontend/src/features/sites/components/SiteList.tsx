@@ -47,7 +47,7 @@ export const SiteList: React.FC<SiteListProps> = ({
         try {
           const docs = await fetchSiteDocumentsApi(s.id);
           const wo = docs.find((d) => d.document_type === 'Work Order');
-          const url = wo?.gcp_file_url || wo?.drive_web_view_link;
+          const url = wo?.view_url || wo?.gcp_file_url || wo?.drive_web_view_link;
           return { siteId: s.id, url };
         } catch {
           return { siteId: s.id, url: undefined };

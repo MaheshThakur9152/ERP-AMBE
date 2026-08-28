@@ -271,7 +271,7 @@ export const SiteDocumentsTab: React.FC<SiteDocumentsTabProps> = ({ siteId, site
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {documents.map((doc) => {
-                  const docUrl = doc.gcp_file_url || doc.drive_web_view_link;
+                  const docUrl = doc.view_url || doc.gcp_file_url || doc.drive_web_view_link;
                   return (
                     <tr key={doc.id} className="hover:bg-slate-50/70 transition-colors">
                       <td className="py-3 px-4 font-semibold text-gray-900">

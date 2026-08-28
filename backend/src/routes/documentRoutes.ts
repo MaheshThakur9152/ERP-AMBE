@@ -6,6 +6,7 @@ import {
   uploadCompanyInvoiceDocument,
   uploadInvoiceDirect,
   getAllSiteDocuments,
+  getEmployeeDocuments,
   uploadSiteDocumentGlobal,
   deleteSiteDocument,
 } from '../controllers/documentController';
@@ -144,6 +145,9 @@ router.post(
   validateAndNormalizeInvoiceDirectUpload,
   uploadInvoiceDirect
 );
+
+// Employee documents routes
+router.get('/employee', requireAuth, getEmployeeDocuments);
 
 // Site documents global management routes
 router.get('/', requireAuth, getAllSiteDocuments);

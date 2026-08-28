@@ -1,9 +1,19 @@
 import { Request, Response } from 'express';
-import { GoogleDriveService } from '../services/googleDriveService';
 import { supabaseAdmin } from '../config/supabase';
 import { SiteService } from '../services/siteService';
+import { CompressionService } from '../services/compressionService';
+import { OracleStorageService } from '../services/oracleStorageService';
+import {
+  buildEmployeeStorageKey,
+  buildInvoiceStorageKey,
+} from '../utils/storageKeys';
+import {
+  enrichDocumentsWithViewUrl,
+  enrichDocumentWithViewUrl,
+  getDocumentViewUrl,
+} from '../utils/documentViewHelper';
 import path from 'path';
-import { buildFileName, buildInvoiceFileName, sanitizeSegment } from '../utils/fileUtils';
+import { buildInvoiceFileName, sanitizeSegment } from '../utils/fileUtils';
 
 function sanitizeFileName(name?: string): string {
   if (!name) return 'document';
@@ -37,7 +47,7 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
     if (!employeeName && supabaseAdmin) {
       const { data: staffData } = await supabaseAdmin
         .from('staff')
-        .select('employee_name')
+        .select('employee_name, designation')
         .eq('id', staffId)
         .maybeSingle();
 
@@ -50,18 +60,28 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
       employeeName = `Staff_${staffId.slice(0, 8)}`;
     }
 
-    // 1. Upload to Google Drive
-    const driveResult = await GoogleDriveService.uploadEmployeeDocument({
-      fileBuffer: file.buffer,
-      originalName: safeOriginalName,
-      mimeType: file.mimetype,
-      employeeName,
-      docType,
+    // 1. Run file compression unchanged before storage call
+    const compressed = await CompressionService.compressFile(file.buffer, file.mimetype);
+
+    // 2. Build storage key matching convention: employees/{siteName}/{designation}/{employeeName}/{timestamp}-{fileName}
+    const storageKey = buildEmployeeStorageKey({
       siteName,
       designation,
+      employeeName,
+      fileName: safeOriginalName,
     });
 
-    // 2. Save metadata to Supabase employee_documents table
+    // 3. Upload to MinIO / Oracle Object Storage
+    const storageResult = await OracleStorageService.uploadFile(
+      compressed.buffer,
+      storageKey,
+      compressed.mimeType
+    );
+
+    // 4. Generate signed read URL for immediate client preview
+    const viewUrl = await OracleStorageService.getSignedReadUrl(storageResult.storageKey);
+
+    // 5. Save metadata to Supabase employee_documents table
     let insertedDoc = null;
     if (supabaseAdmin) {
       const { data: insertedData, error: dbError } = await supabaseAdmin
@@ -70,8 +90,10 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
           {
             staff_id: staffId,
             document_type: docType,
-            file_name: driveResult.name,
-            gcp_file_url: driveResult.webViewLink,
+            file_name: safeOriginalName,
+            storage_provider: 'minio',
+            storage_key: storageResult.storageKey,
+            gcp_file_url: null,
           },
         ])
         .select(`
@@ -79,6 +101,8 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
           staff_id,
           document_type,
           file_name,
+          storage_provider,
+          storage_key,
           gcp_file_url,
           uploaded_at,
           staff:staff_id (id, employee_name, biometric_code, designation)
@@ -88,24 +112,28 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
       if (dbError) {
         console.error('❌ Supabase insert error:', dbError);
         res.status(500).json({
-          error: 'Uploaded to Drive, but failed to insert metadata',
+          error: 'Uploaded to storage, but failed to insert metadata',
           ...(process.env.NODE_ENV === 'development' && { details: dbError.message }),
-          gcp_file_url: driveResult.webViewLink,
-          file_name: driveResult.name,
+          view_url: viewUrl,
+          gcp_file_url: viewUrl,
+          file_name: safeOriginalName,
         });
         return;
       }
-      insertedDoc = insertedData;
+      insertedDoc = insertedData ? await enrichDocumentWithViewUrl(insertedData) : null;
     }
 
     res.status(200).json({
       success: true,
-      gcp_file_url: driveResult.webViewLink,
-      file_name: driveResult.name,
+      view_url: viewUrl,
+      gcp_file_url: viewUrl, // Backward compatibility
+      file_name: safeOriginalName,
+      storage_key: storageResult.storageKey,
+      storage_provider: 'minio',
       document: insertedDoc,
     });
   } catch (error: any) {
-    console.error("Google Drive Upload Error:", error.response?.data || error.message || error);
+    console.error("Document Upload Error:", error.response?.data || error.message || error);
     res.status(500).json({ error: 'Failed to upload', ...(process.env.NODE_ENV === 'development' && { details: error.message }) });
   }
 };
@@ -127,58 +155,72 @@ export const uploadCompanyInvoiceDocument = async (req: Request, res: Response):
 
     const generatedName = sanitizeFileName(rawGeneratedName);
     const safeOriginalName = sanitizeFileName(file.originalname);
+    const effectiveFileName = generatedName || safeOriginalName;
 
-    // 1. Upload to Google Drive
-    const driveResult = await GoogleDriveService.uploadCompanyDocument({
-      fileBuffer: file.buffer,
-      originalName: safeOriginalName,
-      mimeType: file.mimetype,
-      generatedName,
+    // 1. Run file compression unchanged before storage call
+    const compressed = await CompressionService.compressFile(file.buffer, file.mimetype);
+
+    // 2. Build storage key matching convention: invoices/{entity}/{year}/{month}/{timestamp}-{fileName}
+    const storageKey = buildInvoiceStorageKey({
       entity,
       year,
       month,
+      fileName: effectiveFileName,
     });
 
-    // 2. Save metadata to Supabase company_documents table
+    // 3. Upload to MinIO / Oracle Object Storage
+    const storageResult = await OracleStorageService.uploadFile(
+      compressed.buffer,
+      storageKey,
+      compressed.mimeType
+    );
+
+    // 4. Generate signed read URL
+    const viewUrl = await OracleStorageService.getSignedReadUrl(storageResult.storageKey);
+
+    // 5. Save metadata to Supabase company_documents table if present
     let insertedDoc = null;
     if (supabaseAdmin) {
-      const { data: insertedData, error: dbError } = await supabaseAdmin
-        .from('company_documents')
-        .insert([
-          {
-            entity,
-            doc_type: docType,
-            month,
-            year,
-            site_name: siteName,
-            file_name: driveResult.name,
-            gcp_file_url: driveResult.webViewLink,
-          },
-        ])
-        .select()
-        .single();
+      try {
+        const { data: insertedData, error: dbError } = await supabaseAdmin
+          .from('company_documents')
+          .insert([
+            {
+              entity,
+              doc_type: docType,
+              month,
+              year,
+              site_name: siteName,
+              file_name: effectiveFileName,
+              storage_provider: 'minio',
+              storage_key: storageResult.storageKey,
+              gcp_file_url: null,
+            },
+          ])
+          .select()
+          .single();
 
-      if (dbError) {
-        console.error('❌ Supabase insert error:', dbError);
-        res.status(500).json({
-          error: 'Uploaded to Drive, but failed to insert metadata',
-          ...(process.env.NODE_ENV === 'development' && { details: dbError.message }),
-          gcp_file_url: driveResult.webViewLink,
-          file_name: driveResult.name,
-        });
-        return;
+        if (dbError) {
+          console.warn('ℹ️ company_documents insert skipped or table absent:', dbError.message);
+        } else {
+          insertedDoc = insertedData ? await enrichDocumentWithViewUrl(insertedData) : null;
+        }
+      } catch (err: any) {
+        console.warn('ℹ️ company_documents table handling:', err?.message);
       }
-      insertedDoc = insertedData;
     }
 
     res.status(200).json({
       success: true,
-      gcp_file_url: driveResult.webViewLink,
-      file_name: driveResult.name,
+      view_url: viewUrl,
+      gcp_file_url: viewUrl, // Backward compatibility
+      file_name: effectiveFileName,
+      storage_key: storageResult.storageKey,
+      storage_provider: 'minio',
       document: insertedDoc,
     });
   } catch (error: any) {
-    console.error("Google Drive Invoice Upload Error:", error.response?.data || error.message || error);
+    console.error("Invoice Document Upload Error:", error.response?.data || error.message || error);
     res.status(500).json({ error: 'Failed to upload invoice document', ...(process.env.NODE_ENV === 'development' && { details: error.message }) });
   }
 };
@@ -229,24 +271,38 @@ export const uploadInvoiceDirect = async (req: Request, res: Response): Promise<
       fileName = buildInvoiceFileName(invoiceNo, category, path.extname(file.originalname));
     }
 
-    // Direct single-folder upload for max speed using process.env.DRIVE_INVOICE_FOLDER_ID
-    const driveResult = await GoogleDriveService.uploadSingleFolderFile({
-      fileBuffer: file.buffer,
+    // 1. Run file compression unchanged before storage call
+    const compressed = await CompressionService.compressFile(file.buffer, file.mimetype);
+
+    // 2. Build storage key matching convention: invoices/{entity}/{year}/{month}/{timestamp}-{fileName}
+    const storageKey = buildInvoiceStorageKey({
+      entity: 'Invoices',
+      year: new Date().getFullYear(),
+      month: String(new Date().getMonth() + 1).padStart(2, '0'),
       fileName,
-      mimeType: file.mimetype,
     });
 
-    const webViewLink = driveResult.webViewLink;
+    // 3. Upload to MinIO / Oracle Object Storage
+    const storageResult = await OracleStorageService.uploadFile(
+      compressed.buffer,
+      storageKey,
+      compressed.mimeType
+    );
 
-    // Save link to Supabase using supabaseAdmin if invoiceId provided
+    // 4. Generate signed read URL
+    const viewUrl = await OracleStorageService.getSignedReadUrl(storageResult.storageKey);
+
+    // 5. Save storage key and provider to Supabase invoices table
     if (invoiceId && supabaseAdmin) {
-      let updateData: any = {};
+      let updateData: any = {
+        invoice_storage_provider: 'minio',
+      };
       if (isAttendance) {
-        updateData = { certified_attendance_url: webViewLink };
+        updateData.certified_attendance_storage_key = storageResult.storageKey;
       } else if (isGenerated) {
-        updateData = { generated_pdf_url: webViewLink };
+        updateData.generated_pdf_storage_key = storageResult.storageKey;
       } else {
-        updateData = { certified_doc_url: webViewLink };
+        updateData.certified_doc_storage_key = storageResult.storageKey;
       }
 
       const { error: dbError } = await supabaseAdmin
@@ -261,12 +317,15 @@ export const uploadInvoiceDirect = async (req: Request, res: Response): Promise<
 
     res.status(200).json({
       success: true,
-      webViewLink,
-      file_name: driveResult.name,
-      gcp_file_url: webViewLink,
-      generated_pdf_url: isGenerated ? webViewLink : undefined,
-      certified_doc_url: (!isAttendance && !isGenerated) ? webViewLink : undefined,
-      certified_attendance_url: isAttendance ? webViewLink : undefined,
+      view_url: viewUrl,
+      webViewLink: viewUrl,
+      file_name: fileName,
+      storage_key: storageResult.storageKey,
+      storage_provider: 'minio',
+      gcp_file_url: viewUrl,
+      generated_pdf_url: isGenerated ? viewUrl : undefined,
+      certified_doc_url: (!isAttendance && !isGenerated) ? viewUrl : undefined,
+      certified_attendance_url: isAttendance ? viewUrl : undefined,
     });
   } catch (error: any) {
     console.error('Direct Invoice Upload Error:', error.response?.data || error.message || error);
@@ -302,7 +361,8 @@ export const getAllSiteDocuments = async (req: Request, res: Response): Promise<
       if (fallback.error) {
         throw new Error(fallback.error.message);
       }
-      res.status(200).json({ success: true, data: fallback.data || [] });
+      const enrichedFallback = await enrichDocumentsWithViewUrl(fallback.data || []);
+      res.status(200).json({ success: true, data: enrichedFallback });
       return;
     }
 
@@ -333,10 +393,36 @@ export const getAllSiteDocuments = async (req: Request, res: Response): Promise<
       });
     }
 
-    res.status(200).json({ success: true, data: filtered });
+    const enriched = await enrichDocumentsWithViewUrl(filtered);
+    res.status(200).json({ success: true, data: enriched });
   } catch (error: any) {
     console.error('GET /api/documents Error:', error);
     res.status(500).json({ error: 'Failed to fetch documents', details: error?.message });
+  }
+};
+
+export const getEmployeeDocuments = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { staff_id } = req.query;
+    let query = supabaseAdmin
+      .from('employee_documents')
+      .select('*, staff:staff_id(id, employee_name, biometric_code, designation)')
+      .order('uploaded_at', { ascending: false });
+
+    if (staff_id && typeof staff_id === 'string' && staff_id.trim()) {
+      query = query.eq('staff_id', staff_id.trim());
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const enriched = await enrichDocumentsWithViewUrl(data || []);
+    res.status(200).json({ success: true, data: enriched });
+  } catch (error: any) {
+    console.error('GET /api/documents/employee Error:', error);
+    res.status(500).json({ error: 'Failed to fetch employee documents', details: error?.message });
   }
 };
 

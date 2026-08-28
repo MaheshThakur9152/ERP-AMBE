@@ -26,7 +26,10 @@ interface CompanyDocument {
   year: string;
   site_name: string;
   file_name: string;
-  gcp_file_url: string;
+  view_url?: string;
+  gcp_file_url?: string;
+  storage_provider?: string;
+  storage_key?: string;
   created_at: string;
 }
 
@@ -601,7 +604,7 @@ export const InvoiceVault: React.FC = () => {
                     <td className="py-3 px-4 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <a
-                          href={doc.gcp_file_url}
+                          href={doc.view_url || doc.gcp_file_url}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="px-2.5 py-1.5 rounded-lg bg-teal-50 hover:bg-teal-100 text-[#20B2AA] border border-[#20B2AA]/30 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer"

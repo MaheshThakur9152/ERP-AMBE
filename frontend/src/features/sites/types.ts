@@ -60,7 +60,10 @@ export interface SiteDocument {
   document_type: string;
   document_label?: string | null;
   file_name: string;
+  view_url?: string | null;
   gcp_file_url?: string | null;
+  storage_provider?: string | null;
+  storage_key?: string | null;
   drive_file_id?: string | null;
   drive_web_view_link?: string | null;
   file_size?: number | null;

@@ -21,4 +21,21 @@ export const env = {
   GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET || '',
   GOOGLE_REFRESH_TOKEN: process.env.GOOGLE_REFRESH_TOKEN || '',
   GOOGLE_REDIRECT_URI: process.env.GOOGLE_REDIRECT_URI || 'https://developers.google.com/oauthplayground',
+  MINIO_ENDPOINT: process.env.MINIO_ENDPOINT || '',
+  MINIO_ACCESS_KEY: process.env.MINIO_ACCESS_KEY || '',
+  MINIO_SECRET_KEY: process.env.MINIO_SECRET_KEY || '',
+  MINIO_BUCKET: process.env.MINIO_BUCKET || 'ambeuploads',
 };
+
+export function validateMinioEnv(): void {
+  const missing: string[] = [];
+  if (!env.MINIO_ENDPOINT) missing.push('MINIO_ENDPOINT');
+  if (!env.MINIO_ACCESS_KEY) missing.push('MINIO_ACCESS_KEY');
+  if (!env.MINIO_SECRET_KEY) missing.push('MINIO_SECRET_KEY');
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required MinIO/Oracle storage environment variables: ${missing.join(', ')}. Please set them in your .env file.`
+    );
+  }
+}

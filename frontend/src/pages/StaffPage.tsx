@@ -96,7 +96,7 @@ interface StaffMember {
   payee_name?: string;
   payeeName?: string;
   documents?: StaffDocument[];
-  employee_documents?: { id: string; document_type?: string; gcp_file_url?: string; file_name?: string }[];
+  employee_documents?: { id: string; document_type?: string; gcp_file_url?: string; view_url?: string; file_name?: string }[];
 }
 
 export const StaffPage: React.FC = () => {
@@ -196,6 +196,15 @@ export const StaffPage: React.FC = () => {
 
   const fetchDocsForStaff = async (staffId: string) => {
     try {
+      const response = await fetch(`/api/documents/employee?staff_id=${encodeURIComponent(staffId)}`);
+      if (response.ok) {
+        const json = await response.json();
+        if (json.success && Array.isArray(json.data)) {
+          setStaffDocs(json.data);
+          return;
+        }
+      }
+
       const { data, error } = await supabase
         .from('employee_documents')
         .select('*')
@@ -1148,7 +1157,7 @@ export const StaffPage: React.FC = () => {
                       return (
                         <div className="flex items-center gap-2 p-2.5 border border-teal-200 rounded-xl bg-teal-50/50">
                           <a
-                            href={aadhaarDoc.gcp_file_url}
+                            href={aadhaarDoc.view_url || aadhaarDoc.gcp_file_url}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="flex-1 text-center text-xs font-bold text-teal-700 hover:text-teal-900 truncate"
@@ -1209,7 +1218,7 @@ export const StaffPage: React.FC = () => {
                       return (
                         <div className="flex items-center gap-2 p-2.5 border border-indigo-200 rounded-xl bg-indigo-50/50">
                           <a
-                            href={panDoc.gcp_file_url}
+                            href={panDoc.view_url || panDoc.gcp_file_url}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="flex-1 text-center text-xs font-bold text-indigo-700 hover:text-indigo-900 truncate"
@@ -1270,7 +1279,7 @@ export const StaffPage: React.FC = () => {
                       return (
                         <div className="flex items-center gap-2 p-2.5 border border-purple-200 rounded-xl bg-purple-50/50">
                           <a
-                            href={bankDoc.gcp_file_url}
+                            href={bankDoc.view_url || bankDoc.gcp_file_url}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="flex-1 text-center text-xs font-bold text-purple-700 hover:text-purple-900 truncate"
@@ -1331,7 +1340,7 @@ export const StaffPage: React.FC = () => {
                       return (
                         <div className="flex items-center gap-2 p-2.5 border border-amber-200 rounded-xl bg-amber-50/50">
                           <a
-                            href={uanDoc.gcp_file_url}
+                            href={uanDoc.view_url || uanDoc.gcp_file_url}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="flex-1 text-center text-xs font-bold text-amber-700 hover:text-amber-900 truncate"
@@ -1392,7 +1401,7 @@ export const StaffPage: React.FC = () => {
                       return (
                         <div className="flex items-center gap-2 p-2.5 border border-orange-200 rounded-xl bg-orange-50/50">
                           <a
-                            href={esicDoc.gcp_file_url}
+                            href={esicDoc.view_url || esicDoc.gcp_file_url}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="flex-1 text-center text-xs font-bold text-orange-700 hover:text-orange-900 truncate"
@@ -1467,7 +1476,7 @@ export const StaffPage: React.FC = () => {
                             </span>
                           </div>
                           <a
-                            href={doc.gcp_file_url}
+                            href={doc.view_url || doc.gcp_file_url}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-[11px] font-bold text-teal-600 hover:text-teal-800 flex items-center gap-1 ml-2 flex-shrink-0"
@@ -1535,7 +1544,7 @@ export const StaffPage: React.FC = () => {
 
                     {uploadedDoc ? (
                       <a
-                        href={uploadedDoc.gcp_file_url}
+                        href={uploadedDoc.view_url || uploadedDoc.gcp_file_url}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="px-3 py-1.5 text-xs font-bold text-teal-700 bg-teal-50 border border-teal-200 rounded-lg hover:bg-teal-100 flex items-center gap-1.5 transition-colors cursor-pointer"
