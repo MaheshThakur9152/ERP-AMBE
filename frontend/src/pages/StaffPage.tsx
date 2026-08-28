@@ -198,7 +198,7 @@ export const StaffPage: React.FC = () => {
 
   const fetchDocsForStaff = async (staffId: string) => {
     try {
-      const response = await fetch(`/api/documents/employee?staff_id=${encodeURIComponent(staffId)}`);
+      const response = await fetchWithRetry(`/api/documents/employee?staff_id=${encodeURIComponent(staffId)}`);
       if (response.ok) {
         const json = await response.json();
         if (json.success && Array.isArray(json.data)) {
@@ -742,7 +742,7 @@ export const StaffPage: React.FC = () => {
                               setViewerStaffName(name);
                               // Fetch latest documents for this staff member via backend endpoint
                               try {
-                                const response = await fetch(`/api/documents/employee?staff_id=${encodeURIComponent(staff.id)}`);
+                                const response = await fetchWithRetry(`/api/documents/employee?staff_id=${encodeURIComponent(staff.id)}`);
                                 if (response.ok) {
                                   const json = await response.json();
                                   if (json.success && Array.isArray(json.data)) {

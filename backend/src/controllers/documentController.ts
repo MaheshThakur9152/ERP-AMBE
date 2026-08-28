@@ -631,20 +631,32 @@ export const viewDocumentProxy = async (req: Request, res: Response): Promise<vo
       else if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
       else if (ext === '.webp') contentType = 'image/webp';
 
-      res.setHeader('Content-Type', contentType);
-      res.setHeader('Content-Disposition', `inline; filename="${path.basename(fileName)}"`);
-      if (obj.contentLength) {
-        res.setHeader('Content-Length', obj.contentLength);
+      let buffer: Buffer;
+      if (obj.body && typeof obj.body.transformToByteArray === 'function') {
+        const bytes = await obj.body.transformToByteArray();
+        buffer = Buffer.from(bytes);
+      } else if (Buffer.isBuffer(obj.body)) {
+        buffer = obj.body;
+      } else if (obj.body && typeof (obj.body as any).toArray === 'function') {
+        const chunks = await (obj.body as any).toArray();
+        buffer = Buffer.concat(chunks);
+      } else if (obj.body && typeof obj.body[Symbol.asyncIterator] === 'function') {
+        const chunks: Uint8Array[] = [];
+        for await (const chunk of obj.body) {
+          chunks.push(chunk);
+        }
+        buffer = Buffer.concat(chunks);
+      } else {
+        buffer = Buffer.from(obj.body || '');
       }
 
-      if (obj.body && typeof obj.body.pipe === 'function') {
-        obj.body.pipe(res);
-      } else if (obj.body && typeof obj.body.transformToByteArray === 'function') {
-        const bytes = await obj.body.transformToByteArray();
-        res.end(Buffer.from(bytes));
-      } else {
-        res.end(obj.body);
-      }
+      console.warn(`[viewDocumentProxy] Key: ${storageKey}, mime: ${contentType}, length: ${buffer.length} bytes`);
+
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `inline; filename="${path.basename(fileName)}"`);
+      res.setHeader('Content-Length', buffer.length);
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.end(buffer);
       return;
     }
 

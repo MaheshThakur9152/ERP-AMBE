@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, ExternalLink, Loader2, AlertCircle, FileText, Download } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { getApiUrl } from '@/lib/apiClient';
 
 export interface DocumentViewerModalProps {
   isOpen: boolean;
@@ -25,7 +26,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
   const [isImageType, setIsImageType] = useState<boolean>(false);
 
   // Compute primary target URL
-  const targetUrl = documentId ? `/api/documents/${documentId}/view` : url || '';
+  const targetUrl = documentId ? getApiUrl(`/api/documents/${documentId}/view`) : url || '';
 
   useEffect(() => {
     let active = true;
@@ -53,7 +54,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
 
         // Fetch document stream from backend or URL
         const fetchUrl = (documentId && token)
-          ? `/api/documents/${documentId}/view?token=${encodeURIComponent(token)}`
+          ? getApiUrl(`/api/documents/${documentId}/view?token=${encodeURIComponent(token)}`)
           : targetUrl;
 
         const res = await fetch(fetchUrl, {
