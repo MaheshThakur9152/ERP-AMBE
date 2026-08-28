@@ -49,6 +49,78 @@ export const isMatchingDocType = (docType?: string | null, category?: string | n
   return cleanDoc === cleanCat;
 };
 
+export interface StaffKycStatus {
+  hasAadhaar: boolean;
+  hasPan: boolean;
+  hasUan: boolean;
+  hasEsic: boolean;
+  hasUanDoc: boolean;
+  hasUanNumber: boolean;
+  hasEsicDoc: boolean;
+  hasEsicNumber: boolean;
+  hasAadhaarDoc: boolean;
+  hasAadhaarNumber: boolean;
+  hasPanDoc: boolean;
+  hasPanNumber: boolean;
+  missingUanNumberPrompt: boolean;
+  missingEsicNumberPrompt: boolean;
+  docCount: number;
+}
+
+export const computeStaffKycStatus = (staff: StaffMember): StaffKycStatus => {
+  const docs = staff.employee_documents || (staff as any).documents || [];
+
+  const hasAadhaarDoc = docs.some((d: any) =>
+    isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'Aadhaar Card')
+  );
+  const hasAadhaarNumber = Boolean((staff.aadharNo || staff.aadhar_no || '').trim());
+  const hasAadhaar = hasAadhaarDoc || hasAadhaarNumber;
+
+  const hasPanDoc = docs.some((d: any) =>
+    isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'PAN Card')
+  );
+  const hasPanNumber = Boolean((staff.panNo || staff.pan_no || '').trim());
+  const hasPan = hasPanDoc || hasPanNumber;
+
+  const hasUanDoc = docs.some((d: any) =>
+    isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'UAN Card')
+  );
+  const hasUanNumber = Boolean((staff.uan_no || '').trim());
+  const hasUan = hasUanDoc || hasUanNumber;
+
+  const hasEsicDoc = docs.some((d: any) =>
+    isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'ESIC Card')
+  );
+  const hasEsicNumber = Boolean((staff.esic_no || '').trim());
+  const hasEsic = hasEsicDoc || hasEsicNumber;
+
+  console.debug(
+    `[KYCStatus] staff=${staff.id} (${staff.employee_name || staff.name || 'Staff'}) | ` +
+    `uan: number=${hasUanNumber} doc=${hasUanDoc} => present=${hasUan} | ` +
+    `esic: number=${hasEsicNumber} doc=${hasEsicDoc} => present=${hasEsic} | ` +
+    `aadhaar: number=${hasAadhaarNumber} doc=${hasAadhaarDoc} => present=${hasAadhaar} | ` +
+    `pan: number=${hasPanNumber} doc=${hasPanDoc} => present=${hasPan}`
+  );
+
+  return {
+    hasAadhaar,
+    hasPan,
+    hasUan,
+    hasEsic,
+    hasUanDoc,
+    hasUanNumber,
+    hasEsicDoc,
+    hasEsicNumber,
+    hasAadhaarDoc,
+    hasAadhaarNumber,
+    hasPanDoc,
+    hasPanNumber,
+    missingUanNumberPrompt: hasUanDoc && !hasUanNumber,
+    missingEsicNumberPrompt: hasEsicDoc && !hasEsicNumber,
+    docCount: docs.length,
+  };
+};
+
 interface StaffDocument {
   name: string;
   url: string;
@@ -124,9 +196,11 @@ export const StaffPage: React.FC = () => {
 
   // Dedicated Document Viewer Modal State
   const [isViewerOpen, setIsViewerOpen] = useState(false);
+  const [viewerStaff, setViewerStaff] = useState<StaffMember | null>(null);
   const [viewerDocs, setViewerDocs] = useState<any[]>([]);
   const [activeDocPreview, setActiveDocPreview] = useState<{ id: string; fileName: string; title: string; url?: string } | null>(null);
   const [viewerStaffName, setViewerStaffName] = useState('');
+  const [dragOverDocType, setDragOverDocType] = useState<string | null>(null);
 
   // Form state
   const [formData, setFormData] = useState<Partial<StaffMember>>({
@@ -227,6 +301,115 @@ export const StaffPage: React.FC = () => {
   };
 
   const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
+  const [uploadingDocType, setUploadingDocType] = useState<string | null>(null);
+
+  // Global Escape keydown listener for modals
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (activeDocPreview) {
+          setActiveDocPreview(null);
+        } else if (isViewerOpen) {
+          setIsViewerOpen(false);
+        } else if (isModalOpen) {
+          setIsModalOpen(false);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeDocPreview, isViewerOpen, isModalOpen]);
+
+  const handleUploadDocumentForStaff = async (
+    staff: StaffMember,
+    file: File,
+    docType: string
+  ) => {
+    if (!file || !staff) return;
+    setUploadingDocType(docType);
+    setUploadingType(docType);
+    try {
+      const empName = staff.employee_name || staff.name || 'Staff';
+      const site = staff.sites?.site_name || staff.site_name || staff.siteName || '';
+      const designation = staff.designation || staff.role || '';
+
+      const uploadData = new FormData();
+      uploadData.append('file', file);
+      uploadData.append('staff_id', staff.id);
+      uploadData.append('employeeName', empName);
+      uploadData.append('docType', docType);
+      uploadData.append('document_type', docType);
+      uploadData.append('siteName', site);
+      uploadData.append('designation', designation);
+
+      const response = await fetchWithRetry('/api/documents/upload', {
+        method: 'POST',
+        body: uploadData,
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({ error: 'Upload failed' }));
+        throw new Error(errJson.error || `Upload failed with status ${response.status}`);
+      }
+
+      const resJson = await response.json();
+      const newDoc = resJson.document || {
+        id: resJson.document?.id || `temp-${Date.now()}`,
+        staff_id: staff.id,
+        document_type: docType,
+        file_name: file.name,
+        view_url: resJson.view_url,
+        gcp_file_url: resJson.gcp_file_url,
+        uploaded_at: new Date().toISOString(),
+      };
+
+      // 1. Update viewerDocs
+      setViewerDocs((prev) => [
+        ...prev.filter(
+          (d) => !isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, docType)
+        ),
+        newDoc,
+      ]);
+
+      // 2. Update staffDocs if editing same staff
+      setStaffDocs((prev) => [
+        ...prev.filter(
+          (d) => !isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, docType)
+        ),
+        newDoc,
+      ]);
+
+      // 3. Update staffList in-place so table badges reflect immediately
+      setStaffList((prevList) =>
+        prevList.map((s) => {
+          if (s.id === staff.id) {
+            const currentDocs = s.employee_documents || s.documents || [];
+            const updatedDocs = [
+              ...currentDocs.filter(
+                (d: any) => !isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, docType)
+              ),
+              newDoc,
+            ];
+            return {
+              ...s,
+              employee_documents: updatedDocs,
+            };
+          }
+          return s;
+        })
+      );
+
+      // 4. Increment refreshKey for background query sync
+      setRefreshKey((prev) => prev + 1);
+      toast.success(`${docType} uploaded successfully`);
+    } catch (err: any) {
+      console.error('Document Upload Error:', err);
+      toast.error(err.message || `Failed to upload ${docType}`);
+    } finally {
+      setUploadingDocType(null);
+      setUploadingType(null);
+    }
+  };
 
   const handleDeleteStaffDocument = async (documentId: string, fileName?: string) => {
     if (!documentId) return;
@@ -248,9 +431,15 @@ export const StaffPage: React.FC = () => {
 
       toast.success('Document deleted successfully');
 
-      // Update local state
+      // Update local state in sync
       setStaffDocs((prev) => prev.filter((d) => d.id !== documentId));
       setViewerDocs((prev) => prev.filter((d) => d.id !== documentId));
+      setStaffList((prevList) =>
+        prevList.map((s) => ({
+          ...s,
+          employee_documents: (s.employee_documents || []).filter((d: any) => d.id !== documentId),
+        }))
+      );
       if (editingStaff) {
         fetchDocsForStaff(editingStaff.id);
       }
@@ -308,13 +497,13 @@ export const StaffPage: React.FC = () => {
     return Array.from(new Set([...fromStaff, ...defaults])).filter(Boolean);
   }, [staffList, formData.designation, formData.role]);
 
-  // Missing UAN & ESIC count metrics
+  // Missing UAN & ESIC count metrics (checks both text number field and uploaded card document)
   const missingUanCount = React.useMemo(() => {
-    return staffList.filter((s) => !s.uan_no || s.uan_no.trim() === '').length;
+    return staffList.filter((s) => !computeStaffKycStatus(s).hasUan).length;
   }, [staffList]);
 
   const missingEsicCount = React.useMemo(() => {
-    return staffList.filter((s) => !s.esic_no || s.esic_no.trim() === '').length;
+    return staffList.filter((s) => !computeStaffKycStatus(s).hasEsic).length;
   }, [staffList]);
 
   // Filtered staff list by search name, biometric code, site name, role, status, missing uan/esic
@@ -338,8 +527,9 @@ export const StaffPage: React.FC = () => {
     const roleName = staff.designation || staff.role || '';
     const matchesRole = roleFilter === 'All' || roleName === roleFilter;
     const matchesStatus = statusFilter === 'All' || staff.status === statusFilter;
-    const matchesUan = !filterMissingUan || !staff.uan_no || staff.uan_no.trim() === '';
-    const matchesEsic = !filterMissingEsic || !staff.esic_no || staff.esic_no.trim() === '';
+    const kyc = computeStaffKycStatus(staff);
+    const matchesUan = !filterMissingUan || !kyc.hasUan;
+    const matchesEsic = !filterMissingEsic || !kyc.hasEsic;
 
     return matchesSearch && matchesRole && matchesStatus && matchesUan && matchesEsic;
   });
@@ -433,40 +623,8 @@ export const StaffPage: React.FC = () => {
       return;
     }
 
-    setUploadingType(docType);
-    try {
-      const empName = editingStaff.employee_name || editingStaff.name || formData.name || 'Staff';
-      const site = editingStaff.sites?.site_name || editingStaff.site_name || formData.siteName || '';
-      const designation = editingStaff.designation || editingStaff.role || formData.role || '';
-
-      const uploadData = new FormData();
-      uploadData.append('file', file);
-      uploadData.append('staff_id', editingStaff.id);
-      uploadData.append('employeeName', empName);
-      uploadData.append('docType', docType);
-      uploadData.append('document_type', docType);
-      uploadData.append('siteName', site);
-      uploadData.append('designation', designation);
-
-      const response = await fetchWithRetry('/api/documents/upload', {
-        method: 'POST',
-        body: uploadData,
-      });
-
-      if (!response.ok) {
-        const errJson = await response.json().catch(() => ({ error: 'Upload failed' }));
-        throw new Error(errJson.error || `Upload failed with status ${response.status}`);
-      }
-
-      await fetchDocsForStaff(editingStaff.id);
-      setRefreshKey((prev) => prev + 1);
-    } catch (err: any) {
-      console.error('Document Upload Error:', err);
-      alert(err.message || 'Failed to upload document');
-    } finally {
-      setUploadingType(null);
-      e.target.value = '';
-    }
+    await handleUploadDocumentForStaff(editingStaff, file, docType);
+    e.target.value = '';
   };
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -726,29 +884,15 @@ export const StaffPage: React.FC = () => {
                       <td className="py-4 px-4 text-center">
                         <div className="flex items-center justify-center gap-1.5 flex-wrap">
                           {(() => {
-                            const hasAadhaar = Boolean(
-                              staff.aadharNo ||
-                              staff.aadhar_no ||
-                              (staff.employee_documents && staff.employee_documents.some((d: any) => isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'Aadhaar Card')))
-                            );
-                            const hasPan = Boolean(
-                              staff.panNo ||
-                              staff.pan_no ||
-                              (staff.employee_documents && staff.employee_documents.some((d: any) => isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'PAN Card')))
-                            );
-                            const hasUan = Boolean(
-                              staff.uan_no ||
-                              (staff.employee_documents && staff.employee_documents.some((d: any) => isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'UAN Card')))
-                            );
-                            const hasEsic = Boolean(
-                              staff.esic_no ||
-                              (staff.employee_documents && staff.employee_documents.some((d: any) => isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'ESIC Card')))
-                            );
+                            const kyc = computeStaffKycStatus(staff);
 
                             return (
                               <>
-                                {hasAadhaar ? (
-                                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-green-50 text-green-700 border border-green-200">
+                                {kyc.hasAadhaar ? (
+                                  <span
+                                    className="px-2 py-0.5 rounded text-[10px] font-semibold bg-green-50 text-green-700 border border-green-200"
+                                    title={kyc.hasAadhaarDoc ? 'Aadhaar Card uploaded' : 'Aadhaar Number entered'}
+                                  >
                                     Aadhar ✓
                                   </span>
                                 ) : (
@@ -756,18 +900,39 @@ export const StaffPage: React.FC = () => {
                                     No Aadhar
                                   </span>
                                 )}
-                                {hasPan ? (
-                                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                {kyc.hasPan ? (
+                                  <span
+                                    className="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200"
+                                    title={kyc.hasPanDoc ? 'PAN Card uploaded' : 'PAN Number entered'}
+                                  >
                                     PAN ✓
                                   </span>
                                 ) : null}
-                                {hasUan ? (
-                                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                                {kyc.hasUan ? (
+                                  <span
+                                    className="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200"
+                                    title={
+                                      kyc.missingUanNumberPrompt
+                                        ? 'UAN Card uploaded (Number field empty)'
+                                        : kyc.hasUanDoc
+                                        ? 'UAN Card uploaded & verified'
+                                        : 'UAN Number entered'
+                                    }
+                                  >
                                     UAN ✓
                                   </span>
                                 ) : null}
-                                {hasEsic ? (
-                                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-orange-50 text-orange-700 border border-orange-200">
+                                {kyc.hasEsic ? (
+                                  <span
+                                    className="px-2 py-0.5 rounded text-[10px] font-semibold bg-orange-50 text-orange-700 border border-orange-200"
+                                    title={
+                                      kyc.missingEsicNumberPrompt
+                                        ? 'ESIC Card uploaded (Number field empty)'
+                                        : kyc.hasEsicDoc
+                                        ? 'ESIC Card uploaded & verified'
+                                        : 'ESIC Number entered'
+                                    }
+                                  >
                                     ESIC ✓
                                   </span>
                                 ) : null}
@@ -778,6 +943,7 @@ export const StaffPage: React.FC = () => {
                             type="button"
                             onClick={async () => {
                               const name = staff.employee_name || staff.name || 'Staff';
+                              setViewerStaff(staff);
                               setViewerStaffName(name);
                               // Fetch latest documents for this staff member via backend endpoint
                               try {
@@ -1179,7 +1345,12 @@ export const StaffPage: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-700 mb-1">UAN Number</label>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                      UAN Number
+                      {staffDocs.some((d) => isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'UAN Card')) && !formData.uan_no && (
+                        <span className="text-[10px] text-amber-600 font-normal ml-1">(Card uploaded — add UAN number?)</span>
+                      )}
+                    </label>
                     <input
                       type="text"
                       placeholder="100123456789"
@@ -1190,7 +1361,12 @@ export const StaffPage: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-700 mb-1">ESIC Number</label>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                      ESIC Number
+                      {staffDocs.some((d) => isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'ESIC Card')) && !formData.esic_no && (
+                        <span className="text-[10px] text-orange-600 font-normal ml-1">(Card uploaded — add ESIC number?)</span>
+                      )}
+                    </label>
                     <input
                       type="text"
                       placeholder="31001234560000001"
@@ -1620,8 +1796,14 @@ export const StaffPage: React.FC = () => {
 
       {/* Dedicated Lightweight Document Viewer Modal */}
       {isViewerOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden border border-gray-200 animate-in zoom-in-95 duration-150">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150"
+          onClick={() => setIsViewerOpen(false)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden border border-gray-200 animate-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
             {/* Header */}
             <div className="flex justify-between items-center px-5 py-4 border-b border-gray-200 bg-gray-50">
               <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
@@ -1631,7 +1813,8 @@ export const StaffPage: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsViewerOpen(false)}
-                className="text-gray-400 hover:text-red-500 font-bold text-sm transition-colors p-1"
+                className="text-gray-400 hover:text-red-500 font-bold text-sm transition-colors p-1 cursor-pointer"
+                title="Close (Esc)"
               >
                 ✕
               </button>
@@ -1643,13 +1826,52 @@ export const StaffPage: React.FC = () => {
                 const uploadedDoc = viewerDocs.find((d) =>
                   isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, docType)
                 );
+                const isUploading = uploadingDocType === docType;
+                const isDraggingOver = dragOverDocType === docType;
 
                 return (
-                  <div key={docType} className="flex justify-between items-center p-3 border border-gray-200 rounded-xl bg-slate-50">
-                    <span className="font-semibold text-xs text-gray-800">{docType}</span>
+                  <div
+                    key={docType}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (dragOverDocType !== docType) setDragOverDocType(docType);
+                    }}
+                    onDragLeave={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setDragOverDocType(null);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setDragOverDocType(null);
+                      const file = e.dataTransfer.files?.[0];
+                      if (file && viewerStaff) {
+                        handleUploadDocumentForStaff(viewerStaff, file, docType);
+                      }
+                    }}
+                    className={`flex justify-between items-center p-3 border rounded-xl transition-all ${
+                      isDraggingOver
+                        ? 'border-[#20B2AA] bg-teal-50/80 ring-2 ring-[#20B2AA]/30'
+                        : 'border-gray-200 bg-slate-50'
+                    }`}
+                  >
+                    <div className="flex flex-col min-w-0 pr-2">
+                      <span className="font-semibold text-xs text-gray-800">{docType}</span>
+                      {uploadedDoc && (
+                        <span className="text-[10px] text-gray-500 truncate" title={uploadedDoc.file_name}>
+                          {uploadedDoc.file_name}
+                        </span>
+                      )}
+                    </div>
 
-                    {uploadedDoc ? (
-                      <div className="flex items-center gap-1.5">
+                    {isUploading ? (
+                      <span className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#20B2AA] bg-teal-50 border border-teal-200 rounded-lg">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Uploading...
+                      </span>
+                    ) : uploadedDoc ? (
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
                         <button
                           type="button"
                           onClick={() =>
@@ -1679,9 +1901,25 @@ export const StaffPage: React.FC = () => {
                         </button>
                       </div>
                     ) : (
-                      <span className="px-3 py-1.5 text-xs font-medium text-gray-400 bg-gray-100 rounded-lg border border-gray-200">
-                        Not Uploaded
-                      </span>
+                      <label
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-teal-700 bg-white border border-dashed border-teal-400 rounded-lg hover:bg-teal-50 hover:border-teal-500 transition-all cursor-pointer shadow-2xs flex-shrink-0"
+                        title={`Upload or drop ${docType}`}
+                      >
+                        <Upload className="w-3.5 h-3.5 text-[#20B2AA]" />
+                        <span>Upload</span>
+                        <input
+                          type="file"
+                          accept=".pdf,.png,.jpg,.jpeg"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file && viewerStaff) {
+                              handleUploadDocumentForStaff(viewerStaff, file, docType);
+                            }
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
                     )}
                   </div>
                 );
