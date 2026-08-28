@@ -740,7 +740,21 @@ export const StaffPage: React.FC = () => {
                             onClick={async () => {
                               const name = staff.employee_name || staff.name || 'Staff';
                               setViewerStaffName(name);
-                              // Fetch latest documents for this staff member
+                              // Fetch latest documents for this staff member via backend endpoint
+                              try {
+                                const response = await fetch(`/api/documents/employee?staff_id=${encodeURIComponent(staff.id)}`);
+                                if (response.ok) {
+                                  const json = await response.json();
+                                  if (json.success && Array.isArray(json.data)) {
+                                    setViewerDocs(json.data);
+                                    setIsViewerOpen(true);
+                                    return;
+                                  }
+                                }
+                              } catch (e) {
+                                console.warn('API fetch failed for KYC documents, falling back:', e);
+                              }
+
                               const { data } = await supabase
                                 .from('employee_documents')
                                 .select('*')

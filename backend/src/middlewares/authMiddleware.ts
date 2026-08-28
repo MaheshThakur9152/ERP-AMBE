@@ -70,7 +70,10 @@ export async function fetchUserRole(
  */
 export const requireAuth = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const accessToken = req.cookies?.access_token || req.headers.authorization?.replace(/^Bearer\s+/i, '');
+    const accessToken =
+      req.cookies?.access_token ||
+      req.headers.authorization?.replace(/^Bearer\s+/i, '') ||
+      (typeof req.query.token === 'string' ? req.query.token : undefined);
     const refreshToken = req.cookies?.refresh_token;
 
     let user: any = null;
