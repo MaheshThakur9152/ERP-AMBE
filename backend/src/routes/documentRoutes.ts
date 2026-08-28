@@ -8,6 +8,7 @@ import {
   getAllSiteDocuments,
   getEmployeeDocuments,
   uploadSiteDocumentGlobal,
+  deleteDocument,
   deleteSiteDocument,
   viewDocumentProxy,
 } from '../controllers/documentController';
@@ -171,6 +172,7 @@ router.post(
 // Proxy view route for inline previewing
 router.get('/:documentId/view', requireAuth, viewDocumentProxy);
 
-router.delete('/:id', requireAuth, requireSuperAdmin, deleteSiteDocument);
+router.delete('/:documentId', requireAuth, requireAdmin, deleteDocument);
+router.delete('/:id', requireAuth, requireAdmin, deleteDocument);
 
 export default router;

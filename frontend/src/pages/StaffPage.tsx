@@ -19,10 +19,12 @@ import {
   CreditCard,
   Eye,
   RefreshCw,
+  Loader2,
 } from 'lucide-react';
 import { AddStaffModal } from '@/features/attendance/components/AddStaffModal';
 import { supabase } from '@/lib/supabase';
 import { DocumentViewerModal } from '@/components/DocumentViewerModal';
+import { toast } from '@/components/ui/toast';
 
 export const isMatchingDocType = (docType?: string | null, category?: string | null): boolean => {
   if (!docType || !category) return false;
@@ -221,6 +223,43 @@ export const StaffPage: React.FC = () => {
     } catch (err) {
       console.error('Error fetching staff documents:', err);
       setStaffDocs([]);
+    }
+  };
+
+  const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
+
+  const handleDeleteStaffDocument = async (documentId: string, fileName?: string) => {
+    if (!documentId) return;
+    const confirmed = window.confirm(
+      `Delete this document${fileName ? ` "${fileName}"` : ''}? This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    setDeletingDocId(documentId);
+    try {
+      const response = await fetchWithRetry(`/api/documents/${encodeURIComponent(documentId)}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({ error: 'Delete failed' }));
+        throw new Error(errJson.error || `Failed to delete document (HTTP ${response.status})`);
+      }
+
+      toast.success('Document deleted successfully');
+
+      // Update local state
+      setStaffDocs((prev) => prev.filter((d) => d.id !== documentId));
+      setViewerDocs((prev) => prev.filter((d) => d.id !== documentId));
+      if (editingStaff) {
+        fetchDocsForStaff(editingStaff.id);
+      }
+      setRefreshKey((k) => k + 1);
+    } catch (err: any) {
+      console.error('Delete document error:', err);
+      toast.error(err.message || 'Failed to delete document');
+    } finally {
+      setDeletingDocId(null);
     }
   };
 
@@ -1521,21 +1560,36 @@ export const StaffPage: React.FC = () => {
                               {doc.document_type}
                             </span>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setActiveDocPreview({
-                                id: doc.id,
-                                fileName: doc.file_name,
-                                title: `${formData.name || 'Staff'} - ${doc.document_type || 'Document'}`,
-                                url: doc.view_url || doc.gcp_file_url,
-                              })
-                            }
-                            className="text-[11px] font-bold text-teal-600 hover:text-teal-800 flex items-center gap-1 ml-2 flex-shrink-0 cursor-pointer"
-                          >
-                            <span>View</span>
-                            <Eye className="w-3 h-3" />
-                          </button>
+                          <div className="flex items-center gap-1.5 ml-2 flex-shrink-0">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setActiveDocPreview({
+                                  id: doc.id,
+                                  fileName: doc.file_name,
+                                  title: `${formData.name || 'Staff'} - ${doc.document_type || 'Document'}`,
+                                  url: doc.view_url || doc.gcp_file_url,
+                                })
+                              }
+                              className="text-[11px] font-bold text-teal-600 hover:text-teal-800 flex items-center gap-1 cursor-pointer"
+                            >
+                              <span>View</span>
+                              <Eye className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={deletingDocId === doc.id}
+                              onClick={() => handleDeleteStaffDocument(doc.id, doc.file_name)}
+                              className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors cursor-pointer disabled:opacity-50"
+                              title="Delete Document"
+                            >
+                              {deletingDocId === doc.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-red-500" />
+                              ) : (
+                                <Trash2 className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -1595,20 +1649,35 @@ export const StaffPage: React.FC = () => {
                     <span className="font-semibold text-xs text-gray-800">{docType}</span>
 
                     {uploadedDoc ? (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setActiveDocPreview({
-                            id: uploadedDoc.id,
-                            fileName: uploadedDoc.file_name || `${docType}.pdf`,
-                            title: `${viewerStaffName} - ${docType}`,
-                            url: uploadedDoc.view_url || uploadedDoc.gcp_file_url,
-                          })
-                        }
-                        className="px-3 py-1.5 text-xs font-bold text-teal-700 bg-teal-50 border border-teal-200 rounded-lg hover:bg-teal-100 flex items-center gap-1.5 transition-colors cursor-pointer"
-                      >
-                        <Eye className="w-3.5 h-3.5" /> View
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setActiveDocPreview({
+                              id: uploadedDoc.id,
+                              fileName: uploadedDoc.file_name || `${docType}.pdf`,
+                              title: `${viewerStaffName} - ${docType}`,
+                              url: uploadedDoc.view_url || uploadedDoc.gcp_file_url,
+                            })
+                          }
+                          className="px-3 py-1.5 text-xs font-bold text-teal-700 bg-teal-50 border border-teal-200 rounded-lg hover:bg-teal-100 flex items-center gap-1.5 transition-colors cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> View
+                        </button>
+                        <button
+                          type="button"
+                          disabled={deletingDocId === uploadedDoc.id}
+                          onClick={() => handleDeleteStaffDocument(uploadedDoc.id, uploadedDoc.file_name || docType)}
+                          className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                          title="Delete Document"
+                        >
+                          {deletingDocId === uploadedDoc.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-red-500" />
+                          ) : (
+                            <Trash2 className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      </div>
                     ) : (
                       <span className="px-3 py-1.5 text-xs font-medium text-gray-400 bg-gray-100 rounded-lg border border-gray-200">
                         Not Uploaded

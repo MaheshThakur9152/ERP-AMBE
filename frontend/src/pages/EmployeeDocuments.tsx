@@ -235,17 +235,22 @@ export const EmployeeDocuments: React.FC = () => {
   };
 
   const handleDeleteDocument = async (id: string, fileName: string) => {
-    if (!confirm(`Are you sure you want to delete "${fileName}"?`)) return;
+    if (!confirm(`Delete this document "${fileName}"? This cannot be undone.`)) return;
 
     try {
-      const { error } = await supabase.from('employee_documents').delete().eq('id', id);
-      if (error) {
-        alert(`Failed to delete document: ${error.message}`);
-      } else {
-        setDocuments((prev) => prev.filter((doc) => doc.id !== id));
+      const response = await fetchWithRetry(`/api/documents/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({ error: 'Delete failed' }));
+        throw new Error(errJson.error || `Failed to delete document (HTTP ${response.status})`);
       }
-    } catch (err) {
+
+      setDocuments((prev) => prev.filter((doc) => doc.id !== id));
+    } catch (err: any) {
       console.error('Delete document error:', err);
+      alert(err.message || 'Failed to delete document');
     }
   };
 

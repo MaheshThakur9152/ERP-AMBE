@@ -491,31 +491,101 @@ export const uploadSiteDocumentGlobal = async (req: Request, res: Response): Pro
   }
 };
 
-export const deleteSiteDocument = async (req: Request, res: Response): Promise<void> => {
+export const deleteDocument = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { id } = req.params;
-    if (!id) {
-      res.status(400).json({ error: 'Document id is required' });
+    const documentId = req.params.documentId || req.params.id;
+    if (!documentId) {
+      res.status(400).json({ error: 'Document ID is required' });
       return;
     }
 
-    const { error } = await supabaseAdmin
-      .from('site_documents')
+    let foundTable: string | null = null;
+    let docRecord: any = null;
+
+    // 1. Check employee_documents
+    if (supabaseAdmin) {
+      const { data: empDoc } = await supabaseAdmin
+        .from('employee_documents')
+        .select('*')
+        .eq('id', documentId)
+        .maybeSingle();
+
+      if (empDoc) {
+        foundTable = 'employee_documents';
+        docRecord = empDoc;
+      }
+    }
+
+    // 2. Check site_documents
+    if (!docRecord && supabaseAdmin) {
+      const { data: siteDoc } = await supabaseAdmin
+        .from('site_documents')
+        .select('*')
+        .eq('id', documentId)
+        .maybeSingle();
+
+      if (siteDoc) {
+        foundTable = 'site_documents';
+        docRecord = siteDoc;
+      }
+    }
+
+    // 3. Check company_documents
+    if (!docRecord && supabaseAdmin) {
+      try {
+        const { data: compDoc } = await supabaseAdmin
+          .from('company_documents')
+          .select('*')
+          .eq('id', documentId)
+          .maybeSingle();
+
+        if (compDoc) {
+          foundTable = 'company_documents';
+          docRecord = compDoc;
+        }
+      } catch (_) {}
+    }
+
+    if (!docRecord || !foundTable) {
+      res.status(404).json({ error: 'Document not found' });
+      return;
+    }
+
+    // MinIO Storage: Delete file from MinIO
+    if (docRecord.storage_provider === 'minio' && docRecord.storage_key) {
+      try {
+        await OracleStorageService.deleteFile(docRecord.storage_key);
+        console.warn(`[deleteDocument] Removed MinIO object: ${docRecord.storage_key}`);
+      } catch (minioErr) {
+        console.error(`[deleteDocument] Failed to delete MinIO object ${docRecord.storage_key}:`, minioErr);
+      }
+    }
+
+    // Delete DB row
+    const { error: dbDeleteErr } = await supabaseAdmin
+      .from(foundTable)
       .delete()
-      .eq('id', id);
+      .eq('id', documentId);
 
-    if (error) {
-      console.error('❌ Delete site document error:', error);
-      res.status(500).json({ error: 'Failed to delete document', details: error.message });
+    if (dbDeleteErr) {
+      console.error(`[deleteDocument] DB delete error on ${foundTable}:`, dbDeleteErr);
+      res.status(500).json({ error: 'Failed to delete document from database', details: dbDeleteErr.message });
       return;
     }
 
-    res.status(200).json({ success: true, message: 'Document deleted successfully', id });
+    res.status(200).json({
+      success: true,
+      message: 'Document deleted successfully',
+      id: documentId,
+      table: foundTable,
+    });
   } catch (error: any) {
-    console.error('DELETE /api/documents/:id Error:', error);
+    console.error('DELETE /api/documents/:documentId Error:', error);
     res.status(500).json({ error: 'Failed to delete document', details: error?.message });
   }
 };
+
+export const deleteSiteDocument = deleteDocument;
 
 /**
  * Proxy streaming endpoint for inline viewing: GET /api/documents/:documentId/view
