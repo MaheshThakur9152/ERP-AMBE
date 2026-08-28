@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { getApiUrl, fetchWithRetry } from '@/lib/apiClient';
 import {
   Users,
@@ -201,6 +201,23 @@ export const StaffPage: React.FC = () => {
   const [activeDocPreview, setActiveDocPreview] = useState<{ id: string; fileName: string; title: string; url?: string } | null>(null);
   const [viewerStaffName, setViewerStaffName] = useState('');
   const [dragOverDocType, setDragOverDocType] = useState<string | null>(null);
+
+  // Missing Documents Multi-Select Filter State
+  const [missingDocFilters, setMissingDocFilters] = useState<string[]>([]);
+  const [isDocFilterOpen, setIsDocFilterOpen] = useState<boolean>(false);
+  const docFilterRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (docFilterRef.current && !docFilterRef.current.contains(e.target as Node)) {
+        setIsDocFilterOpen(false);
+      }
+    };
+    if (isDocFilterOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [isDocFilterOpen]);
 
   // Form state
   const [formData, setFormData] = useState<Partial<StaffMember>>({
@@ -497,16 +514,26 @@ export const StaffPage: React.FC = () => {
     return Array.from(new Set([...fromStaff, ...defaults])).filter(Boolean);
   }, [staffList, formData.designation, formData.role]);
 
-  // Missing UAN & ESIC count metrics (checks both text number field and uploaded card document)
-  const missingUanCount = React.useMemo(() => {
-    return staffList.filter((s) => !computeStaffKycStatus(s).hasUan).length;
+  // Missing Document metrics (checks both text number field and uploaded card document)
+  const missingCounts = React.useMemo(() => {
+    let aadhar = 0;
+    let pan = 0;
+    let uan = 0;
+    let esic = 0;
+    for (const s of staffList) {
+      const kyc = computeStaffKycStatus(s);
+      if (!kyc.hasAadhaar) aadhar++;
+      if (!kyc.hasPan) pan++;
+      if (!kyc.hasUan) uan++;
+      if (!kyc.hasEsic) esic++;
+    }
+    return { aadhar, pan, uan, esic };
   }, [staffList]);
 
-  const missingEsicCount = React.useMemo(() => {
-    return staffList.filter((s) => !computeStaffKycStatus(s).hasEsic).length;
-  }, [staffList]);
+  const missingUanCount = missingCounts.uan;
+  const missingEsicCount = missingCounts.esic;
 
-  // Filtered staff list by search name, biometric code, site name, role, status, missing uan/esic
+  // Filtered staff list by search name, biometric code, site name, role, status, missing uan/esic, missing doc filters
   const filteredStaff = staffList.filter((staff) => {
     const empName = (staff.employee_name || staff.name || '').toLowerCase();
     const bioCode = (staff.biometric_code || staff.biometricCode || '').toLowerCase();
@@ -531,7 +558,18 @@ export const StaffPage: React.FC = () => {
     const matchesUan = !filterMissingUan || !kyc.hasUan;
     const matchesEsic = !filterMissingEsic || !kyc.hasEsic;
 
-    return matchesSearch && matchesRole && matchesStatus && matchesUan && matchesEsic;
+    // Multi-select Missing Docs Filter: OR logic across selected doc types
+    const matchesMissingDocs =
+      missingDocFilters.length === 0 ||
+      missingDocFilters.some((docKey) => {
+        if (docKey === 'Aadhar') return !kyc.hasAadhaar;
+        if (docKey === 'PAN') return !kyc.hasPan;
+        if (docKey === 'UAN') return !kyc.hasUan;
+        if (docKey === 'ESIC') return !kyc.hasEsic;
+        return false;
+      });
+
+    return matchesSearch && matchesRole && matchesStatus && matchesUan && matchesEsic && matchesMissingDocs;
   });
 
   const handleOpenAddModal = () => {
@@ -793,6 +831,95 @@ export const StaffPage: React.FC = () => {
                 {missingEsicCount}
               </span>
             </button>
+
+            {/* Filter by Missing Docs Multi-Select Dropdown */}
+            <div className="relative" ref={docFilterRef}>
+              <button
+                type="button"
+                onClick={() => setIsDocFilterOpen((prev) => !prev)}
+                className={`px-3 py-2 text-xs font-semibold rounded-lg border transition-all flex items-center gap-2 cursor-pointer ${
+                  missingDocFilters.length > 0
+                    ? 'bg-rose-500 text-white border-rose-600 shadow-xs ring-2 ring-rose-500/20'
+                    : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                }`}
+                title="Filter employees missing required KYC documents"
+              >
+                <FileCheck className="w-3.5 h-3.5" />
+                <span>Filter by Missing Docs</span>
+                {missingDocFilters.length > 0 ? (
+                  <span className="flex items-center gap-1">
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-white/25 text-white">
+                      {missingDocFilters.length}
+                    </span>
+                    <span
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setMissingDocFilters([]);
+                      }}
+                      className="hover:bg-white/30 rounded p-0.5 ml-0.5 transition-colors cursor-pointer"
+                      title="Clear doc filters"
+                    >
+                      <X className="w-3 h-3" />
+                    </span>
+                  </span>
+                ) : null}
+              </button>
+
+              {isDocFilterOpen && (
+                <div className="absolute left-0 mt-1.5 w-60 bg-white border border-gray-200 rounded-xl shadow-xl z-30 p-2.5 space-y-1 animate-in fade-in zoom-in-95 duration-100">
+                  <div className="flex items-center justify-between pb-2 border-b border-gray-100 px-1">
+                    <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                      Missing Document
+                    </span>
+                    {missingDocFilters.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setMissingDocFilters([])}
+                        className="text-[11px] font-semibold text-rose-600 hover:text-rose-800 transition-colors cursor-pointer"
+                      >
+                        Clear all
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="space-y-0.5 pt-1">
+                    {[
+                      { key: 'Aadhar', label: 'Aadhaar Card', count: missingCounts.aadhar, color: 'text-green-700 bg-green-50 border-green-200' },
+                      { key: 'PAN', label: 'PAN Card', count: missingCounts.pan, color: 'text-indigo-700 bg-indigo-50 border-indigo-200' },
+                      { key: 'UAN', label: 'UAN Card / No.', count: missingCounts.uan, color: 'text-amber-700 bg-amber-50 border-amber-200' },
+                      { key: 'ESIC', label: 'ESIC Card / No.', count: missingCounts.esic, color: 'text-orange-700 bg-orange-50 border-orange-200' },
+                    ].map((item) => {
+                      const isChecked = missingDocFilters.includes(item.key);
+                      return (
+                        <label
+                          key={item.key}
+                          className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-50 cursor-pointer text-xs transition-colors select-none"
+                        >
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => {
+                                setMissingDocFilters((prev) =>
+                                  isChecked ? prev.filter((k) => k !== item.key) : [...prev, item.key]
+                                );
+                              }}
+                              className="rounded border-gray-300 text-[#20B2AA] focus:ring-[#20B2AA] h-4 w-4 cursor-pointer"
+                            />
+                            <span className="font-medium text-gray-800">{item.label}</span>
+                          </div>
+                          <span
+                            className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold border ${item.color}`}
+                          >
+                            {item.count}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="text-xs text-gray-500 font-mono">
