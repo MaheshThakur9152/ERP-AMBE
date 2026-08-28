@@ -1,8 +1,11 @@
 import { supabase } from './supabase';
+import { toast } from '@/components/ui/toast';
 
 export interface FetchRetryOptions extends RequestInit {
   retries?: number;
   backoffMs?: number;
+  timeoutMs?: number;
+  skipErrorToast?: boolean;
 }
 
 /**
@@ -36,15 +39,33 @@ export function getInMemoryToken(): string | null {
   return inMemoryAccessToken;
 }
 
+// Throttle error toasts so multiple parallel failing requests don't spam toasts
+let lastErrorToastTime = 0;
+function showServerUnreachableToast() {
+  const now = Date.now();
+  if (now - lastErrorToastTime > 5000) {
+    lastErrorToastTime = now;
+    toast.error('Server unreachable, please try again shortly');
+  }
+}
+
 /**
  * Custom fetch wrapper that automatically retries failed GET/5xx requests with exponential backoff.
- * Automatically attaches credentials: 'include' and Authorization Bearer header if session exists.
+ * Limits retries to 2 attempts max and enforces a strict request timeout.
+ * Surfaces a user-friendly toast when the backend is unreachable.
  */
 export async function fetchWithRetry(
   url: string,
   options: FetchRetryOptions = {}
 ): Promise<Response> {
-  const { retries = 2, backoffMs = 500, ...fetchOptions } = options;
+  const {
+    retries = 2,
+    backoffMs = 500,
+    timeoutMs = 15000,
+    skipErrorToast = false,
+    ...fetchOptions
+  } = options;
+
   const fullUrl = getApiUrl(url);
   const method = (fetchOptions.method || 'GET').toUpperCase();
 
@@ -73,32 +94,76 @@ export async function fetchWithRetry(
   let lastError: any = null;
 
   while (attempt <= retries) {
-    try {
-      const response = await fetch(fullUrl, fetchOptions);
+    const controller = new AbortController();
+    const timerId = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
 
-      // Retry on 5xx server errors (e.g. transient 500 startup race condition)
+    // Merge external signal if passed
+    const activeSignal = fetchOptions.signal
+      ? anySignal([fetchOptions.signal, controller.signal])
+      : controller.signal;
+
+    try {
+      const response = await fetch(fullUrl, {
+        ...fetchOptions,
+        signal: activeSignal,
+      });
+
+      clearTimeout(timerId);
+
+      // Retry on 5xx server errors (e.g. transient gateway / service unavailable)
       if (!response.ok && response.status >= 500 && attempt < retries) {
         attempt++;
         const delay = backoffMs * Math.pow(2, attempt - 1);
-        console.warn(`[apiClient] ${method} ${url} status ${response.status}. Retrying (${attempt}/${retries}) in ${delay}ms...`);
+        console.warn(
+          `[apiClient] ${method} ${url} status ${response.status}. Retrying (${attempt}/${retries}) in ${delay}ms...`
+        );
         await new Promise((resolve) => setTimeout(resolve, delay));
         continue;
       }
 
       return response;
     } catch (err: any) {
+      clearTimeout(timerId);
       lastError = err;
+      const isTimeout = err.name === 'AbortError';
+
       if (attempt < retries) {
         attempt++;
         const delay = backoffMs * Math.pow(2, attempt - 1);
-        console.warn(`[apiClient] ${method} ${url} network error (${err.message}). Retrying (${attempt}/${retries}) in ${delay}ms...`);
+        console.warn(
+          `[apiClient] ${method} ${url} ${isTimeout ? 'timed out' : 'network error'} (${err.message}). Retrying (${attempt}/${retries}) in ${delay}ms...`
+        );
         await new Promise((resolve) => setTimeout(resolve, delay));
       } else {
-        throw err;
+        if (!skipErrorToast) {
+          showServerUnreachableToast();
+        }
+        throw isTimeout
+          ? new Error(`Request timed out after ${timeoutMs}ms (${method} ${url})`)
+          : err;
       }
     }
   }
 
+  if (!skipErrorToast) {
+    showServerUnreachableToast();
+  }
   throw lastError || new Error(`Request failed after ${retries} retries`);
 }
 
+/**
+ * Combines multiple AbortSignals into one.
+ */
+function anySignal(signals: AbortSignal[]): AbortSignal {
+  const controller = new AbortController();
+  for (const signal of signals) {
+    if (signal.aborted) {
+      controller.abort();
+      return controller.signal;
+    }
+    signal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+  return controller.signal;
+}

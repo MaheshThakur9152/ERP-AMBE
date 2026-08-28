@@ -1,0 +1,23 @@
+[Unit]
+Description=Ambe ERP Backend Node.js Service
+After=network.target minio.service
+
+[Service]
+Type=simple
+User=nodeuser
+WorkingDirectory=/var/www/ambeservice/backend
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=5s
+
+# Process Environment & Limits
+Environment=NODE_ENV=production
+LimitNOFILE=65536
+
+# Standard Output / Journal Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ambeservice
+
+[Install]
+WantedBy=multi-user.target
