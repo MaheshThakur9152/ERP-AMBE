@@ -516,3 +516,147 @@ export const deleteSiteDocument = async (req: Request, res: Response): Promise<v
     res.status(500).json({ error: 'Failed to delete document', details: error?.message });
   }
 };
+
+/**
+ * Proxy streaming endpoint for inline viewing: GET /api/documents/:documentId/view
+ */
+export const viewDocumentProxy = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { documentId } = req.params;
+    const docTypeParam = (req.query.type as string)?.toLowerCase();
+
+    if (!documentId) {
+      res.status(400).json({ error: 'documentId is required' });
+      return;
+    }
+
+    let docRecord: any = null;
+    let storageKey: string | null = null;
+    let storageProvider: string = 'google';
+    let gcpFileUrl: string | null = null;
+    let fileName: string = 'document.pdf';
+
+    // 1. Check employee_documents
+    if (supabaseAdmin) {
+      const { data: empDoc } = await supabaseAdmin
+        .from('employee_documents')
+        .select('*')
+        .eq('id', documentId)
+        .maybeSingle();
+
+      if (empDoc) {
+        docRecord = empDoc;
+        storageKey = empDoc.storage_key;
+        storageProvider = empDoc.storage_provider || 'google';
+        gcpFileUrl = empDoc.gcp_file_url;
+        fileName = empDoc.file_name || 'employee-document.pdf';
+      }
+    }
+
+    // 2. Check site_documents
+    if (!docRecord && supabaseAdmin) {
+      const { data: siteDoc } = await supabaseAdmin
+        .from('site_documents')
+        .select('*')
+        .eq('id', documentId)
+        .maybeSingle();
+
+      if (siteDoc) {
+        docRecord = siteDoc;
+        storageKey = siteDoc.storage_key;
+        storageProvider = siteDoc.storage_provider || 'google';
+        gcpFileUrl = siteDoc.gcp_file_url;
+        fileName = siteDoc.file_name || 'site-document.pdf';
+      }
+    }
+
+    // 3. Check company_documents
+    if (!docRecord && supabaseAdmin) {
+      try {
+        const { data: compDoc } = await supabaseAdmin
+          .from('company_documents')
+          .select('*')
+          .eq('id', documentId)
+          .maybeSingle();
+
+        if (compDoc) {
+          docRecord = compDoc;
+          storageKey = compDoc.storage_key;
+          storageProvider = compDoc.storage_provider || 'google';
+          gcpFileUrl = compDoc.gcp_file_url;
+          fileName = compDoc.file_name || 'company-document.pdf';
+        }
+      } catch (_) {}
+    }
+
+    // 4. Check invoices
+    if (!docRecord && supabaseAdmin) {
+      const { data: invDoc } = await supabaseAdmin
+        .from('invoices')
+        .select('*')
+        .eq('id', documentId)
+        .maybeSingle();
+
+      if (invDoc) {
+        docRecord = invDoc;
+        storageProvider = invDoc.invoice_storage_provider || invDoc.storage_provider || 'google';
+
+        if (docTypeParam === 'attendance') {
+          storageKey = invDoc.certified_attendance_storage_key || invDoc.storage_key;
+          gcpFileUrl = invDoc.certified_attendance_url || invDoc.gcp_file_url;
+        } else if (docTypeParam === 'generated') {
+          storageKey = invDoc.generated_pdf_storage_key || invDoc.storage_key;
+          gcpFileUrl = invDoc.generated_pdf_url || invDoc.gcp_file_url;
+        } else {
+          storageKey = invDoc.certified_doc_storage_key || invDoc.storage_key;
+          gcpFileUrl = invDoc.certified_doc_url || invDoc.gcp_file_url;
+        }
+        fileName = `${invDoc.invoice_no || 'invoice'}.pdf`;
+      }
+    }
+
+    if (!docRecord) {
+      res.status(404).json({ error: 'Document record not found' });
+      return;
+    }
+
+    // MinIO Storage Provider: Stream object directly
+    if (storageProvider === 'minio' && storageKey) {
+      const obj = await OracleStorageService.getObject(storageKey);
+      const ext = path.extname(storageKey || fileName).toLowerCase();
+      let contentType = obj.contentType || 'application/octet-stream';
+
+      if (ext === '.pdf') contentType = 'application/pdf';
+      else if (ext === '.png') contentType = 'image/png';
+      else if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
+      else if (ext === '.webp') contentType = 'image/webp';
+
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `inline; filename="${path.basename(fileName)}"`);
+      if (obj.contentLength) {
+        res.setHeader('Content-Length', obj.contentLength);
+      }
+
+      if (obj.body && typeof obj.body.pipe === 'function') {
+        obj.body.pipe(res);
+      } else if (obj.body && typeof obj.body.transformToByteArray === 'function') {
+        const bytes = await obj.body.transformToByteArray();
+        res.end(Buffer.from(bytes));
+      } else {
+        res.end(obj.body);
+      }
+      return;
+    }
+
+    // Google / Legacy Storage: 302 redirect
+    if (gcpFileUrl) {
+      res.redirect(302, gcpFileUrl);
+      return;
+    }
+
+    res.status(404).json({ error: 'Document storage file location not available' });
+  } catch (error: any) {
+    console.error('GET /api/documents/:documentId/view Error:', error);
+    res.status(500).json({ error: 'Failed to stream document', details: error?.message });
+  }
+};

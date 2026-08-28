@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   FileCode,
   Paperclip,
@@ -14,10 +14,12 @@ import {
   MapPin,
   Users,
   CheckCircle,
+  Eye,
 } from 'lucide-react';
 import { InvoiceTemplate } from '@/features/invoices/components/InvoiceTemplate';
 import { MaterialInvoiceTemplate } from '@/features/invoices/components/MaterialInvoiceTemplate';
 import { InvoiceData } from '@/features/invoices/types/invoice';
+import { DocumentViewerModal } from '@/components/DocumentViewerModal';
 
 export interface EntityPreviewData {
   id: string;
@@ -117,6 +119,8 @@ export const EntityPreviewModal: React.FC<EntityPreviewModalProps> = ({
   isLocking = false,
   mode: propMode,
 }) => {
+  const [isDocViewerOpen, setIsDocViewerOpen] = useState(false);
+
   if (!isOpen || !entityData) return null;
 
   const activeMode = propMode || entityData.mode || 'software';
@@ -352,15 +356,18 @@ export const EntityPreviewModal: React.FC<EntityPreviewModalProps> = ({
               <Paperclip size={36} className="text-purple-500 mx-auto" />
               <h5 className="font-bold text-gray-900 text-sm">Physical Uploaded Document Attachment</h5>
               {entityData.uploadedDocUrl ? (
-                <div className="p-3 bg-purple-50 rounded-xl border border-purple-200">
-                  <a
-                    href={entityData.uploadedDocUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs text-purple-700 font-mono font-bold underline break-all"
-                  >
+                <div className="p-3 bg-purple-50 rounded-xl border border-purple-200 flex items-center justify-between gap-2">
+                  <span className="text-xs text-purple-700 font-mono font-bold truncate">
                     {entityData.uploadedDocUrl}
-                  </a>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsDocViewerOpen(true)}
+                    className="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer flex-shrink-0"
+                  >
+                    <Eye size={14} />
+                    <span>View Attachment</span>
+                  </button>
                 </div>
               ) : (
                 <p className="text-xs text-gray-400">
@@ -398,6 +405,16 @@ export const EntityPreviewModal: React.FC<EntityPreviewModalProps> = ({
           )}
         </div>
       </div>
+
+      {/* Inline Document Viewer Modal */}
+      <DocumentViewerModal
+        isOpen={isDocViewerOpen}
+        onClose={() => setIsDocViewerOpen(false)}
+        documentId={entityData.id}
+        url={entityData.uploadedDocUrl || undefined}
+        fileName={`${entityData.title || 'Document'}.pdf`}
+        title={entityData.title || 'Document Attachment'}
+      />
     </div>
   );
 };

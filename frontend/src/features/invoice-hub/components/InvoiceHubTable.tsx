@@ -6,6 +6,7 @@ import { lockInvoiceApi } from '@/features/auth/api/authApi';
 import { useAuth } from '@/features/auth/context/AuthContext';
 import { toast, ToastContainer } from '@/components/ui/toast';
 import { supabase } from '@/lib/supabase';
+import { DocumentViewerModal } from '@/components/DocumentViewerModal';
 import {
   RotateCcw,
   Plus,
@@ -247,6 +248,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
   // Preview Modal state
   const [previewInvoice, setPreviewInvoice] = useState<InvoiceData | null>(null);
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState<boolean>(false);
+  const [viewingDoc, setViewingDoc] = useState<{ id?: string; fileName: string; title: string; url?: string } | null>(null);
   const [colorMode, setColorMode] = useState<'color' | 'bw'>('color');
 
   // Stealth Print state
@@ -1102,15 +1104,21 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                           )}
                           {/* Certified Invoice Attachment UI (Paperclip vs Eye) */}
                           {inv.certified_doc_view_url || inv.certified_doc_url || inv.certifiedDocUrl || (inv as any).view_url ? (
-                            <a
-                              href={inv.certified_doc_view_url || inv.certified_doc_url || inv.certifiedDocUrl || (inv as any).view_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-teal-600 hover:text-teal-800 transition-colors p-1"
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setViewingDoc({
+                                  id: inv.id,
+                                  url: inv.certified_doc_view_url || inv.certified_doc_url || inv.certifiedDocUrl || (inv as any).view_url,
+                                  fileName: `${inv.invoiceNo}_Certified.pdf`,
+                                  title: `Invoice ${inv.invoiceNo} - Certified Attachment`,
+                                })
+                              }
+                              className="text-teal-600 hover:text-teal-800 transition-colors p-1 cursor-pointer"
                               title="View Certified Invoice Attachment"
                             >
                               <Eye size={17} />
-                            </a>
+                            </button>
                           ) : uploadingAttachmentId === inv.id ? (
                             <span className="p-1" title="Uploading Attachment...">
                               <Loader2 size={17} className="animate-spin text-teal-600" />
@@ -1528,6 +1536,16 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
           </div>
         </div>
       )}
+
+      {/* Inline Document Viewer Modal */}
+      <DocumentViewerModal
+        isOpen={!!viewingDoc}
+        onClose={() => setViewingDoc(null)}
+        documentId={viewingDoc?.id}
+        url={viewingDoc?.url}
+        fileName={viewingDoc?.fileName}
+        title={viewingDoc?.title}
+      />
     </>
   );
 };

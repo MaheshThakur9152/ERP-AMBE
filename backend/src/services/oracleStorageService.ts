@@ -93,6 +93,34 @@ export class OracleStorageService {
   }
 
   /**
+   * Fetches an object stream and metadata from MinIO/Oracle storage for direct server-side proxying.
+   */
+  public static async getObject(
+    key: string
+  ): Promise<{ body: any; contentType?: string; contentLength?: number }> {
+    try {
+      if (!key) throw new Error('Object key is required');
+      const client = this.getClient();
+      const bucket = this.getBucketName();
+
+      const command = new GetObjectCommand({
+        Bucket: bucket,
+        Key: key,
+      });
+
+      const response = await client.send(command);
+      return {
+        body: response.Body,
+        contentType: response.ContentType,
+        contentLength: response.ContentLength,
+      };
+    } catch (error: any) {
+      console.error(`❌ MinIO getObject error for key [${key}]:`, error?.message || error);
+      throw error;
+    }
+  }
+
+  /**
    * Deletes an object from MinIO/Oracle storage for rollback/cleanup.
    */
   public static async deleteFile(key: string): Promise<boolean> {

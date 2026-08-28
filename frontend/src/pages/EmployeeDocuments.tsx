@@ -15,6 +15,7 @@ import {
   Eye,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { DocumentViewerModal } from '@/components/DocumentViewerModal';
 
 interface StaffOption {
   id: string;
@@ -59,6 +60,7 @@ export const EmployeeDocuments: React.FC = () => {
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [uploading, setUploading] = useState<boolean>(false);
   const [uploadMessage, setUploadMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [viewingDoc, setViewingDoc] = useState<{ id: string; fileName: string; title: string; url?: string } | null>(null);
 
   const [documents, setDocuments] = useState<EmployeeDocument[]>([]);
   const [loadingDocs, setLoadingDocs] = useState<boolean>(true);
@@ -534,15 +536,21 @@ export const EmployeeDocuments: React.FC = () => {
                     </td>
                     <td className="py-3 px-4 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <a
-                          href={doc.view_url || doc.gcp_file_url || undefined}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setViewingDoc({
+                              id: doc.id,
+                              fileName: doc.file_name,
+                              title: `${doc.staff?.employee_name || 'Staff'} - ${doc.document_type}`,
+                              url: doc.view_url || doc.gcp_file_url || undefined,
+                            })
+                          }
                           className="px-2.5 py-1.5 rounded-lg bg-teal-50 hover:bg-teal-100 text-[#20B2AA] border border-[#20B2AA]/30 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
                         >
                           <span>View</span>
                           <Eye className="w-3 h-3" />
-                        </a>
+                        </button>
                         <button
                           type="button"
                           onClick={() => handleDeleteDocument(doc.id, doc.file_name)}
@@ -560,6 +568,16 @@ export const EmployeeDocuments: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {/* Inline Document Viewer Modal */}
+      <DocumentViewerModal
+        isOpen={!!viewingDoc}
+        onClose={() => setViewingDoc(null)}
+        documentId={viewingDoc?.id}
+        url={viewingDoc?.url}
+        fileName={viewingDoc?.fileName}
+        title={viewingDoc?.title}
+      />
     </div>
   );
 };

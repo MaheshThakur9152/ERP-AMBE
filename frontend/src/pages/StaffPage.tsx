@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { AddStaffModal } from '@/features/attendance/components/AddStaffModal';
 import { supabase } from '@/lib/supabase';
+import { DocumentViewerModal } from '@/components/DocumentViewerModal';
 
 export const isMatchingDocType = (docType?: string | null, category?: string | null): boolean => {
   if (!docType || !category) return false;
@@ -122,6 +123,7 @@ export const StaffPage: React.FC = () => {
   // Dedicated Document Viewer Modal State
   const [isViewerOpen, setIsViewerOpen] = useState(false);
   const [viewerDocs, setViewerDocs] = useState<any[]>([]);
+  const [activeDocPreview, setActiveDocPreview] = useState<{ id: string; fileName: string; title: string; url?: string } | null>(null);
   const [viewerStaffName, setViewerStaffName] = useState('');
 
   // Form state
@@ -1156,14 +1158,20 @@ export const StaffPage: React.FC = () => {
                     if (aadhaarDoc) {
                       return (
                         <div className="flex items-center gap-2 p-2.5 border border-teal-200 rounded-xl bg-teal-50/50">
-                          <a
-                            href={aadhaarDoc.view_url || aadhaarDoc.gcp_file_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setActiveDocPreview({
+                                id: aadhaarDoc.id,
+                                fileName: aadhaarDoc.file_name || 'Aadhaar-Card.pdf',
+                                title: `${formData.name || 'Staff'} - Aadhaar Card`,
+                                url: aadhaarDoc.view_url || aadhaarDoc.gcp_file_url,
+                              })
+                            }
                             className="flex-1 text-center text-xs font-bold text-teal-700 hover:text-teal-900 truncate"
                           >
                             View Aadhaar
-                          </a>
+                          </button>
                           <label
                             className="p-1 text-gray-500 hover:text-teal-600 cursor-pointer rounded transition-colors"
                             title="Replace Document"
@@ -1217,14 +1225,20 @@ export const StaffPage: React.FC = () => {
                     if (panDoc) {
                       return (
                         <div className="flex items-center gap-2 p-2.5 border border-indigo-200 rounded-xl bg-indigo-50/50">
-                          <a
-                            href={panDoc.view_url || panDoc.gcp_file_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setActiveDocPreview({
+                                id: panDoc.id,
+                                fileName: panDoc.file_name || 'PAN-Card.pdf',
+                                title: `${formData.name || 'Staff'} - PAN Card`,
+                                url: panDoc.view_url || panDoc.gcp_file_url,
+                              })
+                            }
                             className="flex-1 text-center text-xs font-bold text-indigo-700 hover:text-indigo-900 truncate"
                           >
                             View PAN
-                          </a>
+                          </button>
                           <label
                             className="p-1 text-gray-500 hover:text-indigo-600 cursor-pointer rounded transition-colors"
                             title="Replace Document"
@@ -1278,14 +1292,20 @@ export const StaffPage: React.FC = () => {
                     if (bankDoc) {
                       return (
                         <div className="flex items-center gap-2 p-2.5 border border-purple-200 rounded-xl bg-purple-50/50">
-                          <a
-                            href={bankDoc.view_url || bankDoc.gcp_file_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setActiveDocPreview({
+                                id: bankDoc.id,
+                                fileName: bankDoc.file_name || 'Bank-Passbook.pdf',
+                                title: `${formData.name || 'Staff'} - Bank Passbook`,
+                                url: bankDoc.view_url || bankDoc.gcp_file_url,
+                              })
+                            }
                             className="flex-1 text-center text-xs font-bold text-purple-700 hover:text-purple-900 truncate"
                           >
                             View Passbook
-                          </a>
+                          </button>
                           <label
                             className="p-1 text-gray-500 hover:text-purple-600 cursor-pointer rounded transition-colors"
                             title="Replace Document"
@@ -1339,14 +1359,20 @@ export const StaffPage: React.FC = () => {
                     if (uanDoc) {
                       return (
                         <div className="flex items-center gap-2 p-2.5 border border-amber-200 rounded-xl bg-amber-50/50">
-                          <a
-                            href={uanDoc.view_url || uanDoc.gcp_file_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setActiveDocPreview({
+                                id: uanDoc.id,
+                                fileName: uanDoc.file_name || 'UAN-Card.pdf',
+                                title: `${formData.name || 'Staff'} - UAN Card`,
+                                url: uanDoc.view_url || uanDoc.gcp_file_url,
+                              })
+                            }
                             className="flex-1 text-center text-xs font-bold text-amber-700 hover:text-amber-900 truncate"
                           >
                             View UAN
-                          </a>
+                          </button>
                           <label
                             className="p-1 text-gray-500 hover:text-amber-600 cursor-pointer rounded transition-colors"
                             title="Replace Document"
@@ -1400,14 +1426,20 @@ export const StaffPage: React.FC = () => {
                     if (esicDoc) {
                       return (
                         <div className="flex items-center gap-2 p-2.5 border border-orange-200 rounded-xl bg-orange-50/50">
-                          <a
-                            href={esicDoc.view_url || esicDoc.gcp_file_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setActiveDocPreview({
+                                id: esicDoc.id,
+                                fileName: esicDoc.file_name || 'ESIC-Card.pdf',
+                                title: `${formData.name || 'Staff'} - ESIC Card`,
+                                url: esicDoc.view_url || esicDoc.gcp_file_url,
+                              })
+                            }
                             className="flex-1 text-center text-xs font-bold text-orange-700 hover:text-orange-900 truncate"
                           >
                             View ESIC
-                          </a>
+                          </button>
                           <label
                             className="p-1 text-gray-500 hover:text-orange-600 cursor-pointer rounded transition-colors"
                             title="Replace Document"
@@ -1475,15 +1507,21 @@ export const StaffPage: React.FC = () => {
                               {doc.document_type}
                             </span>
                           </div>
-                          <a
-                            href={doc.view_url || doc.gcp_file_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-[11px] font-bold text-teal-600 hover:text-teal-800 flex items-center gap-1 ml-2 flex-shrink-0"
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setActiveDocPreview({
+                                id: doc.id,
+                                fileName: doc.file_name,
+                                title: `${formData.name || 'Staff'} - ${doc.document_type || 'Document'}`,
+                                url: doc.view_url || doc.gcp_file_url,
+                              })
+                            }
+                            className="text-[11px] font-bold text-teal-600 hover:text-teal-800 flex items-center gap-1 ml-2 flex-shrink-0 cursor-pointer"
                           >
                             <span>View</span>
                             <Eye className="w-3 h-3" />
-                          </a>
+                          </button>
                         </div>
                       ))}
                     </div>
@@ -1543,14 +1581,20 @@ export const StaffPage: React.FC = () => {
                     <span className="font-semibold text-xs text-gray-800">{docType}</span>
 
                     {uploadedDoc ? (
-                      <a
-                        href={uploadedDoc.view_url || uploadedDoc.gcp_file_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActiveDocPreview({
+                            id: uploadedDoc.id,
+                            fileName: uploadedDoc.file_name || `${docType}.pdf`,
+                            title: `${viewerStaffName} - ${docType}`,
+                            url: uploadedDoc.view_url || uploadedDoc.gcp_file_url,
+                          })
+                        }
                         className="px-3 py-1.5 text-xs font-bold text-teal-700 bg-teal-50 border border-teal-200 rounded-lg hover:bg-teal-100 flex items-center gap-1.5 transition-colors cursor-pointer"
                       >
                         <Eye className="w-3.5 h-3.5" /> View
-                      </a>
+                      </button>
                     ) : (
                       <span className="px-3 py-1.5 text-xs font-medium text-gray-400 bg-gray-100 rounded-lg border border-gray-200">
                         Not Uploaded
@@ -1563,6 +1607,16 @@ export const StaffPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Inline Document Viewer Modal */}
+      <DocumentViewerModal
+        isOpen={!!activeDocPreview}
+        onClose={() => setActiveDocPreview(null)}
+        documentId={activeDocPreview?.id}
+        url={activeDocPreview?.url}
+        fileName={activeDocPreview?.fileName}
+        title={activeDocPreview?.title}
+      />
     </div>
   );
 };

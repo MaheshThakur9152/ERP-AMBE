@@ -17,6 +17,7 @@ import {
   Hash,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
+import { DocumentViewerModal } from '@/components/DocumentViewerModal';
 
 interface CompanyDocument {
   id: string;
@@ -50,6 +51,7 @@ export const InvoiceVault: React.FC = () => {
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [uploading, setUploading] = useState<boolean>(false);
   const [uploadMessage, setUploadMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [viewingDoc, setViewingDoc] = useState<{ id: string; fileName: string; title: string; url?: string } | null>(null);
 
   const [siteOptions, setSiteOptions] = useState<string[]>([]);
   const [documents, setDocuments] = useState<CompanyDocument[]>([]);
@@ -603,15 +605,21 @@ export const InvoiceVault: React.FC = () => {
                     </td>
                     <td className="py-3 px-4 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <a
-                          href={doc.view_url || doc.gcp_file_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setViewingDoc({
+                              id: doc.id,
+                              fileName: doc.file_name,
+                              title: `${doc.entity} - ${doc.doc_type} (${doc.site_name})`,
+                              url: doc.view_url || doc.gcp_file_url,
+                            })
+                          }
                           className="px-2.5 py-1.5 rounded-lg bg-teal-50 hover:bg-teal-100 text-[#20B2AA] border border-[#20B2AA]/30 text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer"
                         >
                           <span>View</span>
                           <Eye className="w-3 h-3" />
-                        </a>
+                        </button>
                         <button
                           type="button"
                           onClick={() => handleDeleteDocument(doc.id, doc.file_name)}
@@ -629,6 +637,16 @@ export const InvoiceVault: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {/* Inline Document Viewer Modal */}
+      <DocumentViewerModal
+        isOpen={!!viewingDoc}
+        onClose={() => setViewingDoc(null)}
+        documentId={viewingDoc?.id}
+        url={viewingDoc?.url}
+        fileName={viewingDoc?.fileName}
+        title={viewingDoc?.title}
+      />
     </div>
   );
 };

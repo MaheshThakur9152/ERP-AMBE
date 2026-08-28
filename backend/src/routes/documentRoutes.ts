@@ -9,6 +9,7 @@ import {
   getEmployeeDocuments,
   uploadSiteDocumentGlobal,
   deleteSiteDocument,
+  viewDocumentProxy,
 } from '../controllers/documentController';
 import { requireAuth, requireAdmin, requireSuperAdmin } from '../middlewares/authMiddleware';
 import { validateFileMagicBytes } from '../middlewares/fileValidator';
@@ -167,6 +168,9 @@ router.post(
   validateFileMagicBytes,
   uploadSiteDocumentGlobal
 );
+// Proxy view route for inline previewing
+router.get('/:documentId/view', requireAuth, viewDocumentProxy);
+
 router.delete('/:id', requireAuth, requireSuperAdmin, deleteSiteDocument);
 
 export default router;

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { RateCardManager } from './RateCardManager';
 import { DocumentUploadModal } from './DocumentUploadModal';
+import { DocumentViewerModal } from '@/components/DocumentViewerModal';
 import { fetchSiteDocumentsApi } from '../api/siteApi';
 import { toast } from '@/components/ui/toast';
 
@@ -36,6 +37,7 @@ export const SiteList: React.FC<SiteListProps> = ({
   const [statusFilter, setStatusFilter] = useState<'All' | 'Active' | 'Inactive'>('All');
   const [managingRateCardSite, setManagingRateCardSite] = useState<{ id: string; name: string } | null>(null);
   const [siteWorkOrders, setSiteWorkOrders] = useState<Record<string, string>>({});
+  const [viewingDoc, setViewingDoc] = useState<{ id?: string; fileName: string; title: string; url?: string } | null>(null);
   const [uploadModalSite, setUploadModalSite] = useState<Site | null>(null);
 
   const loadWorkOrders = () => {
@@ -217,16 +219,21 @@ export const SiteList: React.FC<SiteListProps> = ({
                           </span>
                           <div className="flex items-center gap-1.5 pt-0.5">
                             {siteWorkOrders[site.id] ? (
-                              <a
-                                href={siteWorkOrders[site.id]}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-50 text-[#20B2AA] border border-[#20B2AA]/30 hover:bg-[#20B2AA]/10 flex items-center gap-1 transition-colors"
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setViewingDoc({
+                                    url: siteWorkOrders[site.id],
+                                    fileName: `${site.siteName}_Work_Order.pdf`,
+                                    title: `${site.siteName} - Work Order`,
+                                  })
+                                }
+                                className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-50 text-[#20B2AA] border border-[#20B2AA]/30 hover:bg-[#20B2AA]/10 flex items-center gap-1 transition-colors cursor-pointer"
                                 title="View Stored Work Order Document"
                               >
                                 <FileCheck className="w-3 h-3 text-[#20B2AA]" />
                                 <span>View</span>
-                              </a>
+                              </button>
                             ) : (
                               <span
                                 className="px-1.5 py-0.5 rounded text-[10px] text-gray-400 bg-gray-50 border border-gray-200 flex items-center gap-1 cursor-not-allowed select-none"
@@ -321,6 +328,15 @@ export const SiteList: React.FC<SiteListProps> = ({
           sites={sites}
         />
       )}
+
+      {/* Inline Document Viewer Modal */}
+      <DocumentViewerModal
+        isOpen={!!viewingDoc}
+        onClose={() => setViewingDoc(null)}
+        url={viewingDoc?.url}
+        fileName={viewingDoc?.fileName}
+        title={viewingDoc?.title}
+      />
     </div>
   );
 };

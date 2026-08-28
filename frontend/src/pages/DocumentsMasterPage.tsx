@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { SiteDocument, Site } from '@/features/sites/types';
 import { fetchAllDocumentsApi, deleteDocumentApi, fetchSitesApi } from '@/features/sites/api/siteApi';
 import { DocumentUploadModal } from '@/features/sites/components/DocumentUploadModal';
+import { DocumentViewerModal } from '@/components/DocumentViewerModal';
 import { useAuth } from '@/features/auth/context/AuthContext';
 import { toast, ToastContainer } from '@/components/ui/toast';
 import {
@@ -20,6 +21,7 @@ import {
   Tag,
   Calendar,
   User,
+  Eye,
 } from 'lucide-react';
 
 export const DocumentsMasterPage: React.FC = () => {
@@ -32,6 +34,7 @@ export const DocumentsMasterPage: React.FC = () => {
   const [siteFilter, setSiteFilter] = useState<string>('All');
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [viewingDoc, setViewingDoc] = useState<{ id: string; fileName: string; title: string; url?: string } | null>(null);
 
   const loadData = async () => {
     setIsLoading(true);
@@ -373,15 +376,21 @@ export const DocumentsMasterPage: React.FC = () => {
                         <div className="flex items-center justify-end gap-1.5">
                           {docUrl ? (
                             <>
-                              <a
-                                href={docUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="p-1.5 text-teal-600 hover:text-teal-700 hover:bg-teal-50 rounded-lg border border-teal-200 transition-colors"
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setViewingDoc({
+                                    id: doc.id,
+                                    fileName: doc.file_name,
+                                    title: `${siteName} - ${doc.document_type}`,
+                                    url: docUrl,
+                                  })
+                                }
+                                className="p-1.5 text-teal-600 hover:text-teal-700 hover:bg-teal-50 rounded-lg border border-teal-200 transition-colors cursor-pointer"
                                 title="View Document"
                               >
-                                <ExternalLink className="w-3.5 h-3.5" />
-                              </a>
+                                <Eye className="w-3.5 h-3.5" />
+                              </button>
                               <a
                                 href={docUrl}
                                 download={doc.file_name}
@@ -427,6 +436,16 @@ export const DocumentsMasterPage: React.FC = () => {
         onClose={() => setIsUploadModalOpen(false)}
         onSuccess={loadData}
         sites={sites}
+      />
+
+      {/* Inline Document Viewer Modal */}
+      <DocumentViewerModal
+        isOpen={!!viewingDoc}
+        onClose={() => setViewingDoc(null)}
+        documentId={viewingDoc?.id}
+        url={viewingDoc?.url}
+        fileName={viewingDoc?.fileName}
+        title={viewingDoc?.title}
       />
     </div>
   );

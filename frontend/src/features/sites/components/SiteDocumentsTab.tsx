@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { SiteDocument } from '../types';
 import { fetchSiteDocumentsApi, uploadSiteDocumentApi } from '../api/siteApi';
+import { DocumentViewerModal } from '@/components/DocumentViewerModal';
 import { toast } from '@/components/ui/toast';
 import {
   FileText,
@@ -14,6 +15,7 @@ import {
   Calendar,
   Tag,
   Paperclip,
+  Eye,
 } from 'lucide-react';
 
 interface SiteDocumentsTabProps {
@@ -41,6 +43,7 @@ export const SiteDocumentsTab: React.FC<SiteDocumentsTabProps> = ({ siteId, site
   const [customDocType, setCustomDocType] = useState<string>('');
   const [docLabel, setDocLabel] = useState<string>('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [viewingDoc, setViewingDoc] = useState<{ id: string; fileName: string; title: string; url?: string } | null>(null);
 
   const loadDocuments = async () => {
     if (!siteId) return;
@@ -300,16 +303,22 @@ export const SiteDocumentsTab: React.FC<SiteDocumentsTabProps> = ({ siteId, site
                         <div className="flex items-center justify-end gap-1.5">
                           {docUrl ? (
                             <>
-                              <a
-                                href={docUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="p-1.5 rounded-lg text-[#20B2AA] hover:bg-teal-50 border border-[#20B2AA]/30 transition-colors flex items-center gap-1 font-semibold text-[10px]"
-                                title="View Document in New Tab"
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setViewingDoc({
+                                    id: doc.id,
+                                    fileName: doc.file_name,
+                                    title: `${siteName} - ${doc.document_type}`,
+                                    url: docUrl,
+                                  })
+                                }
+                                className="p-1.5 rounded-lg text-[#20B2AA] hover:bg-teal-50 border border-[#20B2AA]/30 transition-colors flex items-center gap-1 font-semibold text-[10px] cursor-pointer"
+                                title="View Document"
                               >
-                                <ExternalLink className="w-3.5 h-3.5" />
+                                <Eye className="w-3.5 h-3.5" />
                                 <span>View</span>
-                              </a>
+                              </button>
                               <a
                                 href={docUrl}
                                 download={doc.file_name}
@@ -332,6 +341,16 @@ export const SiteDocumentsTab: React.FC<SiteDocumentsTabProps> = ({ siteId, site
           </div>
         )}
       </div>
+
+      {/* Inline Document Viewer Modal */}
+      <DocumentViewerModal
+        isOpen={!!viewingDoc}
+        onClose={() => setViewingDoc(null)}
+        documentId={viewingDoc?.id}
+        url={viewingDoc?.url}
+        fileName={viewingDoc?.fileName}
+        title={viewingDoc?.title}
+      />
     </div>
   );
 };

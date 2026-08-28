@@ -21,6 +21,7 @@ import { fetchInvoicesApi, cancelInvoiceApi } from '../api/invoiceApi';
 import { InvoiceRecord } from '../types';
 import { toast } from '@/components/ui/toast';
 import { formatCurrency } from '@/features/invoices/utils/invoiceCalculator';
+import { DocumentViewerModal } from '@/components/DocumentViewerModal';
 
 interface GroupedLineage {
   key: string;
@@ -36,6 +37,7 @@ export const InvoiceTracker: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [uploadingDocId, setUploadingDocId] = useState<string | null>(null);
   const [uploadingAttId, setUploadingAttId] = useState<string | null>(null);
+  const [viewingDoc, setViewingDoc] = useState<{ id?: string; fileName: string; title: string; url?: string } | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   const loadInvoices = async () => {
@@ -377,30 +379,42 @@ export const InvoiceTracker: React.FC = () => {
                         <div className="flex items-center gap-1.5 flex-wrap">
                           {/* 1. Generated Copy */}
                           {genPdf && (
-                            <a
-                              href={genPdf}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="px-2 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 rounded-lg text-[10px] font-semibold flex items-center gap-1 transition-colors"
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setViewingDoc({
+                                  id: inv.id,
+                                  url: `${genPdf}?type=generated`,
+                                  fileName: `${inv.invoiceNo}_Generated.pdf`,
+                                  title: `Invoice ${inv.invoiceNo} - Generated Copy`,
+                                })
+                              }
+                              className="px-2 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 rounded-lg text-[10px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
                               title="View System Generated PDF"
                             >
                               <FileText className="w-3.5 h-3.5 text-indigo-600" />
                               <span>Generated Copy</span>
-                            </a>
+                            </button>
                           )}
 
                           {/* 2. Uploaded Copy (or greyed out 'Not uploaded') */}
                           {certDoc ? (
-                            <a
-                              href={certDoc}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="px-2 py-1 bg-teal-50 text-[#20B2AA] border border-[#20B2AA]/30 hover:bg-[#20B2AA]/10 rounded-lg text-[10px] font-semibold flex items-center gap-1 transition-colors"
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setViewingDoc({
+                                  id: inv.id,
+                                  url: `${certDoc}?type=certified`,
+                                  fileName: `${inv.invoiceNo}_Certified.pdf`,
+                                  title: `Invoice ${inv.invoiceNo} - Uploaded Copy`,
+                                })
+                              }
+                              className="px-2 py-1 bg-teal-50 text-[#20B2AA] border border-[#20B2AA]/30 hover:bg-[#20B2AA]/10 rounded-lg text-[10px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
                               title="View Uploaded Certified Copy"
                             >
                               <FileCheck className="w-3.5 h-3.5 text-[#20B2AA]" />
                               <span>Uploaded Copy</span>
-                            </a>
+                            </button>
                           ) : (
                             <span
                               className="px-2 py-1 bg-gray-50 text-gray-400 border border-gray-200 rounded-lg text-[10px] font-medium flex items-center gap-1 cursor-default select-none"
@@ -443,16 +457,22 @@ export const InvoiceTracker: React.FC = () => {
 
                           {/* 4. Upload / View Certified Attendance */}
                           {certAtt ? (
-                            <a
-                              href={certAtt}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="px-2 py-1 bg-teal-50 text-[#20B2AA] border border-[#20B2AA]/30 hover:bg-[#20B2AA]/10 rounded-lg text-[10px] font-semibold flex items-center gap-1 transition-colors"
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setViewingDoc({
+                                  id: inv.id,
+                                  url: `${certAtt}?type=attendance`,
+                                  fileName: `${inv.invoiceNo}_Attendance.pdf`,
+                                  title: `Invoice ${inv.invoiceNo} - Attendance`,
+                                })
+                              }
+                              className="px-2 py-1 bg-teal-50 text-[#20B2AA] border border-[#20B2AA]/30 hover:bg-[#20B2AA]/10 rounded-lg text-[10px] font-semibold flex items-center gap-1 transition-colors cursor-pointer"
                               title="View Certified Attendance sheet"
                             >
                               <FileCheck className="w-3.5 h-3.5 text-[#20B2AA]" />
                               <span>Attendance</span>
-                            </a>
+                            </button>
                           ) : (
                             <label
                               className={`px-2 py-1 rounded-lg border text-[10px] font-semibold flex items-center gap-1 cursor-pointer transition-colors ${
@@ -460,7 +480,7 @@ export const InvoiceTracker: React.FC = () => {
                                   ? 'bg-gray-100 text-gray-400 border-gray-200'
                                   : 'text-[#20B2AA] border-[#20B2AA]/30 hover:bg-[#20B2AA]/10'
                               }`}
-                              title="Upload Certified Attendance sheet"
+                              title="Upload Certified Attendance Sheet"
                             >
                               {uploadingAttId === inv.id ? (
                                 <Loader2 className="w-3 h-3 animate-spin text-[#20B2AA]" />
@@ -491,6 +511,16 @@ export const InvoiceTracker: React.FC = () => {
           ))}
         </div>
       )}
+
+      {/* Inline Document Viewer Modal */}
+      <DocumentViewerModal
+        isOpen={!!viewingDoc}
+        onClose={() => setViewingDoc(null)}
+        documentId={viewingDoc?.id}
+        url={viewingDoc?.url}
+        fileName={viewingDoc?.fileName}
+        title={viewingDoc?.title}
+      />
     </div>
   );
 };
