@@ -23,6 +23,7 @@ function sanitizeFileName(name?: string): string {
 }
 
 export const uploadDocument = async (req: Request, res: Response): Promise<void> => {
+  let uploadedStorageKey: string | null = null;
   try {
     const file = req.file;
     const staffId = req.body.staff_id;
@@ -63,12 +64,13 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
     // 1. Run file compression unchanged before storage call
     const compressed = await CompressionService.compressFile(file.buffer, file.mimetype);
 
-    // 2. Build storage key matching convention: employees/{siteName}/{designation}/{employeeName}/{timestamp}-{fileName}
+    // 2. Build storage key: employees/{siteName}/{designation}/{employeeName}/{DocumentType}-{shortUuid}.{ext}
     const storageKey = buildEmployeeStorageKey({
       siteName,
       designation,
       employeeName,
-      fileName: safeOriginalName,
+      documentType: docType,
+      originalName: file.originalname,
     });
 
     // 3. Upload to MinIO / Oracle Object Storage
@@ -77,6 +79,7 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
       storageKey,
       compressed.mimeType
     );
+    uploadedStorageKey = storageResult.storageKey;
 
     // 4. Generate signed read URL for immediate client preview
     const viewUrl = await OracleStorageService.getSignedReadUrl(storageResult.storageKey);
@@ -110,12 +113,14 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
         .single();
 
       if (dbError) {
-        console.error('❌ Supabase insert error:', dbError);
+        console.error('❌ Supabase insert error, deleting uploaded MinIO object for rollback:', dbError);
+        // Rollback uploaded MinIO file to avoid orphaned objects on retry
+        if (uploadedStorageKey) {
+          await OracleStorageService.deleteFile(uploadedStorageKey);
+        }
         res.status(500).json({
-          error: 'Uploaded to storage, but failed to insert metadata',
+          error: 'Failed to insert metadata into database',
           ...(process.env.NODE_ENV === 'development' && { details: dbError.message }),
-          view_url: viewUrl,
-          gcp_file_url: viewUrl,
           file_name: safeOriginalName,
         });
         return;
@@ -133,12 +138,16 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
       document: insertedDoc,
     });
   } catch (error: any) {
+    if (uploadedStorageKey) {
+      await OracleStorageService.deleteFile(uploadedStorageKey).catch(() => {});
+    }
     console.error("Document Upload Error:", error.response?.data || error.message || error);
     res.status(500).json({ error: 'Failed to upload', ...(process.env.NODE_ENV === 'development' && { details: error.message }) });
   }
 };
 
 export const uploadCompanyInvoiceDocument = async (req: Request, res: Response): Promise<void> => {
+  let uploadedStorageKey: string | null = null;
   try {
     const file = req.file;
     const entity = req.body.entity || 'Ambe';
@@ -160,12 +169,13 @@ export const uploadCompanyInvoiceDocument = async (req: Request, res: Response):
     // 1. Run file compression unchanged before storage call
     const compressed = await CompressionService.compressFile(file.buffer, file.mimetype);
 
-    // 2. Build storage key matching convention: invoices/{entity}/{year}/{month}/{timestamp}-{fileName}
+    // 2. Build storage key: invoices/{entity}/{year}/{month}/{DocumentType}-{shortUuid}.{ext}
     const storageKey = buildInvoiceStorageKey({
       entity,
       year,
       month,
-      fileName: effectiveFileName,
+      documentType: docType,
+      originalName: file.originalname,
     });
 
     // 3. Upload to MinIO / Oracle Object Storage
@@ -174,6 +184,7 @@ export const uploadCompanyInvoiceDocument = async (req: Request, res: Response):
       storageKey,
       compressed.mimeType
     );
+    uploadedStorageKey = storageResult.storageKey;
 
     // 4. Generate signed read URL
     const viewUrl = await OracleStorageService.getSignedReadUrl(storageResult.storageKey);
@@ -220,12 +231,16 @@ export const uploadCompanyInvoiceDocument = async (req: Request, res: Response):
       document: insertedDoc,
     });
   } catch (error: any) {
+    if (uploadedStorageKey) {
+      await OracleStorageService.deleteFile(uploadedStorageKey).catch(() => {});
+    }
     console.error("Invoice Document Upload Error:", error.response?.data || error.message || error);
     res.status(500).json({ error: 'Failed to upload invoice document', ...(process.env.NODE_ENV === 'development' && { details: error.message }) });
   }
 };
 
 export const uploadInvoiceDirect = async (req: Request, res: Response): Promise<void> => {
+  let uploadedStorageKey: string | null = null;
   try {
     const file = req.file;
     const rawFileName = req.body.file_name || req.body.fileName || file?.originalname;
@@ -265,21 +280,22 @@ export const uploadInvoiceDirect = async (req: Request, res: Response): Promise<
       }
     }
 
+    const category = isAttendance ? 'Certified-Attendance' : (isGenerated ? 'Generated' : 'Certified');
     let fileName = sanitizeFileName(rawFileName);
     if (invoiceNo) {
-      const category = isAttendance ? 'Certified_Attendance' : (isGenerated ? 'Generated' : 'Certified');
-      fileName = buildInvoiceFileName(invoiceNo, category, path.extname(file.originalname));
+      fileName = buildInvoiceFileName(invoiceNo, category.replace('-', '_'), path.extname(file.originalname));
     }
 
     // 1. Run file compression unchanged before storage call
     const compressed = await CompressionService.compressFile(file.buffer, file.mimetype);
 
-    // 2. Build storage key matching convention: invoices/{entity}/{year}/{month}/{timestamp}-{fileName}
+    // 2. Build storage key: invoices/{entity}/{year}/{month}/{DocumentType}-{shortUuid}.{ext}
     const storageKey = buildInvoiceStorageKey({
       entity: 'Invoices',
       year: new Date().getFullYear(),
       month: String(new Date().getMonth() + 1).padStart(2, '0'),
-      fileName,
+      documentType: category,
+      originalName: file.originalname,
     });
 
     // 3. Upload to MinIO / Oracle Object Storage
@@ -288,6 +304,7 @@ export const uploadInvoiceDirect = async (req: Request, res: Response): Promise<
       storageKey,
       compressed.mimeType
     );
+    uploadedStorageKey = storageResult.storageKey;
 
     // 4. Generate signed read URL
     const viewUrl = await OracleStorageService.getSignedReadUrl(storageResult.storageKey);
@@ -311,7 +328,15 @@ export const uploadInvoiceDirect = async (req: Request, res: Response): Promise<
         .eq('id', invoiceId);
 
       if (dbError) {
-        console.error('Supabase invoice attachment update error:', dbError);
+        console.error('Supabase invoice attachment update error, rolling back MinIO upload:', dbError);
+        if (uploadedStorageKey) {
+          await OracleStorageService.deleteFile(uploadedStorageKey);
+        }
+        res.status(500).json({
+          error: 'Failed to update invoice attachment metadata',
+          ...(process.env.NODE_ENV === 'development' && { details: dbError.message }),
+        });
+        return;
       }
     }
 
@@ -328,6 +353,9 @@ export const uploadInvoiceDirect = async (req: Request, res: Response): Promise<
       certified_attendance_url: isAttendance ? viewUrl : undefined,
     });
   } catch (error: any) {
+    if (uploadedStorageKey) {
+      await OracleStorageService.deleteFile(uploadedStorageKey).catch(() => {});
+    }
     console.error('Direct Invoice Upload Error:', error.response?.data || error.message || error);
     res.status(500).json({ error: 'Failed to upload invoice attachment', ...(process.env.NODE_ENV === 'development' && { details: error.message }) });
   }

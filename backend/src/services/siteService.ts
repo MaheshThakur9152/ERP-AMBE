@@ -368,60 +368,73 @@ export class SiteService {
       originalName: file.originalname,
     });
 
-    // 4. Build object storage key convention: sites/{siteName}/{timestamp}-{fileName}
+    // 4. Build object storage key convention: sites/{siteName}/{DocumentType}-{shortUuid}.{ext}
     const storageKey = buildSiteStorageKey({
       siteName: rawSiteName,
-      fileName,
+      documentType: documentType || 'Document',
+      originalName: file.originalname,
     });
 
-    // 5. Upload to Oracle/MinIO Storage
-    const storageResult = await OracleStorageService.uploadFile(
-      compressed.buffer,
-      storageKey,
-      compressed.mimeType
-    );
+    let uploadedStorageKey: string | null = null;
+    try {
+      // 5. Upload to Oracle/MinIO Storage
+      const storageResult = await OracleStorageService.uploadFile(
+        compressed.buffer,
+        storageKey,
+        compressed.mimeType
+      );
+      uploadedStorageKey = storageResult.storageKey;
 
-    // 6. Generate signed read URL for immediate client preview
-    const viewUrl = await OracleStorageService.getSignedReadUrl(storageResult.storageKey);
+      // 6. Generate signed read URL for immediate client preview
+      const viewUrl = await OracleStorageService.getSignedReadUrl(storageResult.storageKey);
 
-    // 7. Insert metadata into public.site_documents with storage_provider: 'minio' and storage_key
-    const uploadedAt = new Date().toISOString();
+      // 7. Insert metadata into public.site_documents with storage_provider: 'minio' and storage_key
+      const uploadedAt = new Date().toISOString();
 
-    const insertPayload: any = {
-      site_id: siteId,
-      document_type: documentType || 'Document',
-      document_label: documentLabel || null,
-      file_name: fileName,
-      storage_provider: 'minio',
-      storage_key: storageResult.storageKey,
-      gcp_file_url: null,
-      uploaded_at: uploadedAt,
-    };
+      const insertPayload: any = {
+        site_id: siteId,
+        document_type: documentType || 'Document',
+        document_label: documentLabel || null,
+        file_name: fileName,
+        storage_provider: 'minio',
+        storage_key: storageResult.storageKey,
+        gcp_file_url: null,
+        uploaded_at: uploadedAt,
+      };
 
-    let insertedRow = null;
-    const { data: insertedData, error: dbError } = await supabaseAdmin
-      .from('site_documents')
-      .insert([insertPayload])
-      .select('*')
-      .single();
+      let insertedRow = null;
+      const { data: insertedData, error: dbError } = await supabaseAdmin
+        .from('site_documents')
+        .insert([insertPayload])
+        .select('*')
+        .single();
 
-    if (dbError) {
-      console.error('❌ Supabase insert site_documents error:', dbError);
-      throw new Error(`Failed to save site document metadata: ${dbError.message}`);
+      if (dbError) {
+        console.error('❌ Supabase insert site_documents error, rolling back MinIO upload:', dbError);
+        if (uploadedStorageKey) {
+          await OracleStorageService.deleteFile(uploadedStorageKey);
+        }
+        throw new Error(`Failed to save site document metadata: ${dbError.message}`);
+      }
+
+      insertedRow = insertedData;
+      const enrichedRow = await enrichDocumentWithViewUrl(insertedRow || insertPayload);
+
+      return {
+        success: true,
+        file_name: fileName,
+        storage_key: storageResult.storageKey,
+        storage_provider: 'minio',
+        view_url: viewUrl,
+        gcp_file_url: viewUrl, // Fallback compatibility
+        drive_web_view_link: null,
+        document: enrichedRow,
+      };
+    } catch (err: any) {
+      if (uploadedStorageKey) {
+        await OracleStorageService.deleteFile(uploadedStorageKey).catch(() => {});
+      }
+      throw err;
     }
-
-    insertedRow = insertedData;
-    const enrichedRow = await enrichDocumentWithViewUrl(insertedRow || insertPayload);
-
-    return {
-      success: true,
-      file_name: fileName,
-      storage_key: storageResult.storageKey,
-      storage_provider: 'minio',
-      view_url: viewUrl,
-      gcp_file_url: viewUrl, // Fallback compatibility
-      drive_web_view_link: null,
-      document: enrichedRow,
-    };
   }
 }
