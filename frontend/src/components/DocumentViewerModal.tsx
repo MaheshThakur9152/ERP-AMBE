@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { X, ExternalLink, Loader2, AlertCircle, FileText, Download } from 'lucide-react';
+import React, { useEffect, useState, useRef } from 'react';
+import { X, ExternalLink, Loader2, AlertCircle, FileText, Download, RefreshCw } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { getApiUrl } from '@/lib/apiClient';
 
@@ -24,99 +24,164 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [isImageType, setIsImageType] = useState<boolean>(false);
+  const [retryKey, setRetryKey] = useState<number>(0);
+
+  // Keep ref of active blob URL to revoke cleanly
+  const currentBlobUrlRef = useRef<string | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Compute primary target URL
   const targetUrl = documentId ? getApiUrl(`/api/documents/${documentId}/view`) : url || '';
 
   useEffect(() => {
-    let active = true;
-    let createdBlobUrl: string | null = null;
+    // Abort any prior in-flight fetch
+    if (abortControllerRef.current) {
+      console.warn('[KYCPreview] Aborting prior in-flight request');
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+
+    if (!isOpen || !targetUrl) {
+      setLoading(false);
+      return;
+    }
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
     async function loadDocument() {
-      if (!isOpen || !targetUrl) {
-        setLoading(false);
-        return;
-      }
-
       setLoading(true);
       setError(null);
-      setBlobUrl(null);
+
+      console.log(`[KYCPreview] Request start - documentId: ${documentId || 'none'}, fileName: ${fileName}, targetUrl: ${targetUrl}`);
 
       try {
-        // Retrieve current Supabase session token
-        const { data: sessionData } = await supabase.auth.getSession();
-        const token = sessionData?.session?.access_token;
+        // 1. Get current Supabase session token
+        let { data: sessionData } = await supabase.auth.getSession();
+        let token = sessionData?.session?.access_token;
 
-        const headers: Record<string, string> = {};
+        // 2. Build authenticated request
+        let fetchUrl = documentId
+          ? getApiUrl(`/api/documents/${documentId}/view${token ? `?token=${encodeURIComponent(token)}` : ''}`)
+          : targetUrl;
+
+        let headers: Record<string, string> = {};
         if (token) {
           headers['Authorization'] = `Bearer ${token}`;
         }
 
-        // Fetch document stream from backend or URL
-        const fetchUrl = (documentId && token)
-          ? getApiUrl(`/api/documents/${documentId}/view?token=${encodeURIComponent(token)}`)
-          : targetUrl;
+        console.log(`[KYCPreview] Fetching stream from: ${fetchUrl.split('?')[0]} (token present: ${Boolean(token)})`);
 
-        const res = await fetch(fetchUrl, {
+        let res = await fetch(fetchUrl, {
           method: 'GET',
           headers,
+          signal: abortController.signal,
         });
 
+        console.log(`[KYCPreview] HTTP status: ${res.status} ${res.statusText}`);
+
+        // 3. Handle 401 token expiry - attempt silent refresh
+        if (res.status === 401) {
+          console.warn('[KYCPreview] Received 401. Attempting session refresh...');
+          const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+          if (!refreshError && refreshData?.session?.access_token) {
+            token = refreshData.session.access_token;
+            headers['Authorization'] = `Bearer ${token}`;
+            fetchUrl = documentId
+              ? getApiUrl(`/api/documents/${documentId}/view?token=${encodeURIComponent(token)}`)
+              : targetUrl;
+            console.log('[KYCPreview] Retrying fetch with refreshed token...');
+            res = await fetch(fetchUrl, {
+              method: 'GET',
+              headers,
+              signal: abortController.signal,
+            });
+            console.log(`[KYCPreview] Retry HTTP status: ${res.status}`);
+          }
+        }
+
         if (!res.ok) {
-          // If not ok and we have a fallback url, try fallback
+          // If direct url fallback exists and differs, try it
           if (url && url !== targetUrl) {
-            const fallbackRes = await fetch(url);
+            console.log(`[KYCPreview] Trying fallback URL: ${url}`);
+            const fallbackRes = await fetch(url, { signal: abortController.signal });
             if (fallbackRes.ok) {
-              const blob = await fallbackRes.blob();
-              if (active) {
-                createdBlobUrl = URL.createObjectURL(blob);
-                setBlobUrl(createdBlobUrl);
-                setIsImageType(blob.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(fileName));
-                setLoading(false);
-                return;
+              const fallbackBlob = await fallbackRes.blob();
+              const newBlobUrl = URL.createObjectURL(fallbackBlob);
+              if (currentBlobUrlRef.current) {
+                console.log(`[KYCPreview] Revoking previous blob: ${currentBlobUrlRef.current}`);
+                URL.revokeObjectURL(currentBlobUrlRef.current);
               }
+              currentBlobUrlRef.current = newBlobUrl;
+              setBlobUrl(newBlobUrl);
+              setIsImageType(fallbackBlob.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(fileName));
+              setLoading(false);
+              return;
             }
           }
-          throw new Error(`Failed to load document (HTTP ${res.status})`);
+          throw new Error(`Server returned HTTP ${res.status}: ${res.statusText}`);
         }
 
         const contentType = res.headers.get('content-type') || '';
         const blob = await res.blob();
+        console.log(`[KYCPreview] Blob received - size: ${blob.size} bytes, content-type: ${contentType || blob.type}`);
 
-        if (active) {
-          createdBlobUrl = URL.createObjectURL(blob);
-          setBlobUrl(createdBlobUrl);
-          const isImg =
-            contentType.startsWith('image/') ||
-            blob.type.startsWith('image/') ||
-            /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(fileName || targetUrl);
-          setIsImageType(isImg);
-          setLoading(false);
+        if (blob.size === 0) {
+          throw new Error('Received empty document stream (0 bytes)');
         }
+
+        // Create new blob object URL
+        const newBlobUrl = URL.createObjectURL(blob);
+        console.log(`[KYCPreview] Created new blob URL: ${newBlobUrl}`);
+
+        // Revoke previous blob only after new one is ready
+        if (currentBlobUrlRef.current) {
+          console.log(`[KYCPreview] Revoking previous blob: ${currentBlobUrlRef.current}`);
+          URL.revokeObjectURL(currentBlobUrlRef.current);
+        }
+        currentBlobUrlRef.current = newBlobUrl;
+
+        const isImg =
+          contentType.startsWith('image/') ||
+          blob.type.startsWith('image/') ||
+          /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(fileName || targetUrl);
+
+        setBlobUrl(newBlobUrl);
+        setIsImageType(isImg);
+        setLoading(false);
+        console.log(`[KYCPreview] Final preview src assigned: ${newBlobUrl} (isImage: ${isImg})`);
       } catch (err: any) {
-        console.error('Error fetching document preview:', err);
-        if (active) {
-          // Fallback to direct URL if blob fetch failed
-          if (targetUrl) {
-            setBlobUrl(targetUrl);
-            setIsImageType(/\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(fileName || targetUrl));
-          } else {
-            setError(err.message || 'Failed to load document');
-          }
-          setLoading(false);
+        if (err.name === 'AbortError') {
+          console.log('[KYCPreview] Fetch aborted by subsequent request or close');
+          return;
         }
+        console.error('[KYCPreview] Document fetch error:', err);
+        // Explicitly clear blobUrl and do NOT fallback to raw cross-origin URL
+        setBlobUrl(null);
+        setError(err.message || 'Failed to load document preview');
+        setLoading(false);
       }
     }
 
     loadDocument();
 
     return () => {
-      active = false;
-      if (createdBlobUrl) {
-        URL.revokeObjectURL(createdBlobUrl);
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
       }
     };
-  }, [isOpen, targetUrl, documentId, url, fileName]);
+  }, [isOpen, targetUrl, documentId, url, fileName, retryKey]);
+
+  // Clean up blob URL on modal unmount or close
+  useEffect(() => {
+    if (!isOpen && currentBlobUrlRef.current) {
+      console.log(`[KYCPreview] Modal closed. Revoking active blob: ${currentBlobUrlRef.current}`);
+      URL.revokeObjectURL(currentBlobUrlRef.current);
+      currentBlobUrlRef.current = null;
+      setBlobUrl(null);
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -129,8 +194,6 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
-
-  const displayUrl = blobUrl || targetUrl;
 
   return (
     <div
@@ -158,9 +221,9 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
-            {displayUrl && (
+            {blobUrl && (
               <a
-                href={displayUrl}
+                href={blobUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-teal-300 flex items-center gap-1.5 transition-colors"
@@ -194,23 +257,20 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
               <AlertCircle className="w-10 h-10 text-red-500 mb-2" />
               <p className="text-sm font-semibold text-gray-800 mb-1">Failed to load preview</p>
               <p className="text-xs text-gray-500 mb-4">{error}</p>
-              {targetUrl && (
-                <a
-                  href={targetUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="px-4 py-2 rounded-lg bg-teal-600 text-white text-xs font-bold hover:bg-teal-700 transition-colors flex items-center gap-1.5"
-                >
-                  <Download className="w-3.5 h-3.5" /> Try Direct Link
-                </a>
-              )}
+              <button
+                type="button"
+                onClick={() => setRetryKey((k) => k + 1)}
+                className="px-4 py-2 rounded-lg bg-teal-600 text-white text-xs font-bold hover:bg-teal-700 transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+              >
+                <RefreshCw className="w-3.5 h-3.5" /> Retry Preview
+              </button>
             </div>
-          ) : !displayUrl ? (
-            <div className="text-xs text-gray-500">No document preview available.</div>
+          ) : !blobUrl ? (
+            <div className="text-xs text-gray-500">No document preview loaded.</div>
           ) : isImageType ? (
             <div className="w-full h-full p-4 flex items-center justify-center overflow-auto">
               <img
-                src={displayUrl}
+                src={blobUrl}
                 alt={fileName}
                 className="max-w-full max-h-full object-contain rounded shadow-md"
                 onLoad={() => setLoading(false)}
@@ -222,7 +282,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
             </div>
           ) : (
             <iframe
-              src={displayUrl}
+              src={blobUrl}
               title={fileName}
               className="w-full h-full border-0"
               onLoad={() => setLoading(false)}
