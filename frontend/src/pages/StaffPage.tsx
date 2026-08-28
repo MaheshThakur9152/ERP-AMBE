@@ -342,20 +342,35 @@ export const StaffPage: React.FC = () => {
     file: File,
     docType: string
   ) => {
-    if (!file || !staff) return;
+    if (!file || !staff) {
+      toast.error('Missing file or staff for document upload');
+      return;
+    }
+    const staffId = staff.id || (staff as any).staff_id;
+    if (!staffId) {
+      console.error('[StaffEdit] Upload failed: missing staffId on staff object', staff);
+      toast.error('Staff ID missing for upload');
+      return;
+    }
+
     setUploadingDocType(docType);
     setUploadingType(docType);
     try {
-      const empName = staff.employee_name || staff.name || 'Staff';
-      const site = staff.sites?.site_name || staff.site_name || staff.siteName || '';
-      const designation = staff.designation || staff.role || '';
+      const empName = staff.employee_name || staff.name || formData.employee_name || formData.name || 'Staff';
+      const site = staff.sites?.site_name || staff.site_name || staff.siteName || formData.siteName || '';
+      const designation = staff.designation || staff.role || formData.designation || formData.role || '';
+
+      console.log(`[StaffEdit] Uploading ${docType} for employee id=${staffId} (${empName}), fileName=${file.name}`);
 
       const uploadData = new FormData();
       uploadData.append('file', file);
-      uploadData.append('staff_id', staff.id);
+      uploadData.append('staff_id', staffId);
+      uploadData.append('employee_name', empName);
       uploadData.append('employeeName', empName);
+      uploadData.append('doc_type', docType);
       uploadData.append('docType', docType);
       uploadData.append('document_type', docType);
+      uploadData.append('site_name', site);
       uploadData.append('siteName', site);
       uploadData.append('designation', designation);
 
@@ -372,7 +387,7 @@ export const StaffPage: React.FC = () => {
       const resJson = await response.json();
       const newDoc = resJson.document || {
         id: resJson.document?.id || `temp-${Date.now()}`,
-        staff_id: staff.id,
+        staff_id: staffId,
         document_type: docType,
         file_name: file.name,
         view_url: resJson.view_url,
@@ -388,7 +403,7 @@ export const StaffPage: React.FC = () => {
         newDoc,
       ]);
 
-      // 2. Update staffDocs if editing same staff
+      // 2. Update staffDocs
       setStaffDocs((prev) => [
         ...prev.filter(
           (d) => !isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, docType)
@@ -396,10 +411,10 @@ export const StaffPage: React.FC = () => {
         newDoc,
       ]);
 
-      // 3. Update staffList in-place so table badges reflect immediately
+      // 3. Update staffList in-place using stable staffId so table badges reflect immediately regardless of filters
       setStaffList((prevList) =>
         prevList.map((s) => {
-          if (s.id === staff.id) {
+          if (s.id === staffId) {
             const currentDocs = s.employee_documents || s.documents || [];
             const updatedDocs = [
               ...currentDocs.filter(
@@ -416,11 +431,40 @@ export const StaffPage: React.FC = () => {
         })
       );
 
-      // 4. Increment refreshKey for background query sync
+      // 4. Update editingStaff & viewerStaff object references in state
+      setEditingStaff((prev) =>
+        prev && prev.id === staffId
+          ? {
+              ...prev,
+              employee_documents: [
+                ...(prev.employee_documents || []).filter(
+                  (d: any) => !isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, docType)
+                ),
+                newDoc,
+              ],
+            }
+          : prev
+      );
+
+      setViewerStaff((prev) =>
+        prev && prev.id === staffId
+          ? {
+              ...prev,
+              employee_documents: [
+                ...(prev.employee_documents || []).filter(
+                  (d: any) => !isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, docType)
+                ),
+                newDoc,
+              ],
+            }
+          : prev
+      );
+
+      // 5. Increment refreshKey for background query sync
       setRefreshKey((prev) => prev + 1);
       toast.success(`${docType} uploaded successfully`);
     } catch (err: any) {
-      console.error('Document Upload Error:', err);
+      console.error('[StaffEdit] Document Upload Error:', err);
       toast.error(err.message || `Failed to upload ${docType}`);
     } finally {
       setUploadingDocType(null);
@@ -436,6 +480,7 @@ export const StaffPage: React.FC = () => {
     if (!confirmed) return;
 
     setDeletingDocId(documentId);
+    console.log(`[StaffEdit] Deleting document id=${documentId} (${fileName || 'unnamed'})`);
     try {
       const response = await fetchWithRetry(`/api/documents/${encodeURIComponent(documentId)}`, {
         method: 'DELETE',
@@ -462,7 +507,7 @@ export const StaffPage: React.FC = () => {
       }
       setRefreshKey((k) => k + 1);
     } catch (err: any) {
-      console.error('Delete document error:', err);
+      console.error('[StaffEdit] Delete document error:', err);
       toast.error(err.message || 'Failed to delete document');
     } finally {
       setDeletingDocId(null);
@@ -639,12 +684,20 @@ export const StaffPage: React.FC = () => {
   };
 
   const handleDeleteStaff = async (id: string) => {
+    if (!id) {
+      toast.error('Staff ID missing for deletion');
+      return;
+    }
     if (confirm('Are you sure you want to remove this staff member?')) {
+      console.log(`[StaffEdit] Deleting staff id=${id}`);
       const { error } = await supabase.from('staff').delete().eq('id', id);
       if (error) {
-        alert(`Failed to delete staff: ${error.message}`);
+        console.error('[StaffEdit] Delete staff DB error:', error);
+        toast.error(`Failed to delete staff: ${error.message}`);
       } else {
         setStaffList((prev) => prev.filter((s) => s.id !== id));
+        setRefreshKey((prev) => prev + 1);
+        toast.success('Staff member removed successfully');
       }
     }
   };
@@ -656,8 +709,8 @@ export const StaffPage: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!editingStaff) {
-      alert('Please save staff record first before uploading documents.');
+    if (!editingStaff || !editingStaff.id) {
+      toast.error('Please save staff record first before uploading documents.');
       return;
     }
 
@@ -680,36 +733,72 @@ export const StaffPage: React.FC = () => {
     e.preventDefault();
     const empName = (formData.employee_name || formData.name || '').trim();
     if (!empName) {
-      alert('Employee Name is required.');
+      toast.error('Employee Name is required.');
       return;
     }
 
-    if (editingStaff) {
-      const payload: any = {
-        employee_name: empName,
-        biometric_code: (formData.biometric_code || formData.biometricCode || '').trim() || null,
-        phone: (formData.phone || '').trim() || null,
-        designation: (formData.designation || formData.role || 'Janitor').trim(),
-        gender: formData.gender || 'Male',
-        monthly_incentive: Number(formData.monthly_incentive) || 0,
-        status: formData.status || 'Active',
-        site_id: formData.site_id || null,
-        rate_card_id: formData.rate_card_id || null,
-        bank_account_no: (formData.bank_account_no || formData.bankAccountNo || '').trim() || null,
-        bank_ifsc_code: (formData.bank_ifsc_code || formData.bankIfsc || '').trim() || null,
-        bank_name: (formData.bank_name || formData.bankName || '').trim() || null,
-        payee_name: (formData.payee_name || formData.payeeName || '').trim() || null,
-        uan_no: (formData.uan_no || '').trim() || null,
-        esic_no: (formData.esic_no || '').trim() || null,
-      };
+    const staffId = editingStaff?.id || formData.id;
+    if (!staffId) {
+      console.error('[StaffEdit] Update failed: Missing staff id', { editingStaff, formData });
+      toast.error('Cannot update: Employee ID is missing.');
+      return;
+    }
 
-      const { error } = await supabase.from('staff').update(payload).eq('id', editingStaff.id);
+    const payload: any = {
+      employee_name: empName,
+      biometric_code: (formData.biometric_code || formData.biometricCode || '').trim() || null,
+      phone: (formData.phone || '').trim() || null,
+      designation: (formData.designation || formData.role || 'Janitor').trim(),
+      gender: formData.gender || 'Male',
+      monthly_incentive: Number(formData.monthly_incentive) || 0,
+      status: formData.status || 'Active',
+      site_id: formData.site_id || null,
+      rate_card_id: formData.rate_card_id || null,
+      bank_account_no: (formData.bank_account_no || formData.bankAccountNo || '').trim() || null,
+      bank_ifsc_code: (formData.bank_ifsc_code || formData.bankIfsc || '').trim() || null,
+      bank_name: (formData.bank_name || formData.bankName || '').trim() || null,
+      payee_name: (formData.payee_name || formData.payeeName || '').trim() || null,
+      uan_no: (formData.uan_no || '').trim() || null,
+      esic_no: (formData.esic_no || '').trim() || null,
+    };
+
+    console.log(`[StaffEdit] Updating employee id=${staffId} payload:`, payload);
+
+    try {
+      const { error } = await supabase.from('staff').update(payload).eq('id', staffId);
       if (error) {
-        alert(`Failed to update staff: ${error.message}`);
-      } else {
-        setRefreshKey((prev) => prev + 1);
-        setIsModalOpen(false);
+        console.error('[StaffEdit] Update DB error:', error);
+        toast.error(`Failed to update staff: ${error.message}`);
+        return;
       }
+
+      // Update local state in-place so table updates immediately even with active filters
+      setStaffList((prevList) =>
+        prevList.map((s) =>
+          s.id === staffId
+            ? {
+                ...s,
+                ...payload,
+                name: payload.employee_name,
+                role: payload.designation,
+                biometricCode: payload.biometric_code,
+                sites: sitesList.find((site) => site.id === payload.site_id) || s.sites,
+              }
+            : s
+        )
+      );
+
+      // Keep editingStaff object in sync
+      if (editingStaff) {
+        setEditingStaff((prev) => (prev ? { ...prev, ...payload, name: payload.employee_name, role: payload.designation } : null));
+      }
+
+      setRefreshKey((prev) => prev + 1);
+      toast.success('Staff record updated successfully');
+      setIsModalOpen(false);
+    } catch (err: any) {
+      console.error('[StaffEdit] Unexpected error updating staff:', err);
+      toast.error(err.message || 'Unexpected error updating staff record');
     }
   };
 
