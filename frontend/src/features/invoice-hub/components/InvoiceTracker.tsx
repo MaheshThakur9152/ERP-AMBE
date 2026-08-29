@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { getApiUrl } from '@/lib/apiClient';
+import { getApiUrl, fetchWithRetry } from '@/lib/apiClient';
 import {
   FileText,
   Upload,
@@ -153,7 +153,7 @@ export const InvoiceTracker: React.FC = () => {
       formData.append('docType', 'bill');
       formData.append('fileName', `${inv.invoiceNo}_Certified_Bill.${file.name.split('.').pop()}`);
 
-      const res = await fetch(getApiUrl('/api/invoices/upload'), {
+      const res = await fetchWithRetry('/api/invoices/upload', {
         method: 'POST',
         body: formData,
       });
@@ -193,7 +193,7 @@ export const InvoiceTracker: React.FC = () => {
       formData.append('docType', 'attendance');
       formData.append('fileName', `${inv.invoiceNo}_Certified_Attendance.${file.name.split('.').pop()}`);
 
-      const res = await fetch(getApiUrl('/api/invoices/upload'), {
+      const res = await fetchWithRetry('/api/invoices/upload', {
         method: 'POST',
         body: formData,
       });

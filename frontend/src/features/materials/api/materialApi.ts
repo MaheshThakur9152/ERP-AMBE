@@ -1,20 +1,15 @@
-import { supabase } from '@/lib/supabase';
-import { getApiUrl } from '@/lib/apiClient';
+import { fetchWithRetry } from '@/lib/apiClient';
 import { Material, CreateMaterialInput, UpdateMaterialInput } from '../types';
 
 const API_BASE = '/api';
 
-async function getAuthHeader() {
-  const { data: { session } } = await supabase.auth.getSession();
-  return {
-    'Content-Type': 'application/json',
-    'Authorization': session?.access_token ? `Bearer ${session.access_token}` : '',
-  };
-}
-
 export async function fetchMaterialsApi(): Promise<Material[]> {
-  const headers = await getAuthHeader();
-  const res = await fetch(getApiUrl(`${API_BASE}/materials`), { headers });
+  const res = await fetchWithRetry(`${API_BASE}/materials`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
   if (!res.ok) {
     const errorText = await res.text();
     console.error(`[GET /api/materials] API Error ${res.status}:`, errorText);
@@ -31,10 +26,11 @@ export async function fetchMaterialsApi(): Promise<Material[]> {
 }
 
 export async function createMaterialApi(payload: CreateMaterialInput): Promise<Material> {
-  const headers = await getAuthHeader();
-  const res = await fetch(getApiUrl(`${API_BASE}/materials`), {
+  const res = await fetchWithRetry(`${API_BASE}/materials`, {
     method: 'POST',
-    headers,
+    headers: {
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
@@ -47,10 +43,11 @@ export async function createMaterialApi(payload: CreateMaterialInput): Promise<M
 }
 
 export async function updateMaterialApi(id: string, payload: UpdateMaterialInput): Promise<Material> {
-  const headers = await getAuthHeader();
-  const res = await fetch(getApiUrl(`${API_BASE}/materials/${id}`), {
+  const res = await fetchWithRetry(`${API_BASE}/materials/${id}`, {
     method: 'PUT',
-    headers,
+    headers: {
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify(payload),
   });
   if (!res.ok) {
@@ -63,10 +60,11 @@ export async function updateMaterialApi(id: string, payload: UpdateMaterialInput
 }
 
 export async function deleteMaterialApi(id: string): Promise<boolean> {
-  const headers = await getAuthHeader();
-  const res = await fetch(getApiUrl(`${API_BASE}/materials/${id}`), {
+  const res = await fetchWithRetry(`${API_BASE}/materials/${id}`, {
     method: 'DELETE',
-    headers,
+    headers: {
+      'Content-Type': 'application/json',
+    },
   });
   if (!res.ok) {
     const errorText = await res.text();

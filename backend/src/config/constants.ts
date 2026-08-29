@@ -9,9 +9,9 @@ export const DEFAULT_MGMT_FEE_PERCENT = 5;
 export const COOKIE_OPTIONS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
-  sameSite: (process.env.NODE_ENV === 'production' ? 'strict' : 'lax') as 'strict' | 'lax',
+  sameSite: (process.env.NODE_ENV === 'production' ? 'none' : 'lax') as 'none' | 'lax',
   path: '/',
-  ...(process.env.NODE_ENV === 'production' && process.env.COOKIE_DOMAIN ? { domain: process.env.COOKIE_DOMAIN } : {}),
+  ...(process.env.COOKIE_DOMAIN ? { domain: process.env.COOKIE_DOMAIN } : {}),
 };
 
 export const ACCESS_TOKEN_MAX_AGE = 15 * 60 * 1000; // 15 minutes in ms

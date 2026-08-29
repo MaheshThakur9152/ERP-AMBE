@@ -69,7 +69,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
           // If direct url fallback exists and differs, try it
           if (url && url !== targetUrl) {
             console.log(`[KYCPreview] Trying fallback URL: ${url}`);
-            const fallbackRes = await fetch(getApiUrl(url), { signal: abortController.signal });
+            const fallbackRes = await fetchWithRetry(url, { signal: abortController.signal, skipErrorToast: true });
             if (fallbackRes.ok) {
               const fallbackBlob = await fallbackRes.blob();
               const newBlobUrl = URL.createObjectURL(fallbackBlob);

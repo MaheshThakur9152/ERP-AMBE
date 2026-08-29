@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getApiUrl } from '@/lib/apiClient';
+import { getApiUrl, fetchWithRetry } from '@/lib/apiClient';
 import { InvoiceRecord } from '../types';
 import { fetchInvoicesApi, deleteInvoiceApi, createInvoiceApi } from '../api/invoiceApi';
 import { lockInvoiceApi } from '@/features/auth/api/authApi';
@@ -307,7 +307,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
       formData.append('fileName', generatedName);
       formData.append('invoiceId', inv.id);
 
-      const response = await fetch(getApiUrl('/api/invoices/upload'), {
+      const response = await fetchWithRetry('/api/invoices/upload', {
         method: 'POST',
         body: formData,
       });
@@ -372,7 +372,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
       formData.append('file', legacyFile);
       formData.append('fileName', generatedName);
 
-      const uploadRes = await fetch(getApiUrl('/api/invoices/upload'), {
+      const uploadRes = await fetchWithRetry('/api/invoices/upload', {
         method: 'POST',
         body: formData,
       });
