@@ -259,8 +259,13 @@ export const SiteList: React.FC<SiteListProps> = ({
                       <td className="py-3.5 px-4 text-center">
                         <button
                           type="button"
-                          onClick={() => setManagingRateCardSite({ id: site.id, name })}
-                          className="px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 flex items-center gap-1 mx-auto transition-colors"
+                          onClick={() => {
+                            const fullSiteName = (site.codeName || site.code_name)
+                              ? `${name} - ${site.codeName || site.code_name}`
+                              : name;
+                            setManagingRateCardSite({ id: site.id, name: fullSiteName });
+                          }}
+                          className="px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 flex items-center gap-1 mx-auto transition-colors cursor-pointer"
                         >
                           <CreditCard className="w-3 h-3" />
                           <span>Manage Rate Cards</span>

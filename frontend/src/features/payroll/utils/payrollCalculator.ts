@@ -38,6 +38,14 @@ export interface PayrollCalculationResult {
   netSalary: number;
 }
 
+export function normalizeGender(raw: string | null | undefined): 'M' | 'F' | 'O' {
+  if (!raw) return 'M';
+  const g = raw.trim().toUpperCase();
+  if (g.startsWith('F')) return 'F';
+  if (g.startsWith('M')) return 'M';
+  return 'O';
+}
+
 export function calculatePayroll(
   rateCard: RateCard | null | undefined,
   employee: EmployeeInfo | null | undefined,
@@ -93,13 +101,18 @@ export function calculatePayroll(
   const epf = Math.round(earnedBasic * 0.12);
   const earnedGross = earnedBasic + earnedHRA + earnedOther + earnedConveyance + earnedIncentive;
 
+
+
   // Maharashtra PT Logic
   let pt = 0;
-  const genderStr = (employee?.gender || '').trim();
-  if (genderStr === 'F' || genderStr === 'Female' || genderStr.toUpperCase() === 'FEMALE') {
+  const normGender = normalizeGender(employee?.gender);
+  if (normGender === 'F') {
     pt = earnedGross > 25000 ? 200 : 0;
-  } else {
+  } else if (normGender === 'M') {
     pt = earnedGross >= 10000 ? 200 : 0;
+  } else {
+    console.warn(`[PT Calculation] Unhandled gender '${employee?.gender}' (normalized: 'O') for employee. Rule unassigned.`);
+    pt = 0;
   }
 
   // Bonus Accrual (8.33% of Basic)
