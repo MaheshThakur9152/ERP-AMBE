@@ -199,6 +199,9 @@ export async function fetchWithRetry(
       : controller.signal;
 
     try {
+      const hasAuth = headers.has('Authorization');
+      console.debug(`[apiClient] ${method} ${url} (hasAuth: ${hasAuth}, retryAttempt: ${attempt}/${retries})`);
+
       const response = await fetch(fullUrl, {
         ...fetchOptions,
         signal: activeSignal,
@@ -228,7 +231,7 @@ export async function fetchWithRetry(
           });
         } else {
           // Genuine session death (refresh token expired/revoked) -> notify UI while preserving form state
-          console.warn('[apiClient] Token refresh failed. Dispatching auth:session-expired event...');
+          console.warn(`[apiClient] Token refresh failed on 401 for ${url}. Dispatching auth:session-expired event...`);
           window.dispatchEvent(new CustomEvent('auth:session-expired'));
           return response;
         }

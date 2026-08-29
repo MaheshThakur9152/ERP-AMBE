@@ -346,6 +346,10 @@ export const StaffPage: React.FC = () => {
       toast.error('Missing file or staff for document upload');
       return;
     }
+    if (uploadingDocType || uploadingType) {
+      console.warn(`[StaffEdit] Upload already in progress for ${uploadingDocType || uploadingType}, ignoring request for ${docType}`);
+      return;
+    }
     const staffId = staff.id || (staff as any).staff_id;
     if (!staffId) {
       console.error('[StaffEdit] Upload failed: missing staffId on staff object', staff);
@@ -709,8 +713,15 @@ export const StaffPage: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (uploadingType || uploadingDocType) {
+      console.warn(`[StaffEdit] Upload already in progress, ignoring click for ${docType}`);
+      e.target.value = '';
+      return;
+    }
+
     if (!editingStaff || !editingStaff.id) {
       toast.error('Please save staff record first before uploading documents.');
+      e.target.value = '';
       return;
     }
 
@@ -1640,7 +1651,7 @@ export const StaffPage: React.FC = () => {
                     return (
                       <label
                         className={`border border-dashed border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center transition-colors ${
-                          editingStaff ? 'cursor-pointer hover:border-[#20B2AA] hover:bg-teal-50/50' : 'opacity-50 cursor-not-allowed'
+                          editingStaff && !uploadingType ? 'cursor-pointer hover:border-[#20B2AA] hover:bg-teal-50/50' : 'opacity-50 pointer-events-none cursor-not-allowed'
                         }`}
                       >
                         {uploadingType === 'Aadhaar Card' ? (
@@ -1685,7 +1696,9 @@ export const StaffPage: React.FC = () => {
                             View PAN
                           </button>
                           <label
-                            className="p-1 text-gray-500 hover:text-indigo-600 cursor-pointer rounded transition-colors"
+                            className={`p-1 text-gray-500 hover:text-indigo-600 rounded transition-colors ${
+                              uploadingType ? 'opacity-50 pointer-events-none cursor-not-allowed' : 'cursor-pointer'
+                            }`}
                             title="Replace Document"
                           >
                             {uploadingType === 'PAN Card' ? (
@@ -1707,7 +1720,7 @@ export const StaffPage: React.FC = () => {
                     return (
                       <label
                         className={`border border-dashed border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center transition-colors ${
-                          editingStaff ? 'cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/50' : 'opacity-50 cursor-not-allowed'
+                          editingStaff && !uploadingType ? 'cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/50' : 'opacity-50 pointer-events-none cursor-not-allowed'
                         }`}
                       >
                         {uploadingType === 'PAN Card' ? (
@@ -1752,7 +1765,9 @@ export const StaffPage: React.FC = () => {
                             View Passbook
                           </button>
                           <label
-                            className="p-1 text-gray-500 hover:text-purple-600 cursor-pointer rounded transition-colors"
+                            className={`p-1 text-gray-500 hover:text-purple-600 rounded transition-colors ${
+                              uploadingType ? 'opacity-50 pointer-events-none cursor-not-allowed' : 'cursor-pointer'
+                            }`}
                             title="Replace Document"
                           >
                             {uploadingType === 'Bank Details' ? (
@@ -1774,7 +1789,7 @@ export const StaffPage: React.FC = () => {
                     return (
                       <label
                         className={`border border-dashed border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center transition-colors ${
-                          editingStaff ? 'cursor-pointer hover:border-purple-400 hover:bg-purple-50/50' : 'opacity-50 cursor-not-allowed'
+                          editingStaff && !uploadingType ? 'cursor-pointer hover:border-purple-400 hover:bg-purple-50/50' : 'opacity-50 pointer-events-none cursor-not-allowed'
                         }`}
                       >
                         {uploadingType === 'Bank Details' ? (
@@ -1819,7 +1834,9 @@ export const StaffPage: React.FC = () => {
                             View UAN
                           </button>
                           <label
-                            className="p-1 text-gray-500 hover:text-amber-600 cursor-pointer rounded transition-colors"
+                            className={`p-1 text-gray-500 hover:text-amber-600 rounded transition-colors ${
+                              uploadingType ? 'opacity-50 pointer-events-none cursor-not-allowed' : 'cursor-pointer'
+                            }`}
                             title="Replace Document"
                           >
                             {uploadingType === 'UAN Card' ? (
@@ -1841,7 +1858,7 @@ export const StaffPage: React.FC = () => {
                     return (
                       <label
                         className={`border border-dashed border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center transition-colors ${
-                          editingStaff ? 'cursor-pointer hover:border-amber-400 hover:bg-amber-50/50' : 'opacity-50 cursor-not-allowed'
+                          editingStaff && !uploadingType ? 'cursor-pointer hover:border-amber-400 hover:bg-amber-50/50' : 'opacity-50 pointer-events-none cursor-not-allowed'
                         }`}
                       >
                         {uploadingType === 'UAN Card' ? (
@@ -1886,7 +1903,9 @@ export const StaffPage: React.FC = () => {
                             View ESIC
                           </button>
                           <label
-                            className="p-1 text-gray-500 hover:text-orange-600 cursor-pointer rounded transition-colors"
+                            className={`p-1 text-gray-500 hover:text-orange-600 rounded transition-colors ${
+                              uploadingType ? 'opacity-50 pointer-events-none cursor-not-allowed' : 'cursor-pointer'
+                            }`}
                             title="Replace Document"
                           >
                             {uploadingType === 'ESIC Card' ? (
@@ -1908,7 +1927,7 @@ export const StaffPage: React.FC = () => {
                     return (
                       <label
                         className={`border border-dashed border-gray-300 rounded-xl p-3 flex flex-col items-center justify-center transition-colors ${
-                          editingStaff ? 'cursor-pointer hover:border-orange-400 hover:bg-orange-50/50' : 'opacity-50 cursor-not-allowed'
+                          editingStaff && !uploadingType ? 'cursor-pointer hover:border-orange-400 hover:bg-orange-50/50' : 'opacity-50 pointer-events-none cursor-not-allowed'
                         }`}
                       >
                         {uploadingType === 'ESIC Card' ? (
