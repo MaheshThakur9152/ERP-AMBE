@@ -6,6 +6,7 @@ export interface FetchRetryOptions extends RequestInit {
   backoffMs?: number;
   timeoutMs?: number;
   skipErrorToast?: boolean;
+  _is401Retry?: boolean;
 }
 
 /**
@@ -29,14 +30,101 @@ export function getApiUrl(path: string): string {
   return `${envUrl}${cleanPath}`;
 }
 
+// In-Memory Access Token Store (avoids XSS attack vectors of localStorage)
 let inMemoryAccessToken: string | null = null;
+let proactiveRefreshTimer: NodeJS.Timeout | null = null;
+let refreshPromise: Promise<string | null> | null = null;
 
-export function setInMemoryToken(token: string | null): void {
+export const AUTH_ACCESS_TOKEN_TTL_MS = 15 * 60 * 1000; // 15 minutes
+export const PROACTIVE_REFRESH_LEAD_MS = 2 * 60 * 1000; // 2 minutes lead time
+
+/**
+ * Sets or clears the in-memory access token and starts/resets the background refresh timer.
+ */
+export function setInMemoryToken(token: string | null, expiresInMs: number = AUTH_ACCESS_TOKEN_TTL_MS): void {
   inMemoryAccessToken = token;
+  if (token) {
+    scheduleProactiveRefresh(expiresInMs);
+  } else {
+    clearProactiveRefresh();
+  }
 }
 
 export function getInMemoryToken(): string | null {
   return inMemoryAccessToken;
+}
+
+/**
+ * Schedules a background proactive refresh ~2 minutes before token expiry.
+ */
+export function scheduleProactiveRefresh(expiresInMs: number = AUTH_ACCESS_TOKEN_TTL_MS): void {
+  clearProactiveRefresh();
+  const delay = Math.max(expiresInMs - PROACTIVE_REFRESH_LEAD_MS, 30 * 1000);
+
+  proactiveRefreshTimer = setTimeout(async () => {
+    console.debug('[apiClient] Proactively refreshing access token before expiry...');
+    try {
+      await silentRefreshToken();
+    } catch (err) {
+      console.warn('[apiClient] Proactive token refresh failed:', err);
+    }
+  }, delay);
+}
+
+export function clearProactiveRefresh(): void {
+  if (proactiveRefreshTimer) {
+    clearTimeout(proactiveRefreshTimer);
+    proactiveRefreshTimer = null;
+  }
+}
+
+/**
+ * Concurrency-safe silent refresh.
+ * Calls /api/auth/refresh with credentials: 'include'.
+ * Ensures concurrent requests share the exact same refresh promise (no race conditions / duplicate rotation).
+ */
+export async function silentRefreshToken(): Promise<string | null> {
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  refreshPromise = (async () => {
+    try {
+      const refreshUrl = getApiUrl('/api/auth/refresh');
+      const res = await fetch(refreshUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+      });
+
+      if (!res.ok) {
+        console.warn(`[apiClient] Silent refresh returned status ${res.status}`);
+        setInMemoryToken(null);
+        return null;
+      }
+
+      const data = await res.json();
+      const newAccessToken = data.token || data.access_token || null;
+
+      if (newAccessToken) {
+        setInMemoryToken(newAccessToken);
+        return newAccessToken;
+      } else {
+        setInMemoryToken(null);
+        return null;
+      }
+    } catch (err) {
+      console.error('[apiClient] Silent refresh network exception:', err);
+      setInMemoryToken(null);
+      return null;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
 }
 
 // Throttle error toasts so multiple parallel failing requests don't spam toasts
@@ -50,9 +138,11 @@ function showServerUnreachableToast() {
 }
 
 /**
- * Custom fetch wrapper that automatically retries failed GET/5xx requests with exponential backoff.
- * Limits retries to 2 attempts max and enforces a strict request timeout.
- * Surfaces a user-friendly toast when the backend is unreachable.
+ * Custom fetch wrapper that:
+ * 1. Attaches in-memory JWT Access Token in Authorization header.
+ * 2. Injects credentials: 'include' for secure cookie transport.
+ * 3. Proactively retries on 5xx network hiccups with exponential backoff.
+ * 4. Intercepts 401s to perform an automatic silent refresh + replay of the original request.
  */
 export async function fetchWithRetry(
   url: string,
@@ -63,16 +153,17 @@ export async function fetchWithRetry(
     backoffMs = 500,
     timeoutMs = 15000,
     skipErrorToast = false,
+    _is401Retry = false,
     ...fetchOptions
   } = options;
 
   const fullUrl = getApiUrl(url);
   const method = (fetchOptions.method || 'GET').toUpperCase();
 
-  // Ensure cross-origin cookies (access_token, refresh_token) are included by default
+  // Always send cookies (refresh_token)
   fetchOptions.credentials = fetchOptions.credentials || 'include';
 
-  // Attach Authorization header if available and not already set
+  // Attach Authorization header from in-memory token
   const headers = new Headers(fetchOptions.headers || {});
   if (!headers.has('Authorization')) {
     let token = inMemoryAccessToken;
@@ -81,7 +172,7 @@ export async function fetchWithRetry(
         const { data } = await supabase.auth.getSession();
         token = data?.session?.access_token || null;
       } catch {
-        // Ignore session fetch failures
+        // Ignore fallback error
       }
     }
     if (token) {
@@ -111,6 +202,34 @@ export async function fetchWithRetry(
       });
 
       clearTimeout(timerId);
+
+      // 🚨 401 Access Token Expiry Interceptor: Refresh & Retry original request once
+      if (
+        response.status === 401 &&
+        !_is401Retry &&
+        !url.includes('/api/auth/login') &&
+        !url.includes('/api/auth/refresh')
+      ) {
+        console.warn(`[apiClient] 401 Unauthorized encountered on ${url}. Attempting silent token refresh...`);
+        const refreshedToken = await silentRefreshToken();
+
+        if (refreshedToken) {
+          console.info(`[apiClient] Token refreshed successfully. Retrying original request to ${url}...`);
+          const retryHeaders = new Headers(fetchOptions.headers || {});
+          retryHeaders.set('Authorization', `Bearer ${refreshedToken}`);
+
+          return fetchWithRetry(url, {
+            ...options,
+            headers: retryHeaders,
+            _is401Retry: true,
+          });
+        } else {
+          // Genuine session death (refresh token expired/revoked) -> notify UI while preserving form state
+          console.warn('[apiClient] Token refresh failed. Dispatching auth:session-expired event...');
+          window.dispatchEvent(new CustomEvent('auth:session-expired'));
+          return response;
+        }
+      }
 
       // Retry on 5xx server errors (e.g. transient gateway / service unavailable)
       if (!response.ok && response.status >= 500 && attempt < retries) {

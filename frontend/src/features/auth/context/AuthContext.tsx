@@ -3,8 +3,7 @@ import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { setInMemoryToken } from '@/lib/apiClient';
 import { UserProfile, UserRole } from '../types';
-import { loginApi, logoutApi, fetchMeApi, fetchUserProfile } from '../api/authApi';
-
+import { loginApi, logoutApi, refreshTokenApi, fetchMeApi, fetchUserProfile } from '../api/authApi';
 
 interface AuthContextType {
   user: User | null;
@@ -29,7 +28,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const initAuth = async () => {
       try {
-        // 1. Try backend HTTP-only cookie / Bearer session check first (/api/auth/me)
+        // 1. Attempt silent refresh via HTTP-only rotating refresh token cookie
+        const refreshData = await refreshTokenApi();
+        if (refreshData?.user) {
+          const backendUser = refreshData.user;
+          const userObj: User = {
+            id: backendUser.id,
+            app_metadata: { provider: 'email', role: backendUser.role },
+            user_metadata: { email: backendUser.email, role: backendUser.role },
+            aud: 'authenticated',
+            created_at: new Date().toISOString(),
+            email: backendUser.email,
+            phone: '',
+            role: 'authenticated',
+            updated_at: new Date().toISOString(),
+          };
+          setUser(userObj);
+          setRole(backendUser.role);
+          setProfile({
+            id: backendUser.id,
+            email: backendUser.email,
+            full_name: backendUser.email.split('@')[0],
+            role: backendUser.role,
+            phone: null,
+            avatar_url: null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+          return;
+        }
+
+        // 2. Fallback check for active session (/api/auth/me)
         const meData = await fetchMeApi();
         if (meData?.user) {
           const backendUser = meData.user;
@@ -59,7 +88,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return;
         }
 
-        // 2. Fallback to Supabase JS Client session
+        // 3. Fallback to Supabase client session if available
         const { data } = await supabase.auth.getSession();
         if (data?.session?.user) {
           const sessionUser = data.session.user;
@@ -92,7 +121,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return;
         }
 
-        // 3. No active session -> unauthenticated (redirect to /login via ProtectedRoute)
+        // 4. No active credentials -> unauthenticated
         setUser(null);
         setProfile(null);
         setSession(null);
@@ -106,6 +135,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     initAuth();
+
+    // Listen for genuine session expiry event from apiClient 401 interceptor
+    // Preserves sessionStorage form drafts so unsaved work isn't lost
+    const handleSessionExpired = () => {
+      console.warn('[AuthContext] Session expired event received. Transitioning to unauthenticated state.');
+      setUser(null);
+      setProfile(null);
+      setSession(null);
+      setInMemoryToken(null);
+    };
+
+    window.addEventListener('auth:session-expired', handleSessionExpired);
+    return () => {
+      window.removeEventListener('auth:session-expired', handleSessionExpired);
+    };
   }, []);
 
   const login = async (email: string, password: string) => {

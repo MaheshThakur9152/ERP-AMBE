@@ -1,12 +1,15 @@
 import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
-import { COOKIE_OPTIONS, ACCESS_TOKEN_MAX_AGE, REFRESH_TOKEN_MAX_AGE } from '../config/constants';
+import { COOKIE_OPTIONS, REFRESH_TOKEN_MAX_AGE } from '../config/constants';
 import { fetchUserRole } from '../middlewares/authMiddleware';
+import { TokenService } from '../services/tokenService';
 
 export class AuthController {
   /**
    * POST /api/auth/login
-   * Authenticates user via Supabase, sets HTTP-only Access & Refresh token cookies, and returns user role.
+   * Authenticates user via Supabase.
+   * Returns short-lived access token in response body.
+   * Sets long-lived rotating refresh token in HTTP-only, Secure, SameSite=Strict cookie.
    */
   static async login(req: Request, res: Response): Promise<void> {
     try {
@@ -32,16 +35,20 @@ export class AuthController {
       }
 
       const accessToken = data.session.access_token;
-      const refreshToken = data.session.refresh_token;
+      const supabaseRefreshToken = data.session.refresh_token;
 
-      // Set 1-Hour Access Token Cookie
-      res.cookie('access_token', accessToken, {
-        ...COOKIE_OPTIONS,
-        maxAge: ACCESS_TOKEN_MAX_AGE,
-      });
+      // Create server-side refresh token record with rotation & family tracking
+      let rawRefreshToken: string;
+      try {
+        const tokenResult = await TokenService.createRefreshToken(data.user.id, supabaseRefreshToken);
+        rawRefreshToken = tokenResult.rawToken;
+      } catch (dbErr: any) {
+        console.error('[auth:login] Failed to store refresh token in DB, falling back to Supabase refresh token:', dbErr.message);
+        rawRefreshToken = supabaseRefreshToken;
+      }
 
-      // Set 1-Year Refresh Token Cookie
-      res.cookie('refresh_token', refreshToken, {
+      // Set 30-Day Long-Lived Refresh Token Cookie (httpOnly, secure, SameSite=Strict)
+      res.cookie('refresh_token', rawRefreshToken, {
         ...COOKIE_OPTIONS,
         maxAge: REFRESH_TOKEN_MAX_AGE,
       });
@@ -49,12 +56,10 @@ export class AuthController {
       // Fetch user role from user_roles table with retry
       const { role } = await fetchUserRole(data.user.id, data.user.email);
 
-
       res.status(200).json({
         success: true,
         token: accessToken,
         access_token: accessToken,
-        refresh_token: refreshToken,
         user: {
           id: data.user.id,
           email: data.user.email,
@@ -68,13 +73,136 @@ export class AuthController {
   }
 
   /**
+   * POST /api/auth/refresh
+   * Reads refresh_token cookie, verifies server-side state, rotates refresh token,
+   * detects token theft/reuse, and issues a fresh short-lived access token.
+   */
+  static async refresh(req: Request, res: Response): Promise<void> {
+    try {
+      const presentedRefreshToken =
+        req.cookies?.refresh_token ||
+        (typeof req.body?.refresh_token === 'string' ? req.body.refresh_token : undefined);
+
+      if (!presentedRefreshToken) {
+        res.status(401).json({ error: 'Refresh token required' });
+        return;
+      }
+
+      // Validate & rotate token in DB
+      let newRawRefreshToken: string | undefined;
+      let targetUserId: string | undefined;
+      let targetSupabaseRefreshToken: string | null | undefined = presentedRefreshToken;
+
+      try {
+        const validation = await TokenService.validateAndRotate(presentedRefreshToken);
+
+        if (!validation.valid) {
+          // Clear refresh cookie
+          res.clearCookie('refresh_token', COOKIE_OPTIONS);
+          res.clearCookie('access_token', COOKIE_OPTIONS);
+
+          if (validation.theftDetected) {
+            console.error(`🚨 [auth:theft] Token family revoked for user_id=${validation.userId}`);
+            res.status(401).json({
+              error: 'Security alert: Token reuse detected. All sessions terminated.',
+              theftDetected: true,
+            });
+            return;
+          }
+
+          res.status(401).json({ error: validation.error || 'Session expired, please log in again' });
+          return;
+        }
+
+        targetUserId = validation.userId;
+        targetSupabaseRefreshToken = validation.supabaseRefreshToken || presentedRefreshToken;
+        newRawRefreshToken = validation.newRawToken;
+      } catch (dbErr: any) {
+        console.warn('[auth:refresh] DB validation failed, checking direct Supabase refresh:', dbErr.message);
+      }
+
+      // Refresh session via Supabase to obtain new short-lived access token
+      const { data: refreshData, error: refreshError } = await supabaseAdmin.auth.refreshSession({
+        refresh_token: targetSupabaseRefreshToken || presentedRefreshToken,
+      });
+
+      if (refreshError || !refreshData.session || !refreshData.user) {
+        console.error('[auth:refresh] Supabase refreshSession failed:', refreshError?.message);
+        res.clearCookie('refresh_token', COOKIE_OPTIONS);
+        res.clearCookie('access_token', COOKIE_OPTIONS);
+        res.status(401).json({ error: 'Session expired or invalid, please log in again' });
+        return;
+      }
+
+      const newAccessToken = refreshData.session.access_token;
+      const latestSupabaseRefreshToken = refreshData.session.refresh_token;
+
+      // Update the DB record with the latest Supabase refresh token if rotated
+      if (newRawRefreshToken && latestSupabaseRefreshToken) {
+        try {
+          await TokenService.updateSupabaseRefreshToken(
+            TokenService.hashToken(newRawRefreshToken),
+            latestSupabaseRefreshToken
+          );
+        } catch (err: any) {
+          console.error('[auth:refresh] Error updating Supabase refresh token in DB:', err.message);
+        }
+      }
+
+      const finalRefreshToken = newRawRefreshToken || latestSupabaseRefreshToken;
+
+      // Set new rotated 30-day refresh token cookie
+      res.cookie('refresh_token', finalRefreshToken, {
+        ...COOKIE_OPTIONS,
+        maxAge: REFRESH_TOKEN_MAX_AGE,
+      });
+
+      // Fetch fresh role
+      const userId = refreshData.user.id || targetUserId;
+      const userEmail = refreshData.user.email;
+      const { role } = await fetchUserRole(userId!, userEmail);
+
+      res.status(200).json({
+        success: true,
+        token: newAccessToken,
+        access_token: newAccessToken,
+        user: {
+          id: userId,
+          email: userEmail,
+          role,
+        },
+      });
+    } catch (err: any) {
+      console.error('Refresh token error:', err);
+      res.status(500).json({ error: 'Internal server error during token refresh' });
+    }
+  }
+
+  /**
    * POST /api/auth/logout
-   * Clears HTTP-only access_token and refresh_token authentication cookies.
+   * Revokes the current refresh token in the DB and clears cookies.
    */
   static async logout(req: Request, res: Response): Promise<void> {
-    res.clearCookie('access_token', COOKIE_OPTIONS);
-    res.clearCookie('refresh_token', COOKIE_OPTIONS);
-    res.status(200).json({ success: true, message: 'Logged out successfully' });
+    try {
+      const presentedRefreshToken =
+        req.cookies?.refresh_token ||
+        (typeof req.body?.refresh_token === 'string' ? req.body.refresh_token : undefined);
+
+      if (presentedRefreshToken) {
+        await TokenService.revokeToken(presentedRefreshToken).catch((err) => {
+          console.warn('[auth:logout] Token revocation error:', err.message);
+        });
+      }
+
+      res.clearCookie('access_token', COOKIE_OPTIONS);
+      res.clearCookie('refresh_token', COOKIE_OPTIONS);
+      res.status(200).json({ success: true, message: 'Logged out successfully' });
+    } catch (err: any) {
+      console.error('Logout error:', err);
+      res.clearCookie('access_token', COOKIE_OPTIONS);
+      res.clearCookie('refresh_token', COOKIE_OPTIONS);
+      res.status(200).json({ success: true, message: 'Logged out' });
+    }
   }
 
   /**
@@ -101,7 +229,6 @@ export class AuthController {
    * PATCH /api/auth/role
    * Protected: SuperAdmin only.
    * Updates user role in public.user_roles database table for another user.
-   * Disallows editing own role to prevent self-privilege tampering or accidental lockouts.
    */
   static async updateRole(req: Request, res: Response): Promise<void> {
     try {
@@ -161,5 +288,3 @@ export class AuthController {
     }
   }
 }
-
-

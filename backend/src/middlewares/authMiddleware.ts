@@ -64,80 +64,46 @@ export async function fetchUserRole(
 
 /**
  * Middleware: requireAuth
- * Extracts JWT access token from HTTP-only cookie or Authorization header.
- * If access token is invalid/expired, attempts silent refresh using refresh_token cookie.
- * Verifies user with Supabase, fetches role from user_roles with retry, and attaches req.user.
+ * Extracts JWT access token from Authorization header, HTTP-only cookie, or query param.
+ * Verifies access token with Supabase and attaches user & fresh role to req.user.
+ * If expired/invalid, returns 401 so the frontend client can perform token refresh via /api/auth/refresh.
  */
 export const requireAuth = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const accessToken =
-      req.cookies?.access_token ||
       req.headers.authorization?.replace(/^Bearer\s+/i, '') ||
+      req.cookies?.access_token ||
       (typeof req.query.token === 'string' ? req.query.token : undefined);
-    const refreshToken = req.cookies?.refresh_token;
 
-    let user: any = null;
-
-    // 1. Validate Access Token if provided
-    if (accessToken) {
-      const { data: { user: authUser }, error: authError } = await supabaseAdmin.auth.getUser(accessToken);
-      if (authError) {
-        console.warn(`[auth:jwt] accessToken validation failed: ${authError.message}`);
-      } else if (authUser) {
-        user = authUser;
-      }
-    }
-
-    // 2. Silent Refresh if Access Token invalid/expired/missing
-    if (!user && refreshToken) {
-      const { data: refreshData, error: refreshError } = await supabaseAdmin.auth.refreshSession({
-        refresh_token: refreshToken,
-      });
-
-      if (!refreshError && refreshData.session && refreshData.user) {
-        user = refreshData.user;
-
-        // Quietly update cookies in background
-        res.cookie('access_token', refreshData.session.access_token, {
-          ...COOKIE_OPTIONS,
-          maxAge: ACCESS_TOKEN_MAX_AGE,
-        });
-        res.cookie('refresh_token', refreshData.session.refresh_token, {
-          ...COOKIE_OPTIONS,
-          maxAge: REFRESH_TOKEN_MAX_AGE,
-        });
-      } else {
-        // Refresh token invalid or expired -> Clear cookies & 401
-        res.clearCookie('access_token', COOKIE_OPTIONS);
-        res.clearCookie('refresh_token', COOKIE_OPTIONS);
-        res.status(401).json({ error: 'Unauthorized: Session expired, please log in again' });
-        return;
-      }
-    }
-
-    // 3. Reject if no valid user found
-    if (!user) {
-      res.status(401).json({ error: 'Unauthorized: Missing or invalid authentication token' });
+    if (!accessToken) {
+      res.status(401).json({ error: 'Unauthorized: Missing authentication token' });
       return;
     }
 
-    // 4. Query user_roles table for user's assigned role with retry
-    const { role, rawDbRole, error: roleFetchError } = await fetchUserRole(user.id, user.email);
+    // Validate Access Token with Supabase
+    const { data: { user: authUser }, error: authError } = await supabaseAdmin.auth.getUser(accessToken);
+
+    if (authError || !authUser) {
+      console.warn(`[auth:jwt] accessToken validation failed: ${authError?.message || 'Invalid token'}`);
+      res.status(401).json({ error: 'Unauthorized: Access token expired or invalid' });
+      return;
+    }
+
+    // Query user_roles table for user's assigned role with retry
+    const { role, rawDbRole, error: roleFetchError } = await fetchUserRole(authUser.id, authUser.email);
 
     if (roleFetchError) {
       console.error(
-        `[auth:db:fatal] Failed all retries querying user_roles for user_id=${user.id} email=${user.email}: ${roleFetchError.message || roleFetchError}`
+        `[auth:db:fatal] Failed all retries querying user_roles for user_id=${authUser.id} email=${authUser.email}: ${roleFetchError.message || roleFetchError}`
       );
       res.status(503).json({ error: 'Service Unavailable: Role authorization lookup failed, please retry' });
       return;
     }
 
-    console.warn(`[authn] user_id=${user.id} email=${user.email} rawDbRole=${rawDbRole} parsedRole=${role}`);
-
-    // 5. Attach user object to request
+    // Attach user object to request
     req.user = {
-      id: user.id,
-      email: user.email,
+      id: authUser.id,
+      email: authUser.email,
       role,
     };
 

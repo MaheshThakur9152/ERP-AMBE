@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { fetchWithRetry, setInMemoryToken } from '@/lib/apiClient';
+import { fetchWithRetry, setInMemoryToken, getApiUrl } from '@/lib/apiClient';
 import { UserProfile, UserRole } from '../types';
 
 const AUTH_API_BASE = '/api/auth';
@@ -23,6 +23,10 @@ export interface MeResponse {
   access_token?: string;
 }
 
+/**
+ * Logs in with credentials, extracts short-lived access token into memory,
+ * and leaves long-lived refresh token in httpOnly SameSite=Strict cookie.
+ */
 export async function loginApi(email: string, password: string): Promise<LoginResponse> {
   const res = await fetchWithRetry(`${AUTH_API_BASE}/login`, {
     method: 'POST',
@@ -40,19 +44,45 @@ export async function loginApi(email: string, password: string): Promise<LoginRe
   const token = data.token || data.access_token;
   if (token) {
     setInMemoryToken(token);
-    if (data.refresh_token) {
-      await supabase.auth
-        .setSession({
-          access_token: token,
-          refresh_token: data.refresh_token,
-        })
-        .catch(() => {});
-    }
   }
 
   return data;
 }
 
+/**
+ * Performs silent access token refresh by exchanging rotating refresh cookie.
+ */
+export async function refreshTokenApi(): Promise<LoginResponse | null> {
+  try {
+    const refreshUrl = getApiUrl(`${AUTH_API_BASE}/refresh`);
+    const res = await fetch(refreshUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+    });
+
+    if (!res.ok) {
+      setInMemoryToken(null);
+      return null;
+    }
+
+    const data: LoginResponse = await res.json();
+    const token = data.token || data.access_token;
+    if (token) {
+      setInMemoryToken(token);
+    }
+    return data;
+  } catch (err) {
+    setInMemoryToken(null);
+    return null;
+  }
+}
+
+/**
+ * Logs out by invalidating server-side refresh token and clearing cookie.
+ */
 export async function logoutApi(): Promise<void> {
   setInMemoryToken(null);
   await fetchWithRetry(`${AUTH_API_BASE}/logout`, {
@@ -60,6 +90,9 @@ export async function logoutApi(): Promise<void> {
   }).catch(() => {});
 }
 
+/**
+ * Fetches currently authenticated user info.
+ */
 export async function fetchMeApi(): Promise<MeResponse | null> {
   try {
     const res = await fetchWithRetry(`${AUTH_API_BASE}/me`, {
@@ -133,6 +166,3 @@ export async function setEntityLockApi(
   }
   return json;
 }
-
-
-
