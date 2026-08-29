@@ -52,8 +52,11 @@ export const isMatchingDocType = (docType?: string | null, category?: string | n
 export interface StaffKycStatus {
   hasAadhaar: boolean;
   hasPan: boolean;
+  hasBank: boolean;
   hasUan: boolean;
   hasEsic: boolean;
+  hasBankDoc: boolean;
+  hasBankNumber: boolean;
   hasUanDoc: boolean;
   hasUanNumber: boolean;
   hasEsicDoc: boolean;
@@ -82,6 +85,16 @@ export const computeStaffKycStatus = (staff: StaffMember): StaffKycStatus => {
   const hasPanNumber = Boolean((staff.panNo || staff.pan_no || '').trim());
   const hasPan = hasPanDoc || hasPanNumber;
 
+  const hasBankDoc = docs.some((d: any) =>
+    isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'Bank Passbook') ||
+    isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'Bank Details')
+  );
+  const hasBankNumber = Boolean(
+    (staff.bank_account_no || staff.bankAccountNo || '').trim() ||
+    (staff.bank_ifsc_code || staff.bankIfsc || '').trim()
+  );
+  const hasBank = hasBankDoc || hasBankNumber;
+
   const hasUanDoc = docs.some((d: any) =>
     isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'UAN Card')
   );
@@ -94,19 +107,14 @@ export const computeStaffKycStatus = (staff: StaffMember): StaffKycStatus => {
   const hasEsicNumber = Boolean((staff.esic_no || '').trim());
   const hasEsic = hasEsicDoc || hasEsicNumber;
 
-  console.debug(
-    `[KYCStatus] staff=${staff.id} (${staff.employee_name || staff.name || 'Staff'}) | ` +
-    `uan: number=${hasUanNumber} doc=${hasUanDoc} => present=${hasUan} | ` +
-    `esic: number=${hasEsicNumber} doc=${hasEsicDoc} => present=${hasEsic} | ` +
-    `aadhaar: number=${hasAadhaarNumber} doc=${hasAadhaarDoc} => present=${hasAadhaar} | ` +
-    `pan: number=${hasPanNumber} doc=${hasPanDoc} => present=${hasPan}`
-  );
-
   return {
     hasAadhaar,
     hasPan,
+    hasBank,
     hasUan,
     hasEsic,
+    hasBankDoc,
+    hasBankNumber,
     hasUanDoc,
     hasUanNumber,
     hasEsicDoc,
@@ -567,16 +575,18 @@ export const StaffPage: React.FC = () => {
   const missingCounts = React.useMemo(() => {
     let aadhar = 0;
     let pan = 0;
+    let bank = 0;
     let uan = 0;
     let esic = 0;
     for (const s of staffList) {
       const kyc = computeStaffKycStatus(s);
       if (!kyc.hasAadhaar) aadhar++;
       if (!kyc.hasPan) pan++;
+      if (!kyc.hasBank) bank++;
       if (!kyc.hasUan) uan++;
       if (!kyc.hasEsic) esic++;
     }
-    return { aadhar, pan, uan, esic };
+    return { aadhar, pan, bank, uan, esic };
   }, [staffList]);
 
   const missingUanCount = missingCounts.uan;
@@ -613,6 +623,7 @@ export const StaffPage: React.FC = () => {
       missingDocFilters.some((docKey) => {
         if (docKey === 'Aadhar') return !kyc.hasAadhaar;
         if (docKey === 'PAN') return !kyc.hasPan;
+        if (docKey === 'Bank') return !kyc.hasBank;
         if (docKey === 'UAN') return !kyc.hasUan;
         if (docKey === 'ESIC') return !kyc.hasEsic;
         return false;
@@ -986,6 +997,7 @@ export const StaffPage: React.FC = () => {
                     {[
                       { key: 'Aadhar', label: 'Aadhaar Card', count: missingCounts.aadhar, color: 'text-green-700 bg-green-50 border-green-200' },
                       { key: 'PAN', label: 'PAN Card', count: missingCounts.pan, color: 'text-indigo-700 bg-indigo-50 border-indigo-200' },
+                      { key: 'Bank', label: 'Bank Details / Passbook', count: missingCounts.bank, color: 'text-purple-700 bg-purple-50 border-purple-200' },
                       { key: 'UAN', label: 'UAN Card / No.', count: missingCounts.uan, color: 'text-amber-700 bg-amber-50 border-amber-200' },
                       { key: 'ESIC', label: 'ESIC Card / No.', count: missingCounts.esic, color: 'text-orange-700 bg-orange-50 border-orange-200' },
                     ].map((item) => {
@@ -1133,6 +1145,14 @@ export const StaffPage: React.FC = () => {
                                     title={kyc.hasPanDoc ? 'PAN Card uploaded' : 'PAN Number entered'}
                                   >
                                     PAN ✓
+                                  </span>
+                                ) : null}
+                                {kyc.hasBank ? (
+                                  <span
+                                    className="px-2 py-0.5 rounded text-[10px] font-semibold bg-purple-50 text-purple-700 border border-purple-200"
+                                    title={kyc.hasBankDoc ? 'Bank Passbook uploaded' : 'Bank Account entered'}
+                                  >
+                                    Bank ✓
                                   </span>
                                 ) : null}
                                 {kyc.hasUan ? (
