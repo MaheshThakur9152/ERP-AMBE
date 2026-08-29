@@ -79,12 +79,13 @@ export function clearProactiveRefresh(): void {
 }
 
 /**
- * Concurrency-safe silent refresh.
+ * Concurrency-safe single-flight silent refresh.
  * Calls /api/auth/refresh with credentials: 'include'.
- * Ensures concurrent requests share the exact same refresh promise (no race conditions / duplicate rotation).
+ * Ensures EVERY caller across the entire application shares the EXACT SAME in-flight promise.
  */
-export async function silentRefreshToken(): Promise<string | null> {
+export async function getOrRefreshToken(): Promise<string | null> {
   if (refreshPromise) {
+    console.debug('[apiClient] Refresh already in-flight, joining existing promise...');
     return refreshPromise;
   }
 
@@ -126,6 +127,8 @@ export async function silentRefreshToken(): Promise<string | null> {
 
   return refreshPromise;
 }
+
+export const silentRefreshToken = getOrRefreshToken;
 
 // Throttle error toasts so multiple parallel failing requests don't spam toasts
 let lastErrorToastTime = 0;

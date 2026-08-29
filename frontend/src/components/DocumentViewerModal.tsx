@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { X, ExternalLink, Loader2, AlertCircle, FileText, Download, RefreshCw } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
-import { getApiUrl } from '@/lib/apiClient';
+import { X, ExternalLink, Loader2, AlertCircle, FileText, RefreshCw } from 'lucide-react';
+import { fetchWithRetry, getApiUrl } from '@/lib/apiClient';
 
 export interface DocumentViewerModalProps {
   isOpen: boolean;
@@ -31,7 +30,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // Compute primary target URL
-  const targetUrl = documentId ? getApiUrl(`/api/documents/${documentId}/view`) : url || '';
+  const targetUrl = documentId ? `/api/documents/${documentId}/view` : url || '';
 
   useEffect(() => {
     // Abort any prior in-flight fetch
@@ -56,55 +55,21 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
       console.log(`[KYCPreview] Request start - documentId: ${documentId || 'none'}, fileName: ${fileName}, targetUrl: ${targetUrl}`);
 
       try {
-        // 1. Get current Supabase session token
-        let { data: sessionData } = await supabase.auth.getSession();
-        let token = sessionData?.session?.access_token;
-
-        // 2. Build authenticated request
-        let fetchUrl = documentId
-          ? getApiUrl(`/api/documents/${documentId}/view${token ? `?token=${encodeURIComponent(token)}` : ''}`)
-          : targetUrl;
-
-        let headers: Record<string, string> = {};
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
-        }
-
-        console.log(`[KYCPreview] Fetching stream from: ${fetchUrl.split('?')[0]} (token present: ${Boolean(token)})`);
-
-        let res = await fetch(fetchUrl, {
+        // Use shared fetchWithRetry which automatically attaches in-memory access token,
+        // credentials: 'include', and coordinates single-flight 401 refresh + retry
+        const res = await fetchWithRetry(targetUrl, {
           method: 'GET',
-          headers,
           signal: abortController.signal,
+          skipErrorToast: true,
         });
 
         console.log(`[KYCPreview] HTTP status: ${res.status} ${res.statusText}`);
-
-        // 3. Handle 401 token expiry - attempt silent refresh
-        if (res.status === 401) {
-          console.warn('[KYCPreview] Received 401. Attempting session refresh...');
-          const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-          if (!refreshError && refreshData?.session?.access_token) {
-            token = refreshData.session.access_token;
-            headers['Authorization'] = `Bearer ${token}`;
-            fetchUrl = documentId
-              ? getApiUrl(`/api/documents/${documentId}/view?token=${encodeURIComponent(token)}`)
-              : targetUrl;
-            console.log('[KYCPreview] Retrying fetch with refreshed token...');
-            res = await fetch(fetchUrl, {
-              method: 'GET',
-              headers,
-              signal: abortController.signal,
-            });
-            console.log(`[KYCPreview] Retry HTTP status: ${res.status}`);
-          }
-        }
 
         if (!res.ok) {
           // If direct url fallback exists and differs, try it
           if (url && url !== targetUrl) {
             console.log(`[KYCPreview] Trying fallback URL: ${url}`);
-            const fallbackRes = await fetch(url, { signal: abortController.signal });
+            const fallbackRes = await fetch(getApiUrl(url), { signal: abortController.signal });
             if (fallbackRes.ok) {
               const fallbackBlob = await fallbackRes.blob();
               const newBlobUrl = URL.createObjectURL(fallbackBlob);

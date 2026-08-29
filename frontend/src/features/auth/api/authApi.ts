@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { fetchWithRetry, setInMemoryToken, getApiUrl } from '@/lib/apiClient';
+import { fetchWithRetry, setInMemoryToken, getApiUrl, getOrRefreshToken } from '@/lib/apiClient';
 import { UserProfile, UserRole } from '../types';
 
 const AUTH_API_BASE = '/api/auth';
@@ -50,32 +50,27 @@ export async function loginApi(email: string, password: string): Promise<LoginRe
 }
 
 /**
- * Performs silent access token refresh by exchanging rotating refresh cookie.
+ * Performs silent access token refresh using the single-flight shared getOrRefreshToken promise.
  */
 export async function refreshTokenApi(): Promise<LoginResponse | null> {
   try {
-    const refreshUrl = getApiUrl(`${AUTH_API_BASE}/refresh`);
-    const res = await fetch(refreshUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      credentials: 'include',
-    });
-
-    if (!res.ok) {
-      setInMemoryToken(null);
+    const token = await getOrRefreshToken();
+    if (!token) {
       return null;
     }
 
-    const data: LoginResponse = await res.json();
-    const token = data.token || data.access_token;
-    if (token) {
-      setInMemoryToken(token);
+    const me = await fetchMeApi();
+    if (!me?.user) {
+      return null;
     }
-    return data;
+
+    return {
+      success: true,
+      token,
+      access_token: token,
+      user: me.user,
+    };
   } catch (err) {
-    setInMemoryToken(null);
     return null;
   }
 }

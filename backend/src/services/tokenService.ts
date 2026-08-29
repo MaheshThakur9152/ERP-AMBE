@@ -104,7 +104,7 @@ export class TokenService {
     // 🚨 Reuse Detection: If token is already revoked, treat as token theft!
     if (record.revoked_at) {
       console.error(
-        `🚨 [TokenService:THEFT_DETECTED] Revoked token reuse attempted! user_id=${record.user_id} family_id=${record.family_id}`
+        `🚨 [tokenService] Reuse of revoked token detected for family ${record.family_id} (user_id=${record.user_id}, revoked_at=${record.revoked_at}) — check for concurrent refresh calls`
       );
       // Invalidate entire token family for this user
       await this.revokeFamily(record.family_id, record.user_id);
