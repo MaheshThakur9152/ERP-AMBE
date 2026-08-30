@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   X,
   Plus,
+  Pencil,
   CreditCard,
   Loader2,
   Trash2,
@@ -35,6 +36,9 @@ export interface RateCardRecord {
   other_allowance?: number;
   incentive_amount?: number;
   incentive?: number;
+  bonus_amount?: number | null;
+  part_bonus_amount?: number | null;
+  remark?: string;
   is_flat_wage?: boolean;
   created_at?: string;
 }
@@ -86,29 +90,91 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
   const [isCustomPost, setIsCustomPost] = useState<boolean>(false);
   const [customPostName, setCustomPostName] = useState<string>('');
 
-  // New Rate Card Form State (Starts Empty, NOT 0)
+  // Editing Rate Card State (null = create new, string = edit existing ID)
+  const [editingRateCardId, setEditingRateCardId] = useState<string | null>(null);
+
+  // New / Edit Rate Card Form State (Starts Empty, NOT 0)
   const [postName, setPostName] = useState('');
   const [grossSalary, setGrossSalary] = useState<number | ''>('');
   const [committedSalary, setCommittedSalary] = useState<number | ''>('');
+  const [remark, setRemark] = useState<string>('');
   const [basicDa, setBasicDa] = useState<number | ''>('');
   const [hra, setHra] = useState<number | ''>('');
   const [otherAllowance, setOtherAllowance] = useState<number | ''>('');
   const [conveyanceAllowance, setConveyanceAllowance] = useState<number | ''>('');
   const [incentiveAmount, setIncentiveAmount] = useState<number | ''>('');
+  const [bonusAmount, setBonusAmount] = useState<number | ''>('');
+  const [partBonusAmount, setPartBonusAmount] = useState<number | ''>('');
   const [isFlatWage, setIsFlatWage] = useState<boolean>(false);
 
+  const standardDesignations = [
+    'Janitor',
+    'Housekeeping',
+    'Housekeeping Boy',
+    'Supervisor',
+    'Reliever',
+    'Security Guard',
+    'Pantry',
+    'Keyman',
+    'Trainee Staff',
+    'Store Assistant',
+    'HK - HO',
+    'HK -P8',
+  ];
+
+  const remainingStandard = standardDesignations.filter(
+    (d) => !siteDesignations.some((sd) => sd.toLowerCase() === d.toLowerCase())
+  );
+
   const resetForm = () => {
+    setEditingRateCardId(null);
     setPostName('');
     setIsCustomPost(false);
     setCustomPostName('');
     setGrossSalary('');
     setCommittedSalary('');
+    setRemark('');
     setBasicDa('');
     setHra('');
     setOtherAllowance('');
     setConveyanceAllowance('');
     setIncentiveAmount('');
+    setBonusAmount('');
+    setPartBonusAmount('');
     setIsFlatWage(false);
+  };
+
+  const handleStartEdit = (rc: RateCardRecord) => {
+    setEditingRateCardId(rc.id || null);
+    setErrorMsg(null);
+    setSuccessMsg(null);
+
+    const isSiteRole = siteDesignations.some((d) => d.toLowerCase() === rc.post_name.toLowerCase());
+    const isStandardRole = standardDesignations.some((d) => d.toLowerCase() === rc.post_name.toLowerCase());
+
+    if (isSiteRole || isStandardRole) {
+      setIsCustomPost(false);
+      setPostName(rc.post_name);
+      setCustomPostName('');
+    } else {
+      setIsCustomPost(true);
+      setPostName('__custom__');
+      setCustomPostName(rc.post_name);
+    }
+
+    setGrossSalary(rc.gross_salary && Number(rc.gross_salary) > 0 ? Number(rc.gross_salary) : '');
+    setCommittedSalary(rc.committed_salary && Number(rc.committed_salary) > 0 ? Number(rc.committed_salary) : '');
+    setRemark(rc.remark || '');
+    setBasicDa(rc.basic_da && Number(rc.basic_da) > 0 ? Number(rc.basic_da) : '');
+    setHra(rc.hra && Number(rc.hra) > 0 ? Number(rc.hra) : '');
+    const otherVal = rc.other_allowance ?? rc.washing_allowance;
+    setOtherAllowance(otherVal && Number(otherVal) > 0 ? Number(otherVal) : '');
+    setConveyanceAllowance(rc.conveyance_allowance && Number(rc.conveyance_allowance) > 0 ? Number(rc.conveyance_allowance) : '');
+    const incVal = rc.incentive_amount ?? rc.incentive;
+    setIncentiveAmount(incVal && Number(incVal) > 0 ? Number(incVal) : '');
+    setBonusAmount(rc.bonus_amount != null && Number(rc.bonus_amount) > 0 ? Number(rc.bonus_amount) : '');
+    setPartBonusAmount(rc.part_bonus_amount != null && Number(rc.part_bonus_amount) > 0 ? Number(rc.part_bonus_amount) : '');
+    setIsFlatWage(Boolean(rc.is_flat_wage));
   };
 
   const fetchSiteStaff = async () => {
@@ -209,6 +275,7 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
             basic_da: Number(rc.basic_da || 0),
             hra: Number(rc.hra || 0),
             other_allowance: Number(rc.other_allowance || 0),
+            part_bonus_percent: Number(rc.part_bonus_percent || 0),
             is_flat_wage: Boolean(rc.is_flat_wage || rc.isFlatWage),
           }));
 
@@ -285,15 +352,23 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
       return;
     }
 
-    // Lighter duplicate validation
+    // Lighter duplicate validation (skip self during update)
     const duplicateExists = rateCards.some(
-      (rc) => rc.post_name.trim().toLowerCase() === effectivePostName.toLowerCase()
+      (rc) => rc.id !== editingRateCardId && rc.post_name.trim().toLowerCase() === effectivePostName.toLowerCase()
     );
     if (duplicateExists) {
       const proceed = window.confirm(
-        `A rate card for "${effectivePostName}" already exists for this site. Are you sure you want to add another rate card for this role?`
+        `A rate card for "${effectivePostName}" already exists for this site. Are you sure you want to save another rate card for this role?`
       );
       if (!proceed) return;
+    }
+
+    if (bonusAmount !== '' && partBonusAmount !== '') {
+      if (Number(partBonusAmount) > Number(bonusAmount)) {
+        setErrorMsg('Part Bonus Amount (₹) cannot exceed Bonus Amount (₹).');
+        toast.error('Part Bonus Amount (₹) cannot exceed Bonus Amount (₹).');
+        return;
+      }
     }
 
     setSaving(true);
@@ -306,6 +381,7 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
       post_name: effectivePostName,
       gross_salary: Number(grossSalary) || 0,
       committed_salary: committedSalary === '' ? null : Number(committedSalary),
+      remark: remark.trim(),
       basic_da: isFlatWage ? 0 : (basicDa === '' ? 0 : Number(basicDa)),
       hra: isFlatWage ? 0 : (hra === '' ? 0 : Number(hra)),
       other_allowance: isFlatWage ? 0 : (otherAllowance === '' ? 0 : Number(otherAllowance)),
@@ -313,96 +389,138 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
       conveyance_allowance: isFlatWage ? 0 : (conveyanceAllowance === '' ? 0 : Number(conveyanceAllowance)),
       incentive_amount: incentiveAmount === '' ? 0 : Number(incentiveAmount),
       incentive: incentiveAmount === '' ? 0 : Number(incentiveAmount),
+      bonus_amount: isFlatWage ? null : (bonusAmount === '' ? null : Number(bonusAmount)),
+      part_bonus_amount: isFlatWage ? null : (partBonusAmount === '' ? null : Number(partBonusAmount)),
       is_flat_wage: isFlatWage,
     };
 
     try {
-      let { data, error } = await supabase.from('rate_cards').insert([payload]).select();
+      if (editingRateCardId) {
+        // UPDATE existing rate card
+        const { error } = await supabase
+          .from('rate_cards')
+          .update(payload)
+          .eq('id', editingRateCardId);
 
-      if (error) {
-        console.warn('Initial rate_cards insert note:', error.message);
-        // Retry with exact standardized schema columns
-        const minimalPayload = {
-          site_id: siteId || null,
-          site_name: siteName,
-          post_name: effectivePostName,
-          gross_salary: Number(grossSalary) || 0,
-          committed_salary: committedSalary === '' ? null : Number(committedSalary),
-          basic_da: isFlatWage ? 0 : (basicDa === '' ? 0 : Number(basicDa)),
-          hra: isFlatWage ? 0 : (hra === '' ? 0 : Number(hra)),
-          washing_allowance: isFlatWage ? 0 : (otherAllowance === '' ? 0 : Number(otherAllowance)),
-          conveyance_allowance: isFlatWage ? 0 : (conveyanceAllowance === '' ? 0 : Number(conveyanceAllowance)),
-          incentive_amount: incentiveAmount === '' ? 0 : Number(incentiveAmount),
-          is_flat_wage: isFlatWage,
-        };
-        const retryRes = await supabase.from('rate_cards').insert([minimalPayload]).select();
-        data = retryRes.data;
-        error = retryRes.error;
+        if (error) throw error;
+
+        // Also sync to sites JSON rate_cards column
+        if (siteId) {
+          const { data: siteRow } = await supabase
+            .from('sites')
+            .select('rate_cards')
+            .eq('id', siteId)
+            .maybeSingle();
+
+          const currentJsonCards = Array.isArray(siteRow?.rate_cards) ? siteRow.rate_cards : [];
+          const updatedJsonCards = currentJsonCards.map((rc: any) => {
+            if (rc.id === editingRateCardId || (rc.post_name || rc.roleName) === effectivePostName) {
+              return {
+                ...rc,
+                id: editingRateCardId,
+                roleName: effectivePostName,
+                post_name: effectivePostName,
+                monthlyRate: Number(grossSalary) || 0,
+                gross_salary: Number(grossSalary) || 0,
+                committed_salary: committedSalary === '' ? null : Number(committedSalary),
+                remark: remark.trim(),
+                basic_da: isFlatWage ? 0 : (basicDa === '' ? 0 : Number(basicDa)),
+                hra: isFlatWage ? 0 : (hra === '' ? 0 : Number(hra)),
+                other_allowance: isFlatWage ? 0 : (otherAllowance === '' ? 0 : Number(otherAllowance)),
+                conveyance_allowance: isFlatWage ? 0 : (conveyanceAllowance === '' ? 0 : Number(conveyanceAllowance)),
+                incentive_amount: incentiveAmount === '' ? 0 : Number(incentiveAmount),
+                bonus_amount: isFlatWage ? null : (bonusAmount === '' ? null : Number(bonusAmount)),
+                part_bonus_amount: isFlatWage ? null : (partBonusAmount === '' ? null : Number(partBonusAmount)),
+                is_flat_wage: isFlatWage,
+              };
+            }
+            return rc;
+          });
+
+          await supabase.from('sites').update({ rate_cards: updatedJsonCards }).eq('id', siteId);
+        }
+
+        setSuccessMsg(`Rate card for "${effectivePostName}" updated successfully!`);
+        toast.success(`Rate card for "${effectivePostName}" updated successfully!`);
+      } else {
+        // INSERT new rate card
+        let { data, error } = await supabase.from('rate_cards').insert([payload]).select();
+
+        if (error) {
+          console.warn('Initial rate_cards insert note:', error.message);
+          // Retry with exact standardized schema columns
+          const minimalPayload = {
+            site_id: siteId || null,
+            site_name: siteName,
+            post_name: effectivePostName,
+            gross_salary: Number(grossSalary) || 0,
+            committed_salary: committedSalary === '' ? null : Number(committedSalary),
+            remark: remark.trim(),
+            basic_da: isFlatWage ? 0 : (basicDa === '' ? 0 : Number(basicDa)),
+            hra: isFlatWage ? 0 : (hra === '' ? 0 : Number(hra)),
+            washing_allowance: isFlatWage ? 0 : (otherAllowance === '' ? 0 : Number(otherAllowance)),
+            conveyance_allowance: isFlatWage ? 0 : (conveyanceAllowance === '' ? 0 : Number(conveyanceAllowance)),
+            incentive_amount: incentiveAmount === '' ? 0 : Number(incentiveAmount),
+            bonus_amount: isFlatWage ? null : (bonusAmount === '' ? null : Number(bonusAmount)),
+            part_bonus_amount: isFlatWage ? null : (partBonusAmount === '' ? null : Number(partBonusAmount)),
+            is_flat_wage: isFlatWage,
+          };
+          const retryRes = await supabase.from('rate_cards').insert([minimalPayload]).select();
+          data = retryRes.data;
+          error = retryRes.error;
+        }
+
+        if (error) throw error;
+
+        // Also sync to sites JSON rate_cards column
+        if (siteId) {
+          const { data: siteRow } = await supabase
+            .from('sites')
+            .select('rate_cards')
+            .eq('id', siteId)
+            .maybeSingle();
+
+          const currentJsonCards = Array.isArray(siteRow?.rate_cards) ? siteRow.rate_cards : [];
+          const newJsonEntry = {
+            id: data?.[0]?.id || `rc-${Date.now()}`,
+            roleName: effectivePostName,
+            post_name: effectivePostName,
+            monthlyRate: Number(grossSalary) || 0,
+            gross_salary: Number(grossSalary) || 0,
+            committed_salary: committedSalary === '' ? null : Number(committedSalary),
+            remark: remark.trim(),
+            basic_da: isFlatWage ? 0 : (basicDa === '' ? 0 : Number(basicDa)),
+            hra: isFlatWage ? 0 : (hra === '' ? 0 : Number(hra)),
+            other_allowance: isFlatWage ? 0 : (otherAllowance === '' ? 0 : Number(otherAllowance)),
+            conveyance_allowance: isFlatWage ? 0 : (conveyanceAllowance === '' ? 0 : Number(conveyanceAllowance)),
+            incentive_amount: incentiveAmount === '' ? 0 : Number(incentiveAmount),
+            bonus_amount: isFlatWage ? null : (bonusAmount === '' ? null : Number(bonusAmount)),
+            part_bonus_amount: isFlatWage ? null : (partBonusAmount === '' ? null : Number(partBonusAmount)),
+            is_flat_wage: isFlatWage,
+            workingDays: 31,
+            persons: 1,
+          };
+
+          const updatedJsonCards = [...currentJsonCards, newJsonEntry];
+          await supabase.from('sites').update({ rate_cards: updatedJsonCards }).eq('id', siteId);
+        }
+
+        setSuccessMsg(`Rate card for "${effectivePostName}" created successfully!`);
+        toast.success(`Rate card for "${effectivePostName}" created successfully!`);
       }
 
-      if (error) throw error;
-
-      // Also sync to sites JSON rate_cards column
-      if (siteId) {
-        const { data: siteRow } = await supabase
-          .from('sites')
-          .select('rate_cards')
-          .eq('id', siteId)
-          .maybeSingle();
-
-        const currentJsonCards = Array.isArray(siteRow?.rate_cards) ? siteRow.rate_cards : [];
-        const newJsonEntry = {
-          id: data?.[0]?.id || `rc-${Date.now()}`,
-          roleName: effectivePostName,
-          post_name: effectivePostName,
-          monthlyRate: Number(grossSalary) || 0,
-          gross_salary: Number(grossSalary) || 0,
-          committed_salary: committedSalary === '' ? null : Number(committedSalary),
-          basic_da: isFlatWage ? 0 : (basicDa === '' ? 0 : Number(basicDa)),
-          hra: isFlatWage ? 0 : (hra === '' ? 0 : Number(hra)),
-          other_allowance: isFlatWage ? 0 : (otherAllowance === '' ? 0 : Number(otherAllowance)),
-          conveyance_allowance: isFlatWage ? 0 : (conveyanceAllowance === '' ? 0 : Number(conveyanceAllowance)),
-          incentive_amount: incentiveAmount === '' ? 0 : Number(incentiveAmount),
-          is_flat_wage: isFlatWage,
-          workingDays: 31,
-          persons: 1,
-        };
-
-        const updatedJsonCards = [...currentJsonCards, newJsonEntry];
-        await supabase.from('sites').update({ rate_cards: updatedJsonCards }).eq('id', siteId);
-      }
-
-      setSuccessMsg(`Rate card for "${effectivePostName}" created successfully!`);
       resetForm();
       fetchRateCards();
       fetchSiteDesignations();
       if (onRateCardUpdated) onRateCardUpdated();
     } catch (err: any) {
-      console.error('Add rate card failed:', err);
+      console.error('Save rate card failed:', err);
       setErrorMsg(err.message || 'Failed to save rate card.');
+      toast.error(err.message || 'Failed to save rate card.');
     } finally {
       setSaving(false);
     }
   };
-
-  const standardDesignations = [
-    'Janitor',
-    'Housekeeping',
-    'Housekeeping Boy',
-    'Supervisor',
-    'Reliever',
-    'Security Guard',
-    'Pantry',
-    'Keyman',
-    'Trainee Staff',
-    'Store Assistant',
-    'HK - HO',
-    'HK -P8',
-  ];
-
-  const remainingStandard = standardDesignations.filter(
-    (d) => !siteDesignations.some((sd) => sd.toLowerCase() === d.toLowerCase())
-  );
 
   const handleDeleteRateCard = async (id?: string) => {
     if (!id) return;
@@ -633,14 +751,48 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
             </div>
           )}
 
-          {/* Form to Add Rate Card */}
-          <form onSubmit={handleAddRateCard} className="bg-slate-50 p-4 rounded-xl border border-gray-200 space-y-3">
-            <h4 className="font-bold text-xs uppercase tracking-wider text-[#20B2AA] flex items-center gap-1.5">
-              <Plus className="w-4 h-4" /> Add New Designation Rate Card
-            </h4>
+          {/* Form to Add / Edit Rate Card */}
+          <form
+            onSubmit={handleAddRateCard}
+            className={`p-4 rounded-xl border space-y-3 transition-colors ${
+              editingRateCardId
+                ? 'bg-amber-50/70 border-amber-300 ring-2 ring-amber-400/20'
+                : 'bg-slate-50 border-gray-200'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <h4
+                className={`font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 ${
+                  editingRateCardId ? 'text-amber-800' : 'text-[#20B2AA]'
+                }`}
+              >
+                {editingRateCardId ? (
+                  <>
+                    <Pencil className="w-4 h-4 text-amber-600" />
+                    <span>
+                      Editing Rate Card: <strong>{isCustomPost ? customPostName : postName}</strong>
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4" />
+                    <span>Add New Designation Rate Card</span>
+                  </>
+                )}
+              </h4>
+              {editingRateCardId && (
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="text-[11px] font-semibold text-gray-500 hover:text-gray-800 underline cursor-pointer"
+                >
+                  Cancel Edit
+                </button>
+              )}
+            </div>
 
-            {/* Row 1: Post Name, Gross Salary, Committed Salary */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {/* Row 1: Post Name, Gross Salary, Committed Salary, Remark */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
               <div>
                 <label className="block text-[11px] font-bold text-gray-700 mb-1">Post Name *</label>
                 <select
@@ -656,8 +808,7 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
                       setCustomPostName('');
                     }
                   }}
-                  className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-800 font-semibold focus:outline-none focus:border-[#20B2AA]"
-                  required={!isCustomPost}
+                  className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 focus:ring-2 focus:ring-teal-500"
                 >
                   <option value="">Select Role / Designation...</option>
                   {siteDesignations.length > 0 && (
@@ -676,17 +827,16 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
                       </option>
                     ))}
                   </optgroup>
-                  <option value="__custom__">+ Enter Custom Designation...</option>
+                  <option value="__custom__">+ Add Custom Designation...</option>
                 </select>
-
                 {isCustomPost && (
                   <input
                     type="text"
-                    placeholder="Type custom designation name..."
+                    required
+                    placeholder="Enter custom post name..."
                     value={customPostName}
                     onChange={(e) => setCustomPostName(e.target.value)}
-                    className="w-full mt-2 bg-white border border-teal-400 rounded-lg px-3 py-1.5 text-xs text-gray-800 font-semibold focus:outline-none focus:ring-1 focus:ring-[#20B2AA]"
-                    required
+                    className="mt-1.5 w-full bg-white border border-teal-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 focus:ring-2 focus:ring-teal-500"
                   />
                 )}
               </div>
@@ -695,132 +845,196 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
                 <label className="block text-[11px] font-bold text-gray-700 mb-1">Gross Salary (₹) *</label>
                 <input
                   type="number"
+                  required
                   placeholder="e.g. 15000"
                   value={grossSalary === '' ? '' : grossSalary}
                   onChange={(e) => handleGrossChange(e.target.value)}
-                  className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-800 font-mono font-bold focus:outline-none focus:border-[#20B2AA]"
-                  required
+                  className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 font-mono font-bold focus:ring-2 focus:ring-teal-500"
                 />
               </div>
 
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="block text-[11px] font-bold text-gray-700">Committed Salary (₹)</label>
-                  <span className="text-[9px] text-gray-400 font-medium">Ref Only</span>
+                  <label className="text-[11px] font-bold text-gray-700">Committed Salary (₹)</label>
+                  <span className="text-[9.5px] px-1.5 py-0.2 rounded bg-slate-100 text-slate-500 font-medium border border-slate-200">
+                    Ref Only
+                  </span>
                 </div>
                 <input
                   type="number"
                   placeholder="e.g. 15000"
-                  value={committedSalary === '' ? '' : committedSalary}
+                  value={committedSalary === '' || committedSalary === 0 ? '' : committedSalary}
                   onChange={(e) => setCommittedSalary(e.target.value === '' ? '' : Number(e.target.value))}
-                  className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-800 font-mono font-bold focus:outline-none focus:border-[#20B2AA]"
+                  className="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-mono focus:ring-2 focus:ring-slate-400 placeholder:text-slate-300"
                 />
-                <p className="text-[9.5px] text-gray-500 mt-1 flex items-center gap-1">
-                  <Info className="w-3 h-3 text-gray-400 flex-shrink-0" />
-                  <span>For reference only — not used in payroll calculations.</span>
+                <p className="text-[9.5px] text-gray-400 mt-0.5">
+                  Reference only.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-gray-700 mb-1">Remark (optional)</label>
+                <input
+                  type="text"
+                  maxLength={100}
+                  placeholder="e.g. Female, Night Shift"
+                  value={remark}
+                  onChange={(e) => setRemark(e.target.value)}
+                  className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 focus:ring-2 focus:ring-teal-500 placeholder:text-gray-400"
+                />
+                <p className="text-[9.5px] text-gray-400 mt-0.5">
+                  e.g. Female, Night Shift, Contract
                 </p>
               </div>
             </div>
 
-            {/* Non-Compliance / Flat Wage Setup Checkbox */}
+            {/* Flat Wage Toggle */}
             <div className="flex items-center gap-2 pt-1 pb-1">
-              <input
-                type="checkbox"
-                id="isFlatWage"
-                checked={isFlatWage}
-                onChange={(e) => {
-                  setIsFlatWage(e.target.checked);
-                  if (e.target.checked) {
-                    setBasicDa(0);
-                    setHra(0);
-                    setOtherAllowance(0);
-                    setConveyanceAllowance(0);
-                  } else {
-                    setBasicDa('');
-                    setHra('');
-                    setOtherAllowance('');
-                    setConveyanceAllowance('');
-                  }
-                }}
-                className="w-4 h-4 rounded text-[#20B2AA] focus:ring-[#20B2AA]"
-              />
-              <label htmlFor="isFlatWage" className="text-xs font-bold text-slate-800 cursor-pointer flex items-center gap-1.5">
+              <label className="flex items-center gap-2 text-xs font-semibold text-gray-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={isFlatWage}
+                  onChange={(e) => {
+                    setIsFlatWage(e.target.checked);
+                    if (e.target.checked) {
+                      setBasicDa('');
+                      setHra('');
+                      setOtherAllowance('');
+                      setConveyanceAllowance('');
+                      setBonusAmount('');
+                      setPartBonusAmount('');
+                    } else if (grossSalary !== '' && Number(grossSalary) > 0) {
+                      const val = Number(grossSalary);
+                      setBasicDa(Math.round(val * 0.5));
+                      setHra(Math.round(val * 0.2));
+                      setOtherAllowance(Math.round(val * 0.15));
+                      setConveyanceAllowance(Math.max(0, val - Math.round(val * 0.85)));
+                    }
+                  }}
+                  className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500"
+                />
                 <span>Non-Compliance / Flat Wage Setup</span>
-                <span className="text-[10px] text-amber-700 font-medium bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                  (Bypasses EPF/ESIC/PT)
-                </span>
               </label>
+              {isFlatWage && (
+                <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full font-medium">
+                  Bypasses EPF/ESIC/PT
+                </span>
+              )}
             </div>
 
-            <div className="grid grid-cols-5 gap-2">
+            {/* Row 2: Standard Breakups & Bonus */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-7 gap-2">
               <div>
-                <label className="block text-[10px] font-bold text-gray-700 mb-1">Basic + DA (₹)</label>
+                <label className="block text-[10px] font-bold text-gray-600 mb-1">Basic + DA (₹)</label>
                 <input
                   type="number"
                   placeholder="0"
                   disabled={isFlatWage}
-                  value={basicDa === '' ? '' : basicDa}
+                  value={basicDa === '' || basicDa === 0 ? '' : basicDa}
                   onChange={(e) => setBasicDa(e.target.value === '' ? '' : Number(e.target.value))}
-                  className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-800 font-mono disabled:bg-gray-100"
+                  className="w-full bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-900 font-mono focus:ring-2 focus:ring-teal-500 disabled:bg-gray-100"
                 />
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-gray-700 mb-1">HRA (₹)</label>
+                <label className="block text-[10px] font-bold text-gray-600 mb-1">HRA (₹)</label>
                 <input
                   type="number"
                   placeholder="0"
                   disabled={isFlatWage}
-                  value={hra === '' ? '' : hra}
+                  value={hra === '' || hra === 0 ? '' : hra}
                   onChange={(e) => setHra(e.target.value === '' ? '' : Number(e.target.value))}
-                  className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-800 font-mono disabled:bg-gray-100"
+                  className="w-full bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-900 font-mono focus:ring-2 focus:ring-teal-500 disabled:bg-gray-100"
                 />
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-gray-700 mb-1">Other Allow (₹)</label>
+                <label className="block text-[10px] font-bold text-gray-600 mb-1">Other Allow (₹)</label>
                 <input
                   type="number"
                   placeholder="0"
                   disabled={isFlatWage}
-                  value={otherAllowance === '' ? '' : otherAllowance}
+                  value={otherAllowance === '' || otherAllowance === 0 ? '' : otherAllowance}
                   onChange={(e) => setOtherAllowance(e.target.value === '' ? '' : Number(e.target.value))}
-                  className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-800 font-mono disabled:bg-gray-100"
+                  className="w-full bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-900 font-mono focus:ring-2 focus:ring-teal-500 disabled:bg-gray-100"
                 />
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-gray-700 mb-1">Conveyance (₹)</label>
+                <label className="block text-[10px] font-bold text-gray-600 mb-1">Conveyance (₹)</label>
                 <input
                   type="number"
                   placeholder="0"
                   disabled={isFlatWage}
-                  value={conveyanceAllowance === '' ? '' : conveyanceAllowance}
+                  value={conveyanceAllowance === '' || conveyanceAllowance === 0 ? '' : conveyanceAllowance}
                   onChange={(e) => setConveyanceAllowance(e.target.value === '' ? '' : Number(e.target.value))}
-                  className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-800 font-mono disabled:bg-gray-100"
+                  className="w-full bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-900 font-mono focus:ring-2 focus:ring-teal-500 disabled:bg-gray-100"
                 />
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-indigo-700 mb-1">Fixed Incentive (₹)</label>
+                <label className="block text-[10px] font-bold text-gray-600 mb-1">Fixed Incentive (₹)</label>
                 <input
                   type="number"
                   placeholder="0"
-                  value={incentiveAmount === '' ? '' : incentiveAmount}
+                  value={incentiveAmount === '' || incentiveAmount === 0 ? '' : incentiveAmount}
                   onChange={(e) => setIncentiveAmount(e.target.value === '' ? '' : Number(e.target.value))}
-                  className="w-full bg-white border border-indigo-300 rounded-lg px-2.5 py-1.5 text-xs text-indigo-900 font-mono font-bold focus:ring-2 focus:ring-indigo-500"
+                  className="w-full bg-white border border-gray-300 rounded-lg px-2 py-1.5 text-xs text-gray-900 font-mono focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-indigo-700 mb-1">Bonus Amount (₹)</label>
+                <input
+                  type="number"
+                  min={0}
+                  placeholder="Optional - leave blank"
+                  disabled={isFlatWage}
+                  value={bonusAmount === '' || bonusAmount === 0 ? '' : bonusAmount}
+                  onChange={(e) => setBonusAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                  className="w-full bg-white border border-indigo-300 rounded-lg px-2.5 py-1.5 text-xs text-indigo-900 font-mono font-bold focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-100 placeholder:text-gray-300 placeholder:font-normal"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-teal-700 mb-1">Part Bonus Amount (₹)</label>
+                <input
+                  type="number"
+                  min={0}
+                  placeholder="Optional - leave blank"
+                  disabled={isFlatWage}
+                  value={partBonusAmount === '' || partBonusAmount === 0 ? '' : partBonusAmount}
+                  onChange={(e) => setPartBonusAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                  className="w-full bg-white border border-teal-300 rounded-lg px-2.5 py-1.5 text-xs text-teal-900 font-mono font-bold focus:ring-2 focus:ring-teal-500 disabled:bg-gray-100 placeholder:text-gray-300 placeholder:font-normal"
                 />
               </div>
             </div>
 
-            <div className="flex justify-end pt-1">
+            <div className="flex justify-end items-center gap-2 pt-1">
+              {editingRateCardId && (
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="px-3 py-2 rounded-lg text-xs font-semibold text-gray-600 bg-white border border-gray-300 hover:bg-gray-50 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+              )}
               <button
                 type="submit"
                 disabled={saving}
-                className="bg-[#20B2AA] hover:bg-teal-700 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-xs flex items-center gap-2 disabled:opacity-50 transition-all cursor-pointer"
+                className={`${
+                  editingRateCardId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-[#20B2AA] hover:bg-teal-700'
+                } text-white px-4 py-2 rounded-lg text-xs font-bold shadow-xs flex items-center gap-2 disabled:opacity-50 transition-all cursor-pointer`}
               >
-                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-                <span>Save Rate Card</span>
+                {saving ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : editingRateCardId ? (
+                  <Pencil className="w-3.5 h-3.5" />
+                ) : (
+                  <Plus className="w-3.5 h-3.5" />
+                )}
+                <span>{editingRateCardId ? 'Update Rate Card' : 'Save Rate Card'}</span>
               </button>
             </div>
           </form>
@@ -889,17 +1103,29 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
                       className={`bg-white p-4 rounded-xl border transition-all shadow-2xs ${
                         isRosterExpanded
                           ? 'border-teal-400 ring-2 ring-teal-500/10'
+                          : editingRateCardId === rc.id
+                          ? 'border-amber-400 ring-2 ring-amber-500/20 bg-amber-50/30'
                           : 'border-gray-200 hover:border-teal-200'
                       }`}
                     >
                       {/* Rate Card Header Row */}
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div className="space-y-1">
-                          <div className="font-bold text-gray-900 text-sm flex items-center gap-2">
+                          <div className="font-bold text-gray-900 text-sm flex items-center gap-2 flex-wrap">
                             <span>{rc.post_name}</span>
+                            {rc.remark ? (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-semibold border border-slate-200">
+                                {rc.remark}
+                              </span>
+                            ) : null}
                             {rc.is_flat_wage && (
                               <span className="text-[10px] px-2 py-0.5 rounded bg-amber-50 text-amber-700 font-semibold border border-amber-200">
                                 Flat Wage
+                              </span>
+                            )}
+                            {editingRateCardId === rc.id && (
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-bold border border-amber-300">
+                                Editing
                               </span>
                             )}
                           </div>
@@ -913,6 +1139,16 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
                             {(rc.incentive_amount || rc.incentive) ? (
                               <span className="text-indigo-600 font-semibold">
                                 Incentive: ₹{rc.incentive_amount || rc.incentive}
+                              </span>
+                            ) : null}
+                            {rc.bonus_amount != null && Number(rc.bonus_amount) > 0 ? (
+                              <span className="text-indigo-700 font-semibold bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 font-sans">
+                                Bonus: <strong>₹{Number(rc.bonus_amount).toLocaleString('en-IN')}</strong>
+                              </span>
+                            ) : null}
+                            {rc.part_bonus_amount != null && Number(rc.part_bonus_amount) > 0 ? (
+                              <span className="text-teal-700 font-semibold bg-teal-50 px-1.5 py-0.5 rounded border border-teal-200 font-sans">
+                                Part Bonus: <strong>₹{Number(rc.part_bonus_amount).toLocaleString('en-IN')}</strong>
                               </span>
                             ) : null}
                             {rc.committed_salary != null && Number(rc.committed_salary) > 0 && (
@@ -952,6 +1188,16 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
                             ) : (
                               <ChevronDown className="w-3.5 h-3.5 ml-0.5 opacity-60" />
                             )}
+                          </button>
+
+                          {/* Edit Rate Card Button */}
+                          <button
+                            type="button"
+                            onClick={() => handleStartEdit(rc)}
+                            className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
+                            title="Edit Rate Card & Part Bonus"
+                          >
+                            <Pencil className="w-4 h-4" />
                           </button>
 
                           <button

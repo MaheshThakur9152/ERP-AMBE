@@ -206,7 +206,15 @@ export const PayrollHub: React.FC = () => {
         const advances = in_this_mth;
 
         const isPaid = saved?.is_paid ?? false;
-        const rateCard: RateCard | null = emp.rate_cards || null;
+        const rateCard: RateCard | null = emp.rate_cards
+          ? {
+              ...emp.rate_cards,
+              part_bonus_percent:
+                saved?.part_bonus_percent_snapshot !== undefined && saved?.part_bonus_percent_snapshot !== null
+                  ? Number(saved.part_bonus_percent_snapshot)
+                  : Number(emp.rate_cards.part_bonus_percent || 0),
+            }
+          : null;
         const calc = calculatePayroll(rateCard, emp, pd, wo, daysInMonth, advances);
 
         return {
@@ -291,6 +299,14 @@ export const PayrollHub: React.FC = () => {
         esic: row.calc.esic,
         pt: row.calc.pt,
 
+        // Part Bonus Tracking Snapshot Columns
+        bonus_amount_snapshot: row.calc.bonusAmountSnapshot ?? null,
+        part_bonus_amount_snapshot: row.calc.partBonusAmountSnapshot ?? null,
+        rate_card_remark_snapshot: row.calc.rateCardRemarkSnapshot ?? row.rateCard?.remark ?? '',
+        earned_part_bonus: row.calc.earnedPartBonus,
+        remaining_part_bonus: row.calc.remainingPartBonus,
+        total_net_salary: row.calc.totalNetSalary,
+
         // Itemized Advance Ledger Columns
         adv_amt: row.adv_amt ?? 0,
         shirt: row.shirt ?? 0,
@@ -328,6 +344,12 @@ export const PayrollHub: React.FC = () => {
         delete fallbackRecord.adv_total;
         delete fallbackRecord.in_this_mth;
         delete fallbackRecord.in_next_mth;
+        delete fallbackRecord.bonus_amount_snapshot;
+        delete fallbackRecord.part_bonus_amount_snapshot;
+        delete fallbackRecord.rate_card_remark_snapshot;
+        delete fallbackRecord.earned_part_bonus;
+        delete fallbackRecord.remaining_part_bonus;
+        delete fallbackRecord.total_net_salary;
 
         const { error: fallbackError } = await supabase.from('payroll_records').upsert([fallbackRecord], {
           onConflict: 'month_year,staff_id',
@@ -479,6 +501,12 @@ export const PayrollHub: React.FC = () => {
         epf: r.calc!.epf,
         esic: r.calc!.esic,
         pt: r.calc!.pt,
+        bonus_amount_snapshot: r.calc!.bonusAmountSnapshot ?? null,
+        part_bonus_amount_snapshot: r.calc!.partBonusAmountSnapshot ?? null,
+        rate_card_remark_snapshot: r.calc!.rateCardRemarkSnapshot ?? r.rateCard?.remark ?? '',
+        earned_part_bonus: r.calc!.earnedPartBonus,
+        remaining_part_bonus: r.calc!.remainingPartBonus,
+        total_net_salary: r.calc!.totalNetSalary,
         adv_amt: r.adv_amt ?? 0,
         shirt: r.shirt ?? 0,
         pant: r.pant ?? 0,
@@ -505,7 +533,7 @@ export const PayrollHub: React.FC = () => {
         alert(`Failed to mark paid: ${error.message}`);
       } else {
         setRows((prev) =>
-          prev.map((r) => (selectedIds.has(r.id) ? { ...r, isPaid: true, isSaved: true } : r))
+            prev.map((r) => (selectedIds.has(r.id) ? { ...r, isPaid: true, isSaved: true } : r))
         );
         setSelectedIds(new Set());
         setStatusMessage({
@@ -670,12 +698,15 @@ export const PayrollHub: React.FC = () => {
           earnedConveyance: calc.earnedConveyance,
           earnedIncentive: calc.earnedIncentive,
           earnedBonus: calc.earnedBonus,
+          earnedPartBonus: calc.earnedPartBonus,
+          remainingPartBonus: calc.remainingPartBonus,
           earnedGross: calc.earnedGross,
           epf: calc.epf,
           esic: calc.esic,
           pt: calc.pt,
           totalDeductions,
           netSalary: calc.netSalary,
+          totalNetSalary: calc.totalNetSalary,
         };
       });
 
@@ -718,12 +749,27 @@ export const PayrollHub: React.FC = () => {
           acc.epf += r.calc.epf;
           acc.esic += r.calc.esic;
           acc.pt += r.calc.pt;
+          acc.earnedBonus += r.calc.earnedBonus;
+          acc.earnedPartBonus += r.calc.earnedPartBonus;
+          acc.remainingPartBonus += r.calc.remainingPartBonus;
+          acc.totalNetSalary += r.calc.totalNetSalary;
           acc.advances += r.advances;
           acc.netSalary += r.calc.netSalary;
         }
         return acc;
       },
-      { earnedGross: 0, epf: 0, esic: 0, pt: 0, advances: 0, netSalary: 0 }
+      {
+        earnedGross: 0,
+        epf: 0,
+        esic: 0,
+        pt: 0,
+        earnedBonus: 0,
+        earnedPartBonus: 0,
+        remainingPartBonus: 0,
+        totalNetSalary: 0,
+        advances: 0,
+        netSalary: 0,
+      }
     );
   }, [displayedRows]);
 
@@ -875,7 +921,7 @@ export const PayrollHub: React.FC = () => {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-gray-700 border-collapse min-w-[1750px]">
+            <table className="w-full text-left text-xs text-gray-700 border-collapse min-w-[2150px]">
               <thead className="bg-slate-100/80 border-b border-gray-200 font-bold uppercase text-[10px] text-gray-600 tracking-wider">
                 <tr>
                   <th className="p-3 w-12 text-center">
@@ -918,6 +964,10 @@ export const PayrollHub: React.FC = () => {
                   <th className="p-3 text-right text-amber-700">EPF (12%)</th>
                   <th className="p-3 text-right text-amber-700">ESIC (0.75%)</th>
                   <th className="p-3 text-right text-amber-700">PT</th>
+                  <th className="p-3 text-right text-gray-700">Earned Bonus</th>
+                  <th className="p-3 text-right text-teal-700 font-bold">Earned Part Bonus</th>
+                  <th className="p-3 text-right text-amber-800 font-bold bg-amber-50/50">Rem. Part Bonus</th>
+                  <th className="p-3 text-right font-bold text-emerald-800 bg-emerald-50/60 min-w-[130px]">Total Net Salary</th>
                   <th className="p-3 text-center bg-amber-50/50 text-amber-900 border-x border-amber-100 min-w-[140px]">
                     Advances Ledger
                   </th>
@@ -939,7 +989,7 @@ export const PayrollHub: React.FC = () => {
                     <React.Fragment key={row.id}>
                       {isNewGroup && (
                         <tr className="bg-slate-100/90 border-y border-slate-200 text-slate-800 font-sans">
-                          <td colSpan={18} className="py-2 px-3">
+                          <td colSpan={22} className="py-2 px-3">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
                                 <span className="inline-flex items-center gap-1.5 font-bold text-[11px] uppercase tracking-wider text-slate-700 bg-white px-2.5 py-1 rounded-lg border border-slate-300 shadow-2xs">
@@ -1040,7 +1090,7 @@ export const PayrollHub: React.FC = () => {
 
                     {/* If Rate Card is missing, display warning badge instead of numbers */}
                     {!row.calc ? (
-                      <td colSpan={13} className="p-3 text-center bg-red-50/30 border-l border-red-100 font-sans">
+                      <td colSpan={17} className="p-3 text-center bg-red-50/30 border-l border-red-100 font-sans">
                         <span className="text-red-600 font-bold px-3 py-1 bg-red-100 rounded-md border border-red-200 inline-block text-xs">
                           Rate Card Missing
                         </span>
@@ -1086,6 +1136,26 @@ export const PayrollHub: React.FC = () => {
                         </td>
                         <td className="p-3 text-right text-amber-700 font-semibold">
                           -₹{row.calc.pt.toLocaleString('en-IN')}
+                        </td>
+
+                        {/* Earned Bonus */}
+                        <td className="p-3 text-right text-gray-700">
+                          ₹{row.calc.earnedBonus.toLocaleString('en-IN')}
+                        </td>
+
+                        {/* Earned Part Bonus */}
+                        <td className="p-3 text-right text-teal-700 font-semibold">
+                          +₹{row.calc.earnedPartBonus.toLocaleString('en-IN')}
+                        </td>
+
+                        {/* Remaining Part Bonus */}
+                        <td className="p-3 text-right text-amber-800 font-semibold bg-amber-50/40">
+                          ₹{row.calc.remainingPartBonus.toLocaleString('en-IN')}
+                        </td>
+
+                        {/* Total Net Salary */}
+                        <td className="p-3 text-right font-bold text-emerald-800 bg-emerald-50/60 min-w-[130px] text-xs">
+                          ₹{row.calc.totalNetSalary.toLocaleString('en-IN')}
                         </td>
 
                         {/* Advances Input + Ledger Modal Button */}
@@ -1139,6 +1209,18 @@ export const PayrollHub: React.FC = () => {
                   </td>
                   <td className="p-3 text-right text-amber-800">
                     -₹{totals.pt.toLocaleString('en-IN')}
+                  </td>
+                  <td className="p-3 text-right text-gray-700">
+                    ₹{totals.earnedBonus.toLocaleString('en-IN')}
+                  </td>
+                  <td className="p-3 text-right text-teal-800">
+                    +₹{totals.earnedPartBonus.toLocaleString('en-IN')}
+                  </td>
+                  <td className="p-3 text-right text-amber-800 bg-amber-100/50">
+                    ₹{totals.remainingPartBonus.toLocaleString('en-IN')}
+                  </td>
+                  <td className="p-3 text-right text-emerald-800 bg-emerald-100/60 font-bold text-sm">
+                    ₹{totals.totalNetSalary.toLocaleString('en-IN')}
                   </td>
                   <td className="p-3 text-center text-amber-900 bg-amber-100/50">
                     -₹{totals.advances.toLocaleString('en-IN')}

@@ -327,7 +327,7 @@ export const AddStaffModal: React.FC<AddStaffModalProps> = ({
                 <option value="">Select Rate Card...</option>
                 {availableRateCards.map((card) => (
                   <option key={card.id} value={card.id}>
-                    {card.post_name} (₹{card.gross_salary})
+                    {card.post_name}{card.remark ? ` (${card.remark})` : ''} (₹{card.gross_salary})
                   </option>
                 ))}
               </select>

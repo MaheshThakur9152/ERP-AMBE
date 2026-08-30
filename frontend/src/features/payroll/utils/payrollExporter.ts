@@ -33,12 +33,15 @@ export interface PayrollExportRecord {
   earnedConveyance: number;
   earnedIncentive?: number;
   earnedBonus?: number;
+  earnedPartBonus?: number;
+  remainingPartBonus?: number;
   earnedGross: number;
   epf: number;
   esic: number;
   pt: number;
   totalDeductions: number;
   netSalary: number;
+  totalNetSalary?: number;
 }
 
 export interface ExportComplianceOptions {
@@ -63,7 +66,7 @@ export async function exportComplianceExcel({
     views: [{ state: 'frozen', xSplit: 3, ySplit: 5, activeCell: 'D6' }],
   });
 
-  // 1. Column Architecture (57 Explicit Columns Cols A - BE)
+  // 1. Column Architecture (60 Explicit Columns Cols A - BH)
   worksheet.columns = [
     // GROUP 1: EMPLOYEE INFO (Cols A - I)
     { header: 'EMP ID', key: 'emp_id', width: 10 },
@@ -117,16 +120,19 @@ export async function exportComplianceExcel({
     { header: 'PT', key: 'pt', width: 8 },
     { header: 'MLWF', key: 'mlwf', width: 8 },
     { header: 'NET DEDUTION', key: 'net_deduction', width: 14 },
-    // GROUP 7: BENEFITS (Cols AU - AV)
+    // GROUP 7: BENEFITS (Cols AU - AX)
     { header: 'BONUS BASE', key: 'base_bonus', width: 12 },
     { header: 'EARNED BONUS', key: 'earned_bonus', width: 14 },
-    // GROUP 8: PAYOUT (Cols AW - BA)
+    { header: 'EARNED PART BONUS', key: 'earned_part_bonus', width: 16 },
+    { header: 'REM. PART BONUS', key: 'remaining_part_bonus', width: 16 },
+    // GROUP 8: PAYOUT (Cols AY - BD)
     { header: 'NET SALARY', key: 'net_salary', width: 14 },
+    { header: 'TOTAL NET SALARY', key: 'total_net_salary', width: 16 },
     { header: 'PAID DATE', key: 'paid_date', width: 12 },
     { header: 'IN ACCT OF', key: 'in_account_of', width: 15 },
     { header: 'PAYEE NAME', key: 'payee_name', width: 20 },
     { header: 'EMP TOTAL', key: 'employee_total', width: 12 },
-    // GROUP 9: EMPLOYER COMPLIANCE (Cols BB - BE)
+    // GROUP 9: EMPLOYER COMPLIANCE (Cols BE - BH)
     { header: 'EMP EPF', key: 'employer_epf', width: 10 },
     { header: 'EMP ESIC', key: 'employer_esic', width: 10 },
     { header: 'EMP MLWF', key: 'employer_mlwf', width: 10 },
@@ -134,7 +140,7 @@ export async function exportComplianceExcel({
   ];
 
   // Insert Pure Numeric Index Row (Row 2)
-  const indexRowValues = Array.from({ length: 57 }, (_, i) => i + 1);
+  const indexRowValues = Array.from({ length: 60 }, (_, i) => i + 1);
   worksheet.spliceRows(2, 0, indexRowValues);
 
   const borderStyle: Partial<ExcelJS.Borders> = {
@@ -144,13 +150,16 @@ export async function exportComplianceExcel({
     right: { style: 'thin', color: { argb: 'FFCBD5E1' } },
   };
 
-  const highlightCols = new Set(['net_salary', 'employee_total', 'net_compliance_head']);
+  const highlightCols = new Set(['net_salary', 'total_net_salary', 'employee_total', 'net_compliance_head']);
 
   // Add Employee Data Rows
   records.forEach((rec) => {
     const ratePerDay = rec.daysInMonth > 0 ? Math.round(rec.grossRate / rec.daysInMonth) : 0;
     const totalEarnedGross = rec.earnedGross;
     const earnedBonus = rec.earnedBonus ?? Math.round(rec.earnedBasic * 0.0833);
+    const earnedPartBonus = rec.earnedPartBonus ?? 0;
+    const remainingPartBonus = rec.remainingPartBonus ?? 0;
+    const totalNetSalary = rec.totalNetSalary ?? (rec.netSalary + earnedPartBonus);
     const employerEsic = Math.ceil((rec.earnedBasic + rec.earnedHRA + (rec.earnedIncentive || rec.incentive || 0)) * 0.0325);
     const employerTotal = rec.epf + employerEsic;
 
@@ -203,11 +212,14 @@ export async function exportComplianceExcel({
       net_deduction: rec.totalDeductions,
       base_bonus: 0,
       earned_bonus: earnedBonus,
+      earned_part_bonus: earnedPartBonus,
+      remaining_part_bonus: remainingPartBonus,
       net_salary: rec.netSalary,
+      total_net_salary: totalNetSalary,
       paid_date: '',
       in_account_of: '',
       payee_name: rec.empName,
-      employee_total: rec.netSalary,
+      employee_total: totalNetSalary,
       employer_epf: rec.epf,
       employer_esic: employerEsic,
       employer_mlwf: 0,
@@ -224,7 +236,7 @@ export async function exportComplianceExcel({
   const titleRow = worksheet.getRow(1);
   titleRow.height = 30;
   titleRow.getCell('A').value = `AMBE ENTERPRISES - PAYROLL COMPLIANCE SHEET (${month.toUpperCase()} ${year}) - SITE: ${siteName.toUpperCase()}`;
-  worksheet.mergeCells('A1:BE1');
+  worksheet.mergeCells('A1:BH1');
   const titleCell = titleRow.getCell('A');
   titleCell.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FF0F172A' } };
   titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
@@ -241,9 +253,9 @@ export async function exportComplianceExcel({
   groupRow.getCell('Y').value = 'EARNED PAY'; worksheet.mergeCells('Y3:AD3');
   groupRow.getCell('AE').value = 'ADVANCES & UNIFORM'; worksheet.mergeCells('AE3:AO3');
   groupRow.getCell('AP').value = 'DEDUCTIONS'; worksheet.mergeCells('AP3:AT3');
-  groupRow.getCell('AU').value = 'BENEFITS'; worksheet.mergeCells('AU3:AV3');
-  groupRow.getCell('AW').value = 'PAYOUT'; worksheet.mergeCells('AW3:BA3');
-  groupRow.getCell('BB').value = 'EMPLOYER COMPLIANCE'; worksheet.mergeCells('BB3:BE3');
+  groupRow.getCell('AU').value = 'BENEFITS'; worksheet.mergeCells('AU3:AX3');
+  groupRow.getCell('AY').value = 'PAYOUT'; worksheet.mergeCells('AY3:BD3');
+  groupRow.getCell('BE').value = 'EMPLOYER COMPLIANCE'; worksheet.mergeCells('BE3:BH3');
 
   groupRow.eachCell((cell) => {
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF164E63' } };

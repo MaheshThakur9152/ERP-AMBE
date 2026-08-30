@@ -1464,7 +1464,7 @@ export const StaffPage: React.FC = () => {
                       <option value="">Select Rate Card...</option>
                       {rateCardsOptions.map((card) => (
                         <option key={card.id} value={card.id}>
-                          {card.post_name} (₹{card.gross_salary}){card.is_flat_wage ? ' [Flat]' : ''}
+                          {card.post_name}{card.remark ? ` (${card.remark})` : ''} (₹{card.gross_salary}){card.is_flat_wage ? ' [Flat]' : ''}
                         </option>
                       ))}
                     </select>

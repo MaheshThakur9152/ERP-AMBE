@@ -9,6 +9,7 @@ import materialRoutes from './materialRoutes';
 import documentRoutes from './documentRoutes';
 import attendanceRoutes from './attendanceRoutes';
 import staffRoutes from './staffRoutes';
+import bonusRoutes from './bonusRoutes';
 import { supabaseAdmin } from '../config/supabase';
 import { OracleStorageService } from '../services/oracleStorageService';
 import { withTimeout } from '../utils/timeoutHelper';
@@ -82,5 +83,6 @@ router.use('/materials', materialRoutes);
 router.use('/documents', documentRoutes);
 router.use('/attendance', attendanceRoutes);
 router.use('/staff', staffRoutes);
+router.use('/bonus', bonusRoutes);
 
 export default router;

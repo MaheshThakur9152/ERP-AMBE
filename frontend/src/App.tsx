@@ -10,6 +10,7 @@ import { SitesMasterPage } from '@/pages/SitesMasterPage';
 import { InvoiceHubPage } from '@/pages/InvoiceHubPage';
 import { SmartGeneratorPage } from '@/pages/SmartGeneratorPage';
 import { PayrollPage } from '@/pages/PayrollPage';
+import { BonusPage } from '@/pages/BonusPage';
 import { PayslipPage } from '@/pages/PayslipPage';
 import { AdvancesPage } from '@/pages/AdvancesPage';
 import { DeploymentsPage } from '@/pages/DeploymentsPage';
@@ -47,6 +48,7 @@ export const App: React.FC = () => {
             <Route path="/invoice-vault" element={<InvoiceVault />} />
             <Route path="/attendance" element={<AttendancePage />} />
             <Route path="/payroll" element={<PayrollPage />} />
+            <Route path="/bonus" element={<BonusPage />} />
             <Route path="/payslips" element={<PayslipPage />} />
             <Route path="/advances" element={<AdvancesPage />} />
             <Route path="/deployments" element={<DeploymentsPage />} />

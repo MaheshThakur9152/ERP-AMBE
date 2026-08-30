@@ -14,6 +14,7 @@ import {
   LogOut,
   User,
   FolderArchive,
+  Gift,
 } from 'lucide-react';
 import { useAuth } from '@/features/auth/context/AuthContext';
 
@@ -182,6 +183,18 @@ export const Sidebar: React.FC = () => {
                 }
               >
                 Payroll
+              </NavLink>
+              <NavLink
+                to="/bonus"
+                className={({ isActive }) =>
+                  `w-full flex gap-3 px-4 py-2 rounded-lg text-xs font-semibold transition-colors items-center ${
+                    isActive
+                      ? 'bg-[#20B2AA] text-white shadow-md'
+                      : 'hover:bg-white/5 text-gray-300'
+                  }`
+                }
+              >
+                <Gift size={14} /> <span>Bonus</span>
               </NavLink>
               <NavLink
                 to="/payslips"

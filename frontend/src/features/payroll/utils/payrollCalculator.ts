@@ -11,6 +11,9 @@ export interface RateCard {
   incentive_amount?: number;
   incentive?: number;
   is_flat_wage?: boolean;
+  bonus_amount?: number | null;
+  part_bonus_amount?: number | null;
+  remark?: string;
   [key: string]: any;
 }
 
@@ -36,6 +39,12 @@ export interface PayrollCalculationResult {
   earnedBonus: number;
   incentive: number;
   netSalary: number;
+  bonusAmountSnapshot: number | null;
+  partBonusAmountSnapshot: number | null;
+  rateCardRemarkSnapshot: string;
+  earnedPartBonus: number;
+  remainingPartBonus: number;
+  totalNetSalary: number;
 }
 
 export function normalizeGender(raw: string | null | undefined): 'M' | 'F' | 'O' {
@@ -69,12 +78,13 @@ export function calculatePayroll(
   const earnedHRA = Math.round(hra * factor);
   const earnedOther = Math.round(other_allowance * factor);
   const earnedConveyance = Math.round(conveyance_allowance * factor);
-  const earnedIncentive = Math.round(incentive_amount * factor);
+  const earnedIncentive = Math.round(incentive_amount); // Fixed Incentive paid in full (no attendance proration)
 
   // Flat Wage Bypass Logic (Non-Compliance)
   if (rateCard.is_flat_wage) {
     const flatEarned = Math.round((Number(rateCard.gross_salary) || 0) * factor);
     const earnedGross = flatEarned + earnedIncentive;
+    const netSalary = earnedGross - advances;
     return {
       payableDays,
       earnedBasic: 0,
@@ -90,7 +100,13 @@ export function calculatePayroll(
       pt: 0,
       earnedBonus: 0,
       incentive: earnedIncentive,
-      netSalary: earnedGross - advances,
+      netSalary,
+      bonusAmountSnapshot: null,
+      partBonusAmountSnapshot: null,
+      rateCardRemarkSnapshot: rateCard.remark || '',
+      earnedPartBonus: 0,
+      remainingPartBonus: 0,
+      totalNetSalary: netSalary,
     };
   }
 
@@ -100,8 +116,6 @@ export function calculatePayroll(
 
   const epf = Math.round(earnedBasic * 0.12);
   const earnedGross = earnedBasic + earnedHRA + earnedOther + earnedConveyance + earnedIncentive;
-
-
 
   // Maharashtra PT Logic
   let pt = 0;
@@ -115,10 +129,25 @@ export function calculatePayroll(
     pt = 0;
   }
 
-  // Bonus Accrual (8.33% of Basic)
-  const earnedBonus = Math.round(earnedBasic * 0.0833);
-
   const netSalary = earnedGross - epf - esic - pt - advances;
+
+  // Fixed Rupee Bonus & Part Bonus System (Optional, attendance-prorated)
+  const bonusAmount = rateCard.bonus_amount != null && Number(rateCard.bonus_amount) > 0 ? Number(rateCard.bonus_amount) : null;
+  const partBonusAmount = rateCard.part_bonus_amount != null && Number(rateCard.part_bonus_amount) > 0 ? Number(rateCard.part_bonus_amount) : null;
+
+  const earnedBonus = (rateCard.is_flat_wage || !bonusAmount)
+    ? 0
+    : Math.round(bonusAmount * factor);
+
+  const earnedPartBonus = (rateCard.is_flat_wage || !partBonusAmount)
+    ? 0
+    : Math.round(partBonusAmount * factor);
+
+  const remainingPartBonus = (rateCard.is_flat_wage || !bonusAmount || !partBonusAmount)
+    ? 0
+    : Math.max(0, bonusAmount - partBonusAmount);
+
+  const totalNetSalary = netSalary + earnedPartBonus;
 
   return {
     payableDays,
@@ -136,5 +165,11 @@ export function calculatePayroll(
     earnedBonus,
     incentive: earnedIncentive,
     netSalary,
+    bonusAmountSnapshot: bonusAmount,
+    partBonusAmountSnapshot: partBonusAmount,
+    rateCardRemarkSnapshot: rateCard.remark || '',
+    earnedPartBonus,
+    remainingPartBonus,
+    totalNetSalary,
   };
 }
