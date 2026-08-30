@@ -9,6 +9,7 @@ export interface PayrollExportRecord {
   gender: string;
   doj?: string;
   pfNo?: string;
+  uanNo?: string;
   esicNo?: string;
   siteName: string;
   basicDa: number;
@@ -66,9 +67,9 @@ export async function exportComplianceExcel({
     views: [{ state: 'frozen', xSplit: 3, ySplit: 5, activeCell: 'D6' }],
   });
 
-  // 1. Column Architecture (60 Explicit Columns Cols A - BH)
+  // 1. Column Architecture
   worksheet.columns = [
-    // GROUP 1: EMPLOYEE INFO (Cols A - I)
+    // GROUP 1: EMPLOYEE INFO
     { header: 'EMP ID', key: 'emp_id', width: 10 },
     { header: 'NAME', key: 'employee_name', width: 22 },
     { header: 'POST', key: 'post_name', width: 14 },
@@ -77,8 +78,9 @@ export async function exportComplianceExcel({
     { header: 'STATUS', key: 'work_status', width: 10 },
     { header: 'COMPLIANCE NAME', key: 'compliance_name', width: 22 },
     { header: 'PF NO', key: 'pf_no', width: 14 },
+    { header: 'UAN NO', key: 'uan_no', width: 14 },
     { header: 'ESIC NO', key: 'esic_no', width: 14 },
-    // GROUP 2: ATTENDANCE (Cols J - R)
+    // GROUP 2: ATTENDANCE
     { header: 'PD', key: 'pd', width: 6 },
     { header: 'WO', key: 'wo', width: 6 },
     { header: 'WOE', key: 'woe', width: 6 },
@@ -88,21 +90,21 @@ export async function exportComplianceExcel({
     { header: 'LAST MTH', key: 'last_month', width: 10 },
     { header: 'TOTAL', key: 'payable_days', width: 8 },
     { header: 'OT HRS', key: 'ot_hours', width: 8 },
-    // GROUP 3: BASE RATE CARD (Cols S - X)
+    // GROUP 3: BASE RATE CARD
     { header: 'GROSS RATE', key: 'gross_salary', width: 12 },
     { header: 'BASIC', key: 'base_basic', width: 10 },
     { header: 'HRA', key: 'base_hra', width: 10 },
     { header: 'WASHING', key: 'base_other', width: 10 },
     { header: 'CONVEYANCE', key: 'base_conveyance', width: 12 },
     { header: 'OTHER', key: 'base_misc', width: 10 },
-    // GROUP 4: EARNED PAY (Cols Y - AD)
+    // GROUP 4: EARNED PAY
     { header: 'EARNED GROSS', key: 'earned_gross', width: 14 },
     { header: 'EARNED BASIC', key: 'earned_basic', width: 12 },
     { header: 'EARNED HRA', key: 'earned_hra', width: 12 },
     { header: 'EARNED WASH', key: 'earned_other', width: 12 },
     { header: 'EARNED CONV', key: 'earned_conveyance', width: 12 },
     { header: 'INCENTIVE', key: 'earned_incentive', width: 10 },
-    // GROUP 5: ADVANCES & UNIFORM (Cols AE - AO)
+    // GROUP 5: ADVANCES & UNIFORM
     { header: 'ADV DATE', key: 'adv_date', width: 12 },
     { header: 'ADV AMT', key: 'adv_amt', width: 10 },
     { header: 'SHIRT', key: 'uni_shirt', width: 8 },
@@ -114,25 +116,25 @@ export async function exportComplianceExcel({
     { header: 'ADV TOTAL', key: 'total_advances', width: 10 },
     { header: 'IN THIS MTH', key: 'adv_this_month', width: 12 },
     { header: 'IN NEXT MTH', key: 'adv_next_month', width: 12 },
-    // GROUP 6: DEDUCTIONS (Cols AP - AT)
+    // GROUP 6: DEDUCTIONS
     { header: 'EPF', key: 'epf', width: 8 },
     { header: 'ESIC', key: 'esic', width: 8 },
     { header: 'PT', key: 'pt', width: 8 },
     { header: 'MLWF', key: 'mlwf', width: 8 },
     { header: 'NET DEDUTION', key: 'net_deduction', width: 14 },
-    // GROUP 7: BENEFITS (Cols AU - AX)
+    // GROUP 7: BENEFITS
     { header: 'BONUS BASE', key: 'base_bonus', width: 12 },
     { header: 'EARNED BONUS', key: 'earned_bonus', width: 14 },
     { header: 'EARNED PART BONUS', key: 'earned_part_bonus', width: 16 },
     { header: 'REM. PART BONUS', key: 'remaining_part_bonus', width: 16 },
-    // GROUP 8: PAYOUT (Cols AY - BD)
+    // GROUP 8: PAYOUT
     { header: 'NET SALARY', key: 'net_salary', width: 14 },
     { header: 'TOTAL NET SALARY', key: 'total_net_salary', width: 16 },
     { header: 'PAID DATE', key: 'paid_date', width: 12 },
     { header: 'IN ACCT OF', key: 'in_account_of', width: 15 },
     { header: 'PAYEE NAME', key: 'payee_name', width: 20 },
     { header: 'EMP TOTAL', key: 'employee_total', width: 12 },
-    // GROUP 9: EMPLOYER COMPLIANCE (Cols BE - BH)
+    // GROUP 9: EMPLOYER COMPLIANCE
     { header: 'EMP EPF', key: 'employer_epf', width: 10 },
     { header: 'EMP ESIC', key: 'employer_esic', width: 10 },
     { header: 'EMP MLWF', key: 'employer_mlwf', width: 10 },
@@ -140,7 +142,7 @@ export async function exportComplianceExcel({
   ];
 
   // Insert Pure Numeric Index Row (Row 2)
-  const indexRowValues = Array.from({ length: 60 }, (_, i) => i + 1);
+  const indexRowValues = Array.from({ length: worksheet.columns.length }, (_, i) => i + 1);
   worksheet.spliceRows(2, 0, indexRowValues);
 
   const borderStyle: Partial<ExcelJS.Borders> = {
@@ -172,6 +174,7 @@ export async function exportComplianceExcel({
       work_status: 'Active',
       compliance_name: 'Ambe Enterprises',
       pf_no: rec.pfNo || '',
+      uan_no: rec.uanNo || '',
       esic_no: rec.esicNo || '',
       pd: rec.pd,
       wo: rec.wo,

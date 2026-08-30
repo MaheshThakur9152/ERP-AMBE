@@ -299,8 +299,7 @@ export const PayslipHub: React.FC = () => {
                       <div className="flex justify-between"><span className="font-sans font-bold">NAME:</span> <span>{record.employee_name || staff.name || '-'}</span></div>
                       <div className="flex justify-between"><span className="font-sans font-bold">EMP ID:</span> <span>{record.emp_id || staff.biometric_code || '-'}</span></div>
                       <div className="flex justify-between"><span className="font-sans font-bold">DESIGNATION:</span> <span>{staff.designation || 'Staff'}</span></div>
-                      <div className="flex justify-between"><span className="font-sans font-bold">DOJ:</span> <span>{staff.joining_date ? new Date(staff.joining_date).toLocaleDateString('en-GB') : '01/01/2026'}</span></div>
-                      <div className="flex justify-between"><span className="font-sans font-bold">PF NO:</span> <span>{staff.pf_no || staff.pfNo || 'N/A'}</span></div>
+                      <div className="flex justify-between"><span className="font-sans font-bold">PF NO:</span> <span>{staff.pf_no || staff.pfNo || staff.uan_no || 'N/A'}</span></div>
                       <div className="flex justify-between"><span className="font-sans font-bold">ESIC NO:</span> <span>{staff.esic_no || staff.esicNo || 'N/A'}</span></div>
                       <div className="flex justify-between"><span className="font-sans font-bold">BANK A/C:</span> <span>{staff.bank_account_no || staff.bank_account || 'N/A'}</span></div>
                       <div className="flex justify-between"><span className="font-sans font-bold">IFSC:</span> <span>{staff.bank_ifsc_code || staff.ifsc || 'N/A'}</span></div>
