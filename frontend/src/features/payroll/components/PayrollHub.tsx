@@ -15,7 +15,13 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { calculatePayroll, RateCard, PayrollCalculationResult } from '../utils/payrollCalculator';
-import { exportComplianceExcel, PayrollExportRecord, exportAxisPayoutExcel, AxisExportRecord } from '../utils/payrollExporter';
+import {
+  exportComplianceExcel,
+  exportAllSitesComplianceExcel,
+  PayrollExportRecord,
+  exportAxisPayoutExcel,
+  AxisExportRecord,
+} from '../utils/payrollExporter';
 
 export interface EmployeePayrollRow {
   id: string;
@@ -109,7 +115,10 @@ export const PayrollHub: React.FC = () => {
   useEffect(() => {
     const fetchSites = async () => {
       try {
-        const { data, error } = await supabase.from('sites').select('id, site_name, code_name').order('site_name');
+        const { data, error } = await supabase
+          .from('sites')
+          .select('id, site_name, code_name, company_id, companies(id, name)')
+          .order('site_name');
         if (error) {
           console.warn('Fallback: fetching sites via API', error);
           const res = await fetchWithRetry('/api/sites');
@@ -149,7 +158,7 @@ export const PayrollHub: React.FC = () => {
         }
       }
 
-      let staffQuery = supabase.from('staff').select('*, rate_cards(*), sites(site_name, code_name)');
+      let staffQuery = supabase.from('staff').select('*, rate_cards(*), sites(site_name, code_name, company_id, companies(id, name))');
       if (selectedSiteId !== 'all') {
         if (deployedStaffIds.length > 0) {
           staffQuery = staffQuery.or(`site_id.eq.${selectedSiteId},id.in.(${deployedStaffIds.join(',')})`);
@@ -708,15 +717,52 @@ export const PayrollHub: React.FC = () => {
           totalDeductions,
           netSalary: calc.netSalary,
           totalNetSalary: calc.totalNetSalary,
+          payeeName: emp.payee_name || emp.payeeName || emp.employee_name || emp.name || r.name,
+          bankAccountNo: emp.bank_account_no || emp.bankAccountNo || emp.bank_account || '',
+          bankIfscCode: emp.bank_ifsc_code || emp.bankIfsc || emp.bankIfscCode || emp.ifsc || '',
+          bankName: emp.bank_name || emp.bankName || '',
+          companyName: emp.sites?.companies?.name || (sites.find((s: any) => s.id === r.siteId) as any)?.companies?.name || 'AMBE SERVICE FACILITIES PRIVATE LIMITED',
         };
       });
 
-      await exportComplianceExcel({
-        month: selectedMonth,
-        year: selectedYear,
-        siteName: activeSiteName,
-        records: exportRecords,
-      });
+      console.log('PayrollExportRecord sample for export:', exportRecords[0]);
+
+      if (selectedSiteId === 'all') {
+        // Group records by site name for multi-tab workbook
+        const siteGroupsMap = new Map<string, PayrollExportRecord[]>();
+        exportRecords.forEach((rec) => {
+          const sName = rec.siteName || 'Site';
+          if (!siteGroupsMap.has(sName)) {
+            siteGroupsMap.set(sName, []);
+          }
+          siteGroupsMap.get(sName)!.push(rec);
+        });
+
+        const siteRecords = Array.from(siteGroupsMap.entries()).map(([siteName, siteRecs]) => ({
+          siteName,
+          companyName: siteRecs[0]?.companyName,
+          records: siteRecs,
+        }));
+
+        await exportAllSitesComplianceExcel({
+          month: selectedMonth,
+          year: selectedYear,
+          siteRecords,
+        });
+      } else {
+        const siteCompName =
+          exportRecords[0]?.companyName ||
+          (sites.find((s: any) => s.id === selectedSiteId) as any)?.companies?.name ||
+          'AMBE SERVICE FACILITIES PRIVATE LIMITED';
+
+        await exportComplianceExcel({
+          month: selectedMonth,
+          year: selectedYear,
+          siteName: activeSiteName,
+          companyName: siteCompName,
+          records: exportRecords,
+        });
+      }
 
       setStatusMessage({ type: 'success', text: 'Compliance Excel generated & downloaded successfully!' });
     } catch (err: any) {
