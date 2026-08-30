@@ -178,6 +178,8 @@ interface StaffMember {
   bankName?: string;
   payee_name?: string;
   payeeName?: string;
+  compliance_name?: string;
+  complianceName?: string;
   documents?: StaffDocument[];
   employee_documents?: { id: string; document_type?: string; gcp_file_url?: string; view_url?: string; file_name?: string }[];
 }
@@ -657,6 +659,8 @@ export const StaffPage: React.FC = () => {
       panNo: '',
       uan_no: '',
       esic_no: '',
+      compliance_name: '',
+      complianceName: '',
       status: 'Active',
       documents: [],
     });
@@ -687,6 +691,8 @@ export const StaffPage: React.FC = () => {
       bank_ifsc_code: staff.bank_ifsc_code || staff.bankIfsc || '',
       bank_name: staff.bank_name || staff.bankName || '',
       payee_name: staff.payee_name || staff.payeeName || '',
+      compliance_name: staff.compliance_name || (staff as any).complianceName || '',
+      complianceName: staff.compliance_name || (staff as any).complianceName || '',
       aadharNo: staff.aadharNo || staff.aadhar_no || '',
       panNo: staff.panNo || staff.pan_no || '',
       uan_no: staff.uan_no || '',
@@ -776,6 +782,7 @@ export const StaffPage: React.FC = () => {
       status: formData.status || 'Active',
       site_id: formData.site_id || null,
       rate_card_id: formData.rate_card_id || null,
+      compliance_name: (formData.compliance_name || formData.complianceName || '').trim() || null,
       bank_account_no: (formData.bank_account_no || formData.bankAccountNo || '').trim() || null,
       bank_ifsc_code: (formData.bank_ifsc_code || formData.bankIfsc || '').trim() || null,
       bank_name: (formData.bank_name || formData.bankName || '').trim() || null,
@@ -1356,7 +1363,7 @@ export const StaffPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div>
                     <label className="block text-[11px] font-bold text-gray-700 mb-1">Phone Number</label>
                     <input
@@ -1428,6 +1435,23 @@ export const StaffPage: React.FC = () => {
                         <option value="__custom__">+ Add New Designation...</option>
                       </select>
                     )}
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">Compliance Name</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Ambe Enterprises"
+                      value={formData.compliance_name || formData.complianceName || ''}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          compliance_name: e.target.value,
+                          complianceName: e.target.value,
+                        })
+                      }
+                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800"
+                    />
                   </div>
                 </div>
 

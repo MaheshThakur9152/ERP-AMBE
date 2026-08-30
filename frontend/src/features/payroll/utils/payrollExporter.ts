@@ -19,6 +19,7 @@ export interface PayrollExportRecord {
   conveyanceAllowance: number;
   incentive: number;
   grossRate: number;
+  committedSalary?: number;
   daysInMonth: number;
   advances: number;
   pd: number;
@@ -48,6 +49,8 @@ export interface PayrollExportRecord {
   bankIfscCode?: string;
   bankName?: string;
   companyName?: string;
+  complianceName?: string;
+  siteCodeName?: string;
 }
 
 export interface ExportComplianceOptions {
@@ -325,7 +328,6 @@ export function buildComplianceSheet(
   let currentRowNum = 11;
 
   records.forEach((rec, idx) => {
-    const ratePerDay = rec.daysInMonth > 0 ? Math.round(rec.grossRate / rec.daysInMonth) : 0;
     const totalEarnedGross = rec.earnedGross;
     const earnedBonus = rec.earnedBonus ?? Math.round(rec.earnedBasic * 0.0833);
     const earnedPartBonus = rec.earnedPartBonus ?? 0;
@@ -341,8 +343,8 @@ export function buildComplianceSheet(
       rec.designation,                                            // 3: POST
       rec.gender || 'M',                                          // 4: GENDER
       'Active',                                                   // 5: Work Status (TODO)
-      rec.grossRate,                                              // 6: SAL Committed
-      'Ambe Enterprises',                                         // 7: Compliance Name (TODO)
+      rec.committedSalary ?? '',                                  // 6: SAL Committed
+      rec.complianceName || '',                                   // 7: Compliance Name
       rec.pfNo || rec.uanNo || '',                                // 8: PF No
       rec.esicNo || '',                                           // 9: ESIC No
 
@@ -360,7 +362,7 @@ export function buildComplianceSheet(
       0,                                                          // 18: OT Hours Worked (TODO)
 
       // 19-29: Interleaved Rate & Earned Pay (11 cols)
-      ratePerDay,                                                 // 19: Rate Per Day
+      rec.grossRate,                                              // 19: Rate Per Day (Gross Salary)
       rec.basicDa,                                                // 20: BASIC+DA
       rec.earnedBasic,                                            // 21: Earned Basic+DA
       rec.hra,                                                    // 22: HRA

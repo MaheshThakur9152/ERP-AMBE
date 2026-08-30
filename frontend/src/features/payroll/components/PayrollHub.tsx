@@ -678,6 +678,11 @@ export const PayrollHub: React.FC = () => {
           ? (rc.gross_salary || 0)
           : ((rc.basic_da || 0) + (rc.hra || 0) + otherAllowance + conveyanceAllowance + incentive || (rc.gross_salary || 0));
         const totalDeductions = calc.epf + calc.esic + calc.pt + r.advances;
+        const siteObj = (sites.find((s: any) => s.id === r.siteId) as any) || emp.sites || {};
+        const siteCodeName = (siteObj.code_name || emp.sites?.code_name || '').trim();
+        const siteName = r.siteName || siteObj.site_name || emp.sites?.site_name || 'Site';
+        const compName = siteObj.companies?.name || emp.sites?.companies?.name || 'AMBE SERVICE FACILITIES PRIVATE LIMITED';
+
         return {
           srNo: idx + 1,
           empId: r.empId,
@@ -688,7 +693,9 @@ export const PayrollHub: React.FC = () => {
           pfNo: emp.pf_no || emp.pfNo || emp.uan_no || '',
           uanNo: emp.uan_no || emp.uanNo || emp.pf_no || '',
           esicNo: emp.esic_no || emp.esicNo || '',
-          siteName: r.siteName,
+          siteName,
+          siteCodeName,
+          complianceName: emp.compliance_name || emp.complianceName || '',
           basicDa: rc.basic_da || 0,
           hra: rc.hra || 0,
           washingAllowance: otherAllowance,
@@ -696,6 +703,12 @@ export const PayrollHub: React.FC = () => {
           conveyanceAllowance,
           incentive,
           grossRate,
+          committedSalary:
+            rc.committed_salary !== undefined && rc.committed_salary !== null && rc.committed_salary !== ''
+              ? Number(rc.committed_salary)
+              : rc.committedSalary !== undefined && rc.committedSalary !== null && rc.committedSalary !== ''
+              ? Number(rc.committedSalary)
+              : undefined,
           daysInMonth,
           advances: r.advances,
           pd: r.pd,
@@ -721,27 +734,37 @@ export const PayrollHub: React.FC = () => {
           bankAccountNo: emp.bank_account_no || emp.bankAccountNo || emp.bank_account || '',
           bankIfscCode: emp.bank_ifsc_code || emp.bankIfsc || emp.bankIfscCode || emp.ifsc || '',
           bankName: emp.bank_name || emp.bankName || '',
-          companyName: emp.sites?.companies?.name || (sites.find((s: any) => s.id === r.siteId) as any)?.companies?.name || 'AMBE SERVICE FACILITIES PRIVATE LIMITED',
+          companyName: compName,
         };
       });
 
       console.log('PayrollExportRecord sample for export:', exportRecords[0]);
 
       if (selectedSiteId === 'all') {
-        // Group records by site name for multi-tab workbook
-        const siteGroupsMap = new Map<string, PayrollExportRecord[]>();
+        // Group records by site code_name (if present), or fall back to distinct site_name
+        const groupsMap = new Map<string, { tabName: string; companyName?: string; records: PayrollExportRecord[] }>();
+
         exportRecords.forEach((rec) => {
-          const sName = rec.siteName || 'Site';
-          if (!siteGroupsMap.has(sName)) {
-            siteGroupsMap.set(sName, []);
+          // If code_name exists and is non-empty, use code_name as the group key & tab name
+          // Otherwise, fall back to that site's own site_name as group key
+          const groupKey = rec.siteCodeName && rec.siteCodeName.trim()
+            ? rec.siteCodeName.trim()
+            : (rec.siteName || 'Site').trim();
+
+          if (!groupsMap.has(groupKey)) {
+            groupsMap.set(groupKey, {
+              tabName: groupKey,
+              companyName: rec.companyName,
+              records: [],
+            });
           }
-          siteGroupsMap.get(sName)!.push(rec);
+          groupsMap.get(groupKey)!.records.push(rec);
         });
 
-        const siteRecords = Array.from(siteGroupsMap.entries()).map(([siteName, siteRecs]) => ({
-          siteName,
-          companyName: siteRecs[0]?.companyName,
-          records: siteRecs,
+        const siteRecords = Array.from(groupsMap.values()).map((g) => ({
+          siteName: g.tabName,
+          companyName: g.companyName,
+          records: g.records,
         }));
 
         await exportAllSitesComplianceExcel({
