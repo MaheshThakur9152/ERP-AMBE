@@ -8,6 +8,7 @@ import { env } from '../config/env';
 import { DEFAULT_MGMT_FEE_PERCENT } from '../config/constants';
 import { AuthUser } from '../types/express';
 import { enrichInvoicesWithViewUrls, enrichInvoiceWithViewUrls } from '../utils/documentViewHelper';
+import { OracleStorageService } from './oracleStorageService';
 
 const InvoiceRowSchema = z.object({
   id: z.string().optional().nullable(),
@@ -213,6 +214,12 @@ export function mapRowToInvoiceRecord(rawRow: any): InvoiceRecord {
     cancelledAt: (row.cancelled_at || row.cancelledAt) ? String(row.cancelled_at || row.cancelledAt) : null,
     cancelled_reason: (row.cancelled_reason || row.cancelledReason) ? String(row.cancelled_reason || row.cancelledReason) : null,
     cancelledReason: (row.cancelled_reason || row.cancelledReason) ? String(row.cancelled_reason || row.cancelledReason) : null,
+    approved_at: (row.approved_at || row.approvedAt) ? String(row.approved_at || row.approvedAt) : null,
+    approvedAt: (row.approved_at || row.approvedAt) ? String(row.approved_at || row.approvedAt) : null,
+    certified_doc_confirmed_at: (row.certified_doc_confirmed_at || row.certifiedDocConfirmedAt) ? String(row.certified_doc_confirmed_at || row.certifiedDocConfirmedAt) : null,
+    certifiedDocConfirmedAt: (row.certified_doc_confirmed_at || row.certifiedDocConfirmedAt) ? String(row.certified_doc_confirmed_at || row.certifiedDocConfirmedAt) : null,
+    certified_attendance_confirmed_at: (row.certified_attendance_confirmed_at || row.certifiedAttendanceConfirmedAt) ? String(row.certified_attendance_confirmed_at || row.certifiedAttendanceConfirmedAt) : null,
+    certifiedAttendanceConfirmedAt: (row.certified_attendance_confirmed_at || row.certifiedAttendanceConfirmedAt) ? String(row.certified_attendance_confirmed_at || row.certifiedAttendanceConfirmedAt) : null,
     previous_version_id: row.previous_version_id || row.previousVersionId || row.payload?.previous_version_id || null,
     payload: fullPayload,
     created_at: row.created_at ? String(row.created_at) : (row.createdAt ? String(row.createdAt) : undefined),
@@ -587,5 +594,281 @@ export class InvoiceQueryService {
 
     console.warn(`[invoice:lock:update:success] invoice_id=${id} db_is_locked=${data?.is_locked} updated_at=${data?.updated_at}`);
     return await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(data));
+  }
+
+  /**
+   * Approve a Proforma Invoice
+   * PATCH /api/invoices/:id/approve
+   * Sets status = 'Approved', approved_at = now()
+   */
+  static async approveProforma(id: string, user?: AuthUser): Promise<InvoiceRecord> {
+    await this.verifyInvoiceOwnership(id, user);
+
+    const { data: inv, error: fetchErr } = await supabaseAdmin
+      .from('invoices')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (fetchErr || !inv) {
+      throw new Error(`Invoice not found: ${fetchErr?.message || id}`);
+    }
+
+    const isProforma =
+      inv.type === 'Proforma Invoice' ||
+      inv.type === 'Proforma' ||
+      String(inv.type || '').toLowerCase().includes('proforma');
+
+    if (!isProforma) {
+      throw new Error(`Only Proforma invoices can be approved. Current type: ${inv.type}`);
+    }
+
+    if (inv.status !== 'Pending') {
+      throw new Error(`Only Pending invoices can be approved. Current status: ${inv.status}`);
+    }
+
+    const now = new Date().toISOString();
+    const { data, error } = await supabaseAdmin
+      .from('invoices')
+      .update({
+        status: 'Approved',
+        approved_at: now,
+        updated_at: now,
+      })
+      .eq('id', id)
+      .select('*, sites(*), companies(*)')
+      .single();
+
+    if (error) {
+      console.error(`[invoice:approve:error] invoice_id=${id} error:`, error.message);
+      throw new Error(`Invoice approval failed: ${error.message}`);
+    }
+
+    console.log(`[invoice:approve:success] invoice_id=${id} approved_at=${now}`);
+    return await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(data));
+  }
+
+  /**
+   * Convert an Approved Proforma to a Tax Invoice
+   * POST /api/invoices/:id/convert-to-tax-invoice
+   */
+  static async convertToTaxInvoice(id: string, user?: AuthUser): Promise<InvoiceRecord> {
+    await this.verifyInvoiceOwnership(id, user);
+
+    const { data: proforma, error: fetchErr } = await supabaseAdmin
+      .from('invoices')
+      .select('*, sites(*), companies(*)')
+      .eq('id', id)
+      .single();
+
+    if (fetchErr || !proforma) {
+      throw new Error(`Proforma invoice not found: ${fetchErr?.message || id}`);
+    }
+
+    if (proforma.status !== 'Approved') {
+      throw new Error(`Only Approved Proforma invoices can be converted to Tax Invoice. Current status: ${proforma.status}`);
+    }
+
+    const companyId = proforma.company_id || proforma.companies?.id;
+    if (!companyId) {
+      throw new Error('Company ID is required to generate Tax Invoice sequence number');
+    }
+
+    // Fetch company to get tax_prefix and tax_sequence
+    const { data: comp, error: compErr } = await supabaseAdmin
+      .from('companies')
+      .select('*')
+      .eq('id', companyId)
+      .single();
+
+    if (compErr || !comp) {
+      throw new Error(`Company not found: ${compErr?.message || companyId}`);
+    }
+
+    const taxPrefix = comp.tax_prefix || 'AS/26-27/';
+    const taxSeq = comp.tax_sequence || 1;
+    const nextTaxInvoiceNo = `${taxPrefix}${taxSeq}`;
+    const now = new Date().toISOString();
+
+    const insertRow: any = {
+      company_id: companyId,
+      site_id: proforma.site_id,
+      invoice_no: nextTaxInvoiceNo,
+      type: 'Tax Invoice',
+      status: 'Pending',
+      previous_version_id: proforma.id,
+      invoice_date: now.split('T')[0],
+      billing_period: proforma.billing_period || '',
+      line_items: proforma.line_items || [],
+      sub_total: proforma.sub_total || 0,
+      tax_total: proforma.tax_total || 0,
+      grand_total: proforma.grand_total || 0,
+      management_fee_percent: proforma.management_fee_percent ?? proforma.mgmt_percent ?? DEFAULT_MGMT_FEE_PERCENT,
+      mgmt_percent: proforma.management_fee_percent ?? proforma.mgmt_percent ?? DEFAULT_MGMT_FEE_PERCENT,
+      machinery_charges: proforma.machinery_charges || 0,
+      material_charges: proforma.material_charges || 0,
+      additional_charges: proforma.additional_charges || [],
+      challan_no: proforma.challan_no || '',
+      challan_date: proforma.challan_date || '',
+      buyer_order_no: proforma.buyer_order_no || '',
+      dispatch_doc_no: proforma.dispatch_doc_no || '',
+      dispatched_through: proforma.dispatched_through || '',
+      destination: proforma.destination || '',
+      terms_of_delivery: proforma.terms_of_delivery || '',
+      is_material: proforma.is_material || false,
+      created_at: now,
+    };
+
+    this.validateRequiredColumns(insertRow);
+
+    const { data: newTaxInvoice, error: insertErr } = await supabaseAdmin
+      .from('invoices')
+      .insert([insertRow])
+      .select('*, sites(*), companies(*)')
+      .single();
+
+    if (insertErr) {
+      console.error(`[invoice:convert:error] proforma_id=${id} error:`, insertErr.message);
+      throw new Error(`Failed to create Tax Invoice: ${insertErr.message}`);
+    }
+
+    // Increment company tax sequence
+    await supabaseAdmin
+      .from('companies')
+      .update({ tax_sequence: taxSeq + 1 })
+      .eq('id', companyId);
+
+    console.log(`[invoice:convert:success] proforma_id=${id} created tax_invoice_id=${newTaxInvoice.id} invoice_no=${nextTaxInvoiceNo}`);
+    return await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(newTaxInvoice));
+  }
+
+  /**
+   * Mark an uploaded invoice document as certified
+   * PATCH /api/invoices/:id/certify/:docType
+   */
+  static async certifyInvoiceDocument(id: string, docType: string, user?: AuthUser): Promise<InvoiceRecord> {
+    await this.verifyInvoiceOwnership(id, user);
+
+    const isAttendance = docType.toLowerCase().includes('attendance');
+    const updateField = isAttendance ? 'certified_attendance_confirmed_at' : 'certified_doc_confirmed_at';
+    const now = new Date().toISOString();
+
+    const { data, error } = await supabaseAdmin
+      .from('invoices')
+      .update({ [updateField]: now, updated_at: now })
+      .eq('id', id)
+      .select('*, sites(*), companies(*)')
+      .single();
+
+    if (error) {
+      console.error(`[invoice:certify:error] invoice_id=${id} docType=${docType} error:`, error.message);
+      throw new Error(`Certification update failed: ${error.message}`);
+    }
+
+    console.log(`[invoice:certify:success] invoice_id=${id} docType=${docType} confirmed_at=${now}`);
+    return await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(data));
+  }
+
+  /**
+   * Delete an uploaded invoice document from storage and clear database references
+   * DELETE /api/invoices/:id/document/:docType
+   */
+  static async deleteInvoiceDocument(id: string, docType: string, user?: AuthUser): Promise<InvoiceRecord> {
+    await this.verifyInvoiceOwnership(id, user);
+
+    const { data: inv, error: fetchErr } = await supabaseAdmin
+      .from('invoices')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (fetchErr || !inv) {
+      throw new Error(`Invoice not found: ${fetchErr?.message || id}`);
+    }
+
+    const isAttendance = docType.toLowerCase().includes('attendance');
+    const storageKey = isAttendance ? inv.certified_attendance_storage_key : inv.certified_doc_storage_key;
+
+    if (storageKey) {
+      await OracleStorageService.deleteFile(storageKey).catch((err) => {
+        console.warn(`[invoice:deleteDoc:minio] Failed to delete file ${storageKey}:`, err);
+      });
+    }
+
+    const updatePayload: any = isAttendance
+      ? {
+          certified_attendance_url: null,
+          certified_attendance_storage_key: null,
+          certified_attendance_confirmed_at: null,
+          updated_at: new Date().toISOString(),
+        }
+      : {
+          certified_doc_url: null,
+          certified_doc_storage_key: null,
+          certified_doc_confirmed_at: null,
+          updated_at: new Date().toISOString(),
+        };
+
+    const { data, error } = await supabaseAdmin
+      .from('invoices')
+      .update(updatePayload)
+      .eq('id', id)
+      .select('*, sites(*), companies(*)')
+      .single();
+
+    if (error) {
+      console.error(`[invoice:deleteDoc:error] invoice_id=${id} docType=${docType} error:`, error.message);
+      throw new Error(`Document deletion failed: ${error.message}`);
+    }
+
+    console.log(`[invoice:deleteDoc:success] invoice_id=${id} docType=${docType} deleted`);
+    return await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(data));
+  }
+
+  /**
+   * Fetch invoice document file info or stream directly
+   * GET /api/invoices/:id/document/:docType/view
+   */
+  static async getInvoiceDocumentLocation(id: string, docType: string): Promise<{ storageKey?: string; viewUrl?: string; fileName: string }> {
+    const { data: inv, error: fetchErr } = await supabaseAdmin
+      .from('invoices')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (fetchErr || !inv) {
+      throw new Error(`Invoice not found: ${fetchErr?.message || id}`);
+    }
+
+    const lower = docType.toLowerCase();
+    let storageKey: string | null = null;
+    let fallbackUrl: string | null = null;
+    let fileName = `${inv.invoice_no || 'invoice'}.pdf`;
+
+    if (lower === 'attendance' || lower.includes('attendance')) {
+      storageKey = inv.certified_attendance_storage_key;
+      fallbackUrl = inv.certified_attendance_url;
+      fileName = `${inv.invoice_no || 'invoice'}_Attendance.pdf`;
+    } else if (lower === 'generated' || lower.includes('generated')) {
+      storageKey = inv.generated_pdf_storage_key;
+      fallbackUrl = inv.generated_pdf_url;
+      fileName = `${inv.invoice_no || 'invoice'}_Generated.pdf`;
+    } else {
+      // Default to bill / certified doc
+      storageKey = inv.certified_doc_storage_key;
+      fallbackUrl = inv.certified_doc_url;
+      fileName = `${inv.invoice_no || 'invoice'}_Certified_Bill.pdf`;
+    }
+
+    let viewUrl = fallbackUrl || undefined;
+    if (storageKey) {
+      viewUrl = await OracleStorageService.getSignedReadUrl(storageKey, 3600);
+    }
+
+    return {
+      storageKey: storageKey || undefined,
+      viewUrl,
+      fileName,
+    };
   }
 }

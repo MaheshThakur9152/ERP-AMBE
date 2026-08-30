@@ -46,4 +46,15 @@ router.patch('/:id/lock', requireAuth, requireSuperAdmin, InvoiceController.togg
 // Cancel invoice route: Admin & SuperAdmin
 router.patch('/:id/cancel', requireAuth, requireAdmin, checkLockBouncer('invoices'), InvoiceController.cancel);
 
+// Approve proforma invoice: Admin & SuperAdmin
+router.patch('/:id/approve', requireAuth, requireAdmin, checkLockBouncer('invoices'), InvoiceController.approve);
+
+// Convert approved proforma to tax invoice: Admin & SuperAdmin
+router.post('/:id/convert-to-tax-invoice', requireAuth, requireAdmin, checkLockBouncer('invoices'), InvoiceController.convertToTaxInvoice);
+
+// Invoice document management routes (permissible on locked invoices for supplementary paperwork)
+router.get('/:id/document/:docType/view', requireAuth, InvoiceController.viewDocument);
+router.patch('/:id/certify/:docType', requireAuth, requireAdmin, InvoiceController.certifyDocument);
+router.delete('/:id/document/:docType', requireAuth, requireAdmin, InvoiceController.deleteDocument);
+
 export default router;

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { X, ExternalLink, Loader2, AlertCircle, FileText, RefreshCw } from 'lucide-react';
+import { X, ExternalLink, Loader2, AlertCircle, FileText, RefreshCw, Trash2 } from 'lucide-react';
 import { fetchWithRetry, getApiUrl } from '@/lib/apiClient';
 
 export interface DocumentViewerModalProps {
@@ -9,6 +9,7 @@ export interface DocumentViewerModalProps {
   url?: string;
   fileName?: string;
   title?: string;
+  onDelete?: () => void;
 }
 
 export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
@@ -18,6 +19,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
   url,
   fileName = 'Document',
   title,
+  onDelete,
 }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -29,8 +31,8 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
   const currentBlobUrlRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Compute primary target URL
-  const targetUrl = documentId ? `/api/documents/${documentId}/view` : url || '';
+  // Prioritize direct url if provided, fallback to /api/documents/:documentId/view
+  const targetUrl = url || (documentId ? `/api/documents/${documentId}/view` : '');
 
   useEffect(() => {
     // Abort any prior in-flight fetch
@@ -197,6 +199,23 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
                 <ExternalLink className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">New Tab</span>
               </a>
+            )}
+            {onDelete && (
+              <button
+                type="button"
+                onClick={() => {
+                  const confirmed = window.confirm(`Delete this document "${fileName || 'Document'}"? This action cannot be undone.`);
+                  if (confirmed) {
+                    onDelete();
+                    onClose();
+                  }
+                }}
+                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-red-600/90 text-xs font-semibold text-red-300 hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="Delete document"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Delete</span>
+              </button>
             )}
             <button
               onClick={onClose}

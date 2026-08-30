@@ -42,6 +42,12 @@ export interface InvoiceRecord {
   cancelledAt?: string;
   cancelled_reason?: string;
   cancelledReason?: string;
+  approved_at?: string;
+  approvedAt?: string;
+  certified_doc_confirmed_at?: string;
+  certifiedDocConfirmedAt?: string;
+  certified_attendance_confirmed_at?: string;
+  certifiedAttendanceConfirmedAt?: string;
   previous_version_id?: string;
   is_locked?: boolean;
   created_at?: string;

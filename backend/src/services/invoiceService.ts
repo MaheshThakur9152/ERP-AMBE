@@ -30,4 +30,24 @@ export class InvoiceService {
   static cancelInvoice(id: string, cancelledReason?: string, user?: AuthUser): Promise<InvoiceRecord> {
     return InvoiceQueryService.cancelInvoice(id, cancelledReason, user);
   }
+
+  static approveProforma(id: string, user?: AuthUser): Promise<InvoiceRecord> {
+    return InvoiceQueryService.approveProforma(id, user);
+  }
+
+  static convertToTaxInvoice(id: string, user?: AuthUser): Promise<InvoiceRecord> {
+    return InvoiceQueryService.convertToTaxInvoice(id, user);
+  }
+
+  static certifyInvoiceDocument(id: string, docType: string, user?: AuthUser): Promise<InvoiceRecord> {
+    return InvoiceQueryService.certifyInvoiceDocument(id, docType, user);
+  }
+
+  static deleteInvoiceDocument(id: string, docType: string, user?: AuthUser): Promise<InvoiceRecord> {
+    return InvoiceQueryService.deleteInvoiceDocument(id, docType, user);
+  }
+
+  static getInvoiceDocumentLocation(id: string, docType: string): Promise<{ storageKey?: string; viewUrl?: string; fileName: string }> {
+    return InvoiceQueryService.getInvoiceDocumentLocation(id, docType);
+  }
 }
