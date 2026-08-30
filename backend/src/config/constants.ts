@@ -6,12 +6,22 @@
 export const DEFAULT_MGMT_FEE_PERCENT = 5;
 
 /** Shared cookie configuration for secure JWT and refresh token storage */
-export const COOKIE_OPTIONS = {
+const isProd = process.env.NODE_ENV === 'production';
+const defaultCookieDomain = isProd ? '.ambeservice.com' : undefined;
+const resolvedCookieDomain = process.env.COOKIE_DOMAIN || defaultCookieDomain;
+
+export const COOKIE_OPTIONS: {
+  httpOnly: boolean;
+  secure: boolean;
+  sameSite: 'none' | 'lax';
+  path: string;
+  domain?: string;
+} = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: (process.env.NODE_ENV === 'production' ? 'none' : 'lax') as 'none' | 'lax',
+  secure: isProd,
+  sameSite: isProd ? 'none' : 'lax',
   path: '/',
-  ...(process.env.COOKIE_DOMAIN ? { domain: process.env.COOKIE_DOMAIN } : {}),
+  ...(resolvedCookieDomain ? { domain: resolvedCookieDomain } : {}),
 };
 
 export const ACCESS_TOKEN_MAX_AGE = 15 * 60 * 1000; // 15 minutes in ms
