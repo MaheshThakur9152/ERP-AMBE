@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { SiteController } from '../controllers/siteController';
-import { requireAuth, requireAdmin, checkLockBouncer } from '../middlewares/authMiddleware';
+import { requireAuth, requireAdmin, checkLockBouncer, checkFieldLockBouncer } from '../middlewares/authMiddleware';
 import { validateFileMagicBytes } from '../middlewares/fileValidator';
 
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'application/pdf', 'image/webp'];
@@ -25,7 +25,8 @@ const router = Router();
 router.get('/', requireAuth, SiteController.list);
 router.get('/:id', requireAuth, SiteController.getById);
 router.post('/', requireAuth, requireAdmin, SiteController.create);
-router.put('/:id', requireAuth, requireAdmin, checkLockBouncer('sites'), SiteController.update);
+router.put('/:id', requireAuth, requireAdmin, checkFieldLockBouncer('sites'), SiteController.update);
+router.patch('/:id', requireAuth, requireAdmin, checkFieldLockBouncer('sites'), SiteController.update);
 router.delete('/:id', requireAuth, requireAdmin, checkLockBouncer('sites'), SiteController.delete);
 
 // Site documents routes

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { DocumentViewerModal } from '@/components/DocumentViewerModal';
+import { useAuth } from '@/features/auth/context/AuthContext';
 
 interface StaffOption {
   id: string;
@@ -35,9 +36,11 @@ interface EmployeeDocument {
   storage_provider?: string | null;
   storage_key?: string | null;
   uploaded_at: string;
+  is_locked?: boolean;
   staff?: {
     employee_name?: string;
     designation?: string;
+    is_locked?: boolean;
   };
 }
 
@@ -52,6 +55,7 @@ const DOCUMENT_TYPES = [
 ];
 
 export const EmployeeDocuments: React.FC = () => {
+  const { isSuperAdmin } = useAuth();
   const [staffList, setStaffList] = useState<StaffOption[]>([]);
   const [selectedStaffId, setSelectedStaffId] = useState<string>('');
   const [documentType, setDocumentType] = useState<string>('ID Proof');
@@ -235,6 +239,12 @@ export const EmployeeDocuments: React.FC = () => {
   };
 
   const handleDeleteDocument = async (id: string, fileName: string) => {
+    const docToDelete = documents.find((d) => d.id === id);
+    if ((docToDelete?.is_locked || docToDelete?.staff?.is_locked) && !isSuperAdmin) {
+      alert('Cannot delete document: Staff record is locked by SuperAdmin');
+      return;
+    }
+
     if (!confirm(`Delete this document "${fileName}"? This cannot be undone.`)) return;
 
     try {
@@ -556,14 +566,16 @@ export const EmployeeDocuments: React.FC = () => {
                           <span>View</span>
                           <Eye className="w-3 h-3" />
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteDocument(doc.id, doc.file_name)}
-                          className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded-lg transition-colors"
-                          title="Delete Document Record"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        {((!doc.is_locked && !doc.staff?.is_locked) || isSuperAdmin) && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteDocument(doc.id, doc.file_name)}
+                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
+                            title="Delete Document Record"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

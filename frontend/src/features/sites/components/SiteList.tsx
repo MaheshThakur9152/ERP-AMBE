@@ -13,12 +13,14 @@ import {
   Upload,
   FileCheck,
   Loader2,
+  Lock,
 } from 'lucide-react';
 import { RateCardManager } from './RateCardManager';
 import { DocumentUploadModal } from './DocumentUploadModal';
 import { DocumentViewerModal } from '@/components/DocumentViewerModal';
 import { fetchSiteDocumentsApi } from '../api/siteApi';
 import { toast } from '@/components/ui/toast';
+import { useAuth } from '@/features/auth/context/AuthContext';
 
 interface SiteListProps {
   sites: Site[];
@@ -33,6 +35,7 @@ export const SiteList: React.FC<SiteListProps> = ({
   onEditSite,
   onDeleteSite,
 }) => {
+  const { isSuperAdmin } = useAuth();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'All' | 'Active' | 'Inactive'>('All');
   const [managingRateCardSite, setManagingRateCardSite] = useState<{ id: string; name: string } | null>(null);
@@ -287,16 +290,21 @@ export const SiteList: React.FC<SiteListProps> = ({
                           <button
                             type="button"
                             onClick={() => onEditSite(site)}
-                            className="p-1.5 text-gray-500 hover:text-[#20B2AA] hover:bg-gray-100 rounded-lg transition-colors"
+                            className="p-1.5 text-gray-500 hover:text-[#20B2AA] hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
                             title="Edit Site"
                           >
                             <Edit2 className="w-4 h-4" />
                           </button>
                           <button
                             type="button"
+                            disabled={site.is_locked && !isSuperAdmin}
                             onClick={() => onDeleteSite(site.id)}
-                            className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-gray-100 rounded-lg transition-colors"
-                            title="Delete Site"
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              site.is_locked && !isSuperAdmin
+                                ? 'text-gray-300 cursor-not-allowed opacity-40'
+                                : 'text-gray-500 hover:text-red-600 hover:bg-gray-100 cursor-pointer'
+                            }`}
+                            title={site.is_locked && !isSuperAdmin ? 'Site record is locked by SuperAdmin' : 'Delete Site'}
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>

@@ -33,7 +33,6 @@ export function getApiUrl(path: string): string {
 // In-Memory Access Token Store (avoids XSS attack vectors of localStorage)
 let inMemoryAccessToken: string | null = null;
 let proactiveRefreshTimer: NodeJS.Timeout | null = null;
-let refreshPromise: Promise<string | null> | null = null;
 
 export const AUTH_ACCESS_TOKEN_TTL_MS = 15 * 60 * 1000; // 15 minutes
 export const PROACTIVE_REFRESH_LEAD_MS = 2 * 60 * 1000; // 2 minutes lead time
@@ -78,12 +77,19 @@ export function clearProactiveRefresh(): void {
   }
 }
 
+export interface RefreshPayload {
+  token: string | null;
+  user?: any;
+}
+
+let refreshPromise: Promise<RefreshPayload | null> | null = null;
+
 /**
  * Concurrency-safe single-flight silent refresh.
  * Calls /api/auth/refresh with credentials: 'include'.
  * Ensures EVERY caller across the entire application shares the EXACT SAME in-flight promise.
  */
-export async function getOrRefreshToken(): Promise<string | null> {
+export async function getOrRefreshSession(): Promise<RefreshPayload | null> {
   if (refreshPromise) {
     console.debug('[apiClient] Refresh already in-flight, joining existing promise...');
     return refreshPromise;
@@ -111,7 +117,10 @@ export async function getOrRefreshToken(): Promise<string | null> {
 
       if (newAccessToken) {
         setInMemoryToken(newAccessToken);
-        return newAccessToken;
+        return {
+          token: newAccessToken,
+          user: data.user || null,
+        };
       } else {
         setInMemoryToken(null);
         return null;
@@ -126,6 +135,11 @@ export async function getOrRefreshToken(): Promise<string | null> {
   })();
 
   return refreshPromise;
+}
+
+export async function getOrRefreshToken(): Promise<string | null> {
+  const result = await getOrRefreshSession();
+  return result?.token || null;
 }
 
 export const silentRefreshToken = getOrRefreshToken;
@@ -163,12 +177,23 @@ export async function fetchWithRetry(
   const fullUrl = getApiUrl(url);
   const method = (fetchOptions.method || 'GET').toUpperCase();
 
-  // Always send cookies (refresh_token)
-  fetchOptions.credentials = fetchOptions.credentials || 'include';
+  const isExternalUrl = fullUrl.startsWith('http://') || fullUrl.startsWith('https://');
+  const isPresignedOrExternalStorage = isExternalUrl && (
+    fullUrl.includes('X-Amz-') ||
+    fullUrl.includes('storage.ambeservice.com') ||
+    fullUrl.includes('storage.googleapis.com') ||
+    fullUrl.includes('s3.amazonaws.com') ||
+    fullUrl.includes('googleusercontent.com')
+  );
 
-  // Attach Authorization header from in-memory token
+  // Send cookies (refresh_token) only to internal API requests
+  if (!isPresignedOrExternalStorage) {
+    fetchOptions.credentials = fetchOptions.credentials || 'include';
+  }
+
+  // Attach Authorization header from in-memory token ONLY for internal API requests
   const headers = new Headers(fetchOptions.headers || {});
-  if (!headers.has('Authorization')) {
+  if (!isPresignedOrExternalStorage && !headers.has('Authorization')) {
     let token = inMemoryAccessToken;
     if (!token) {
       try {

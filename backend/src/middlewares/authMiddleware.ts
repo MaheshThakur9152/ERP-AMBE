@@ -200,3 +200,161 @@ export const checkLockBouncer = (tableName: string) => {
     }
   };
 };
+
+/**
+ * Helper to check if a value is considered already filled / non-empty
+ */
+export function isValueFilled(val: any): boolean {
+  if (val === null || val === undefined) return false;
+  if (typeof val === 'string' && val.trim() === '') return false;
+  if (Array.isArray(val) && val.length === 0) return false;
+  return true;
+}
+
+/**
+ * Helper to check if two values are meaningfully different
+ */
+export function areValuesDifferent(oldVal: any, newVal: any): boolean {
+  if (newVal === undefined) return false; // Key not provided in patch
+
+  // Normalize null / undefined / empty string
+  const normOld = oldVal === null || oldVal === undefined || oldVal === '' ? null : oldVal;
+  const normNew = newVal === null || newVal === undefined || newVal === '' ? null : newVal;
+  if (normOld === null && normNew === null) return false;
+  if (normOld === null || normNew === null) return true;
+
+  // Numbers / numeric strings comparison
+  if (
+    (typeof normOld === 'number' || typeof normOld === 'string') &&
+    (typeof normNew === 'number' || typeof normNew === 'string') &&
+    !isNaN(Number(normOld)) &&
+    !isNaN(Number(normNew))
+  ) {
+    if (Number(normOld) === Number(normNew)) return false;
+  }
+
+  // Booleans
+  if (typeof normOld === 'boolean' || typeof normNew === 'boolean') {
+    return Boolean(normOld) !== Boolean(normNew);
+  }
+
+  // Strings (trimmed)
+  if (typeof normOld === 'string' && typeof normNew === 'string') {
+    return normOld.trim() !== normNew.trim();
+  }
+
+  // Objects / Arrays
+  if (typeof normOld === 'object' && typeof normNew === 'object') {
+    return JSON.stringify(normOld) !== JSON.stringify(normNew);
+  }
+
+  return normOld !== normNew;
+}
+
+/**
+ * Middleware: checkFieldLockBouncer
+ * Partial field-level lock enforcement for entities like staff and sites.
+ *
+ * Rules when is_locked === true AND role === 'admin':
+ * 1. Existing filled fields (non-null, non-empty) are frozen -> returns 403 if modified.
+ * 2. Empty/missing fields (null, "", undefined) can be filled in by admin.
+ * 3. SuperAdmin bypasses all locks.
+ */
+export const checkFieldLockBouncer = (tableName: string) => {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { id } = req.params;
+      if (!id) {
+        next();
+        return;
+      }
+
+      // SuperAdmin override
+      if (req.user?.role === 'superadmin') {
+        next();
+        return;
+      }
+
+      const { data: currentRow, error } = await supabaseAdmin
+        .from(tableName)
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (error) {
+        console.error(`checkFieldLockBouncer [${tableName}] db error:`, error);
+        res.status(500).json({ error: 'Failed to verify lock status' });
+        return;
+      }
+
+      if (!currentRow) {
+        next();
+        return;
+      }
+
+      // If record is not locked, allow update
+      if (!currentRow.is_locked) {
+        next();
+        return;
+      }
+
+      const incoming = req.body || {};
+      const ignoreKeys = new Set([
+        'id',
+        'created_at',
+        'createdAt',
+        'updated_at',
+        'updatedAt',
+        'is_locked',
+        'isLocked',
+      ]);
+
+      // Guard: Admin cannot toggle is_locked
+      if (incoming.is_locked !== undefined && incoming.is_locked !== currentRow.is_locked) {
+        res.status(403).json({
+          error: 'Forbidden: Only SuperAdmin can change lock status',
+          field: 'is_locked',
+          is_locked: true,
+        });
+        return;
+      }
+
+      for (const [key, newVal] of Object.entries(incoming)) {
+        if (ignoreKeys.has(key)) continue;
+
+        // Determine current value in database (supporting camelCase / snake_case)
+        const snakeKey = key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+        let currentVal = currentRow[key];
+        let matchedDbKey = key;
+
+        if (currentVal === undefined && currentRow[snakeKey] !== undefined) {
+          currentVal = currentRow[snakeKey];
+          matchedDbKey = snakeKey;
+        }
+
+        // If field exists in DB and already has data
+        const hadExistingValue = isValueFilled(currentVal);
+
+        if (hadExistingValue) {
+          const isDifferent = areValuesDifferent(currentVal, newVal);
+          if (isDifferent) {
+            console.warn(
+              `[checkFieldLockBouncer] 403 Blocked edit on locked ${tableName} id=${id}. Field "${key}" (DB: ${matchedDbKey}) had value "${JSON.stringify(currentVal)}" but incoming was "${JSON.stringify(newVal)}"`
+            );
+            res.status(403).json({
+              error: `Field "${key}" is locked and cannot be modified`,
+              field: key,
+              is_locked: true,
+            });
+            return;
+          }
+        }
+      }
+
+      next();
+    } catch (err: any) {
+      console.error(`checkFieldLockBouncer [${tableName}] exception:`, err);
+      res.status(500).json({ error: 'Failed to verify field lock status' });
+    }
+  };
+};

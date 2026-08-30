@@ -551,6 +551,86 @@ export const deleteDocument = async (req: Request, res: Response): Promise<void>
       return;
     }
 
+    // Lock guard: if user is not superadmin, block deleting documents of locked records
+    if ((req as any).user?.role !== 'superadmin') {
+      if (foundTable === 'employee_documents') {
+        const staffId = docRecord.staff_id || docRecord.staffId || docRecord.employee_id;
+        if (staffId) {
+          const { data: parentStaff } = await supabaseAdmin
+            .from('staff')
+            .select('is_locked')
+            .eq('id', staffId)
+            .maybeSingle();
+
+          if (parentStaff?.is_locked || docRecord.is_locked) {
+            res.status(403).json({
+              error: 'Forbidden: Cannot delete document from a locked staff record',
+              is_locked: true,
+            });
+            return;
+          }
+        } else if (docRecord.is_locked) {
+          res.status(403).json({
+            error: 'Forbidden: Document is locked by SuperAdmin',
+            is_locked: true,
+          });
+          return;
+        }
+      } else if (foundTable === 'site_documents') {
+        const siteId = docRecord.site_id || docRecord.siteId;
+        if (siteId) {
+          const { data: parentSite } = await supabaseAdmin
+            .from('sites')
+            .select('is_locked')
+            .eq('id', siteId)
+            .maybeSingle();
+
+          if (parentSite?.is_locked || docRecord.is_locked) {
+            res.status(403).json({
+              error: 'Forbidden: Cannot delete document from a locked site record',
+              is_locked: true,
+            });
+            return;
+          }
+        } else if (docRecord.is_locked) {
+          res.status(403).json({
+            error: 'Forbidden: Document is locked by SuperAdmin',
+            is_locked: true,
+          });
+          return;
+        }
+      } else if (foundTable === 'company_documents') {
+        const companyId = docRecord.company_id || docRecord.companyId;
+        if (companyId) {
+          const { data: parentCompany } = await supabaseAdmin
+            .from('companies')
+            .select('is_locked')
+            .eq('id', companyId)
+            .maybeSingle();
+
+          if (parentCompany?.is_locked || docRecord.is_locked) {
+            res.status(403).json({
+              error: 'Forbidden: Cannot delete document from a locked company record',
+              is_locked: true,
+            });
+            return;
+          }
+        } else if (docRecord.is_locked) {
+          res.status(403).json({
+            error: 'Forbidden: Document is locked by SuperAdmin',
+            is_locked: true,
+          });
+          return;
+        }
+      } else if (docRecord.is_locked) {
+        res.status(403).json({
+          error: 'Forbidden: Document is locked by SuperAdmin',
+          is_locked: true,
+        });
+        return;
+      }
+    }
+
     // MinIO Storage: Delete file from MinIO
     if (docRecord.storage_provider === 'minio' && docRecord.storage_key) {
       try {

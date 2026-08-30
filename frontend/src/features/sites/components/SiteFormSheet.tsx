@@ -6,8 +6,9 @@ import { createSiteApi, updateSiteApi } from '../api/siteApi';
 import { fetchCompanies } from '@/features/company-profiles/api/companyApi';
 import { CompanyProfile } from '@/features/company-profiles/types';
 import { toast } from '@/components/ui/toast';
-import { X, Plus, Trash2, Building, FileText, CreditCard, ShieldCheck, Loader2, FolderArchive } from 'lucide-react';
+import { X, Plus, Trash2, Building, FileText, CreditCard, ShieldCheck, Loader2, FolderArchive, Lock } from 'lucide-react';
 import { SiteDocumentsTab } from './SiteDocumentsTab';
+import { useAuth } from '@/features/auth/context/AuthContext';
 
 interface SiteFormSheetProps {
   isOpen: boolean;
@@ -22,10 +23,30 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
   onSuccess,
   editingSite,
 }) => {
+  const { isSuperAdmin } = useAuth();
   const [companies, setCompanies] = useState<CompanyProfile[]>([]);
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
   const [isLoadingCompanies, setIsLoadingCompanies] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'details' | 'documents'>('details');
+
+  const isLockedRecord = Boolean(editingSite?.is_locked);
+  const isPartiallyLocked = isLockedRecord && !isSuperAdmin;
+
+  const isFieldFilled = (val: any) =>
+    val !== null && val !== undefined && String(val).trim() !== '' && String(val) !== '0';
+
+  const isCompanyLocked = isPartiallyLocked && isFieldFilled(editingSite?.company_id || editingSite?.companyId);
+  const isSiteNameLocked = isPartiallyLocked && isFieldFilled(editingSite?.siteName || (editingSite as any)?.site_name);
+  const isCodeNameLocked = isPartiallyLocked && isFieldFilled(editingSite?.codeName || editingSite?.code_name);
+  const isClientNameLocked = isPartiallyLocked && isFieldFilled(editingSite?.clientName || (editingSite as any)?.client_name);
+  const isGstinLocked = isPartiallyLocked && isFieldFilled(editingSite?.gstin);
+  const isContactLocked = isPartiallyLocked && isFieldFilled(editingSite?.contactNo || editingSite?.contact_no);
+  const isEmailLocked = isPartiallyLocked && isFieldFilled(editingSite?.email);
+  const isAddressLocked = isPartiallyLocked && isFieldFilled(editingSite?.address);
+  const isWorkOrderRefLocked = isPartiallyLocked && isFieldFilled(editingSite?.workOrderRefNo || editingSite?.work_order_ref_no);
+  const isWorkOrderPeriodLocked = isPartiallyLocked && isFieldFilled(editingSite?.workOrderPeriod || editingSite?.work_order_period);
+  const isMgmtPercentLocked = isPartiallyLocked && (Number(editingSite?.mgmtPercent ?? editingSite?.management_fee_percent) > 0);
+  const isStatusLocked = isPartiallyLocked && isFieldFilled(editingSite?.status);
 
   useEffect(() => {
     if (isOpen) {
@@ -171,7 +192,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
   if (!isOpen) return null;
 
   const onSubmit = async (data: SiteFormData) => {
-    const payload = {
+    let payload: any = {
       ...data,
       company_id: selectedCompanyId || (companies[0]?.id || undefined),
       code_name: data.codeName || '',
@@ -185,6 +206,42 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
       default_additional_charges: data.defaultAdditionalCharges || [],
       defaultAdditionalCharges: data.defaultAdditionalCharges || [],
     };
+
+    // If partially locked, preserve original filled values from DB
+    if (isPartiallyLocked && editingSite) {
+      if (isFieldFilled(editingSite.company_id || editingSite.companyId)) {
+        payload.company_id = editingSite.company_id || editingSite.companyId;
+      }
+      if (isFieldFilled(editingSite.siteName || (editingSite as any).site_name)) {
+        payload.siteName = editingSite.siteName || (editingSite as any).site_name;
+      }
+      if (isFieldFilled(editingSite.codeName || editingSite.code_name)) {
+        payload.codeName = editingSite.codeName || editingSite.code_name;
+        payload.code_name = editingSite.codeName || editingSite.code_name;
+      }
+      if (isFieldFilled(editingSite.clientName || (editingSite as any).client_name)) {
+        payload.clientName = editingSite.clientName || (editingSite as any).client_name;
+      }
+      if (isFieldFilled(editingSite.gstin)) {
+        payload.gstin = editingSite.gstin;
+      }
+      if (isFieldFilled(editingSite.contactNo || editingSite.contact_no)) {
+        payload.contactNo = editingSite.contactNo || editingSite.contact_no;
+        payload.contact_no = editingSite.contactNo || editingSite.contact_no;
+      }
+      if (isFieldFilled(editingSite.email)) {
+        payload.email = editingSite.email;
+      }
+      if (isFieldFilled(editingSite.address)) {
+        payload.address = editingSite.address;
+      }
+      if (isFieldFilled(editingSite.workOrderRefNo || editingSite.work_order_ref_no)) {
+        payload.workOrderRefNo = editingSite.workOrderRefNo || editingSite.work_order_ref_no;
+      }
+      if (isFieldFilled(editingSite.workOrderPeriod || editingSite.work_order_period)) {
+        payload.workOrderPeriod = editingSite.workOrderPeriod || editingSite.work_order_period;
+      }
+    }
 
     try {
       if (editingSite) {
@@ -215,18 +272,28 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
                 <Building className="w-5 h-5" />
               </div>
               <div>
-                <h2 className="text-lg font-bold">
-                  {editingSite ? `Edit Site Master: ${editingSite.siteName || (editingSite as any).site_name || ''}` : 'Add New Site Master'}
-                </h2>
-                <p className="text-xs text-slate-300">
-                  Define client party details, operating entity, work order reference &amp; rate cards.
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-bold">
+                    {editingSite ? `Edit Site Master: ${editingSite.siteName || (editingSite as any).site_name || ''}` : 'Add New Site Master'}
+                  </h2>
+                  {isLockedRecord && (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-400/40 flex items-center gap-1">
+                      <Lock className="w-2.5 h-2.5" />
+                      <span>Locked Record</span>
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-300 mt-0.5">
+                  {isPartiallyLocked
+                    ? 'Existing filled fields are read-only. Empty fields & documents can be saved.'
+                    : 'Define client party details, operating entity, work order reference & rate cards.'}
                 </p>
               </div>
             </div>
             <button
               type="button"
               onClick={onClose}
-              className="p-2 text-slate-300 hover:text-white rounded-lg hover:bg-white/10 transition-colors"
+              className="p-2 text-slate-300 hover:text-white rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -237,7 +304,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveTab('details')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
                   activeTab === 'details'
                     ? 'bg-white text-[#34495E] shadow-xs'
                     : 'text-slate-200 hover:bg-white/10'
@@ -249,7 +316,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
               <button
                 type="button"
                 onClick={() => setActiveTab('documents')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
                   activeTab === 'documents'
                     ? 'bg-white text-[#34495E] shadow-xs'
                     : 'text-slate-200 hover:bg-white/10'
@@ -269,6 +336,16 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
           </div>
         ) : (
           <form onSubmit={handleSubmit(onSubmit)} className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50">
+          {/* Lock Notice Banner */}
+          {isPartiallyLocked && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 flex items-start gap-2.5 text-xs text-amber-900 shadow-xs">
+              <Lock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold">Partial Lock Active:</span> Existing filled fields cannot be modified by Admins. You can still enter data for any missing/empty fields and upload new site documents.
+              </div>
+            </div>
+          )}
+
           {/* Section 1: Operating Entity & Client Party Info */}
           <div className="space-y-4 bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
             <h3 className="text-xs font-bold uppercase text-[#20B2AA] tracking-wider flex items-center gap-1.5 border-b border-gray-100 pb-2">
@@ -277,7 +354,15 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
             </h3>
 
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Operating Company Entity *</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-gray-700">Operating Company Entity *</label>
+                {isCompanyLocked && (
+                  <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.2" title="Locked by SuperAdmin">
+                    <Lock className="w-2.5 h-2.5 text-amber-600" />
+                    <span>Locked</span>
+                  </span>
+                )}
+              </div>
               {isLoadingCompanies ? (
                 <div className="flex items-center gap-2 text-xs text-gray-500 py-1.5">
                   <Loader2 className="w-4 h-4 animate-spin text-[#20B2AA]" />
@@ -286,8 +371,14 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
               ) : (
                 <select
                   value={selectedCompanyId}
+                  disabled={isCompanyLocked}
                   onChange={(e) => setSelectedCompanyId(e.target.value)}
-                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
+                  className={`w-full border rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none ${
+                    isCompanyLocked
+                      ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                      : 'bg-white border-gray-200 focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]'
+                  }`}
+                  title={isCompanyLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                 >
                   {companies.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -300,12 +391,25 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Site Name *</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-gray-700">Site Name *</label>
+                  {isSiteNameLocked && (
+                    <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1" title="Locked by SuperAdmin">
+                      <Lock className="w-2 h-2 text-amber-600" />
+                    </span>
+                  )}
+                </div>
                 <input
                   type="text"
                   placeholder="e.g. Minerva"
+                  disabled={isSiteNameLocked}
                   {...register('siteName')}
-                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
+                  className={`w-full border rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none ${
+                    isSiteNameLocked
+                      ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                      : 'bg-white border-gray-200 focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]'
+                  }`}
+                  title={isSiteNameLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                 />
                 {errors.siteName && (
                   <p className="text-[11px] text-red-500 mt-1">{errors.siteName.message}</p>
@@ -313,22 +417,48 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Code Name (Internal)</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-gray-700">Code Name (Internal)</label>
+                  {isCodeNameLocked && (
+                    <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1" title="Locked by SuperAdmin">
+                      <Lock className="w-2 h-2 text-amber-600" />
+                    </span>
+                  )}
+                </div>
                 <input
                   type="text"
                   placeholder="e.g. Ajmera(HK)"
+                  disabled={isCodeNameLocked}
                   {...register('codeName')}
-                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 font-mono focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
+                  className={`w-full border rounded-lg px-3 py-2 text-sm text-gray-800 font-mono focus:outline-none ${
+                    isCodeNameLocked
+                      ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                      : 'bg-white border-gray-200 focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]'
+                  }`}
+                  title={isCodeNameLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Client Party Name *</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-gray-700">Client Party Name *</label>
+                  {isClientNameLocked && (
+                    <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1" title="Locked by SuperAdmin">
+                      <Lock className="w-2 h-2 text-amber-600" />
+                    </span>
+                  )}
+                </div>
                 <input
                   type="text"
                   placeholder="e.g. Lokhandwala Minerva CHS LTD"
+                  disabled={isClientNameLocked}
                   {...register('clientName')}
-                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
+                  className={`w-full border rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none ${
+                    isClientNameLocked
+                      ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                      : 'bg-white border-gray-200 focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]'
+                  }`}
+                  title={isClientNameLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                 />
                 {errors.clientName && (
                   <p className="text-[11px] text-red-500 mt-1">{errors.clientName.message}</p>
@@ -338,20 +468,46 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">GSTIN (Optional)</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-gray-700">GSTIN (Optional)</label>
+                  {isGstinLocked && (
+                    <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1" title="Locked by SuperAdmin">
+                      <Lock className="w-2 h-2 text-amber-600" />
+                    </span>
+                  )}
+                </div>
                 <input
                   type="text"
                   placeholder="e.g. 27AAEAL7350F1ZM"
+                  disabled={isGstinLocked}
                   {...register('gstin')}
-                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono text-gray-800 uppercase focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
+                  className={`w-full border rounded-lg px-3 py-2 text-sm font-mono text-gray-800 uppercase focus:outline-none ${
+                    isGstinLocked
+                      ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                      : 'bg-white border-gray-200 focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]'
+                  }`}
+                  title={isGstinLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Status</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-gray-700">Status</label>
+                  {isStatusLocked && (
+                    <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1" title="Locked by SuperAdmin">
+                      <Lock className="w-2 h-2 text-amber-600" />
+                    </span>
+                  )}
+                </div>
                 <select
+                  disabled={isStatusLocked}
                   {...register('status')}
-                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
+                  className={`w-full border rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none ${
+                    isStatusLocked
+                      ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                      : 'bg-white border-gray-200 focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]'
+                  }`}
+                  title={isStatusLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                 >
                   <option value="Active">Active</option>
                   <option value="Inactive">Inactive</option>
@@ -361,33 +517,72 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Contact Number (Optional)</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-gray-700">Contact Number (Optional)</label>
+                  {isContactLocked && (
+                    <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1" title="Locked by SuperAdmin">
+                      <Lock className="w-2 h-2 text-amber-600" />
+                    </span>
+                  )}
+                </div>
                 <input
                   type="text"
                   placeholder="e.g. +91 9876543210"
+                  disabled={isContactLocked}
                   {...register('contactNo')}
-                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
+                  className={`w-full border rounded-lg px-3 py-2 text-sm font-mono text-gray-800 focus:outline-none ${
+                    isContactLocked
+                      ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                      : 'bg-white border-gray-200 focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]'
+                  }`}
+                  title={isContactLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Email Address (Optional)</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-gray-700">Email Address (Optional)</label>
+                  {isEmailLocked && (
+                    <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1" title="Locked by SuperAdmin">
+                      <Lock className="w-2 h-2 text-amber-600" />
+                    </span>
+                  )}
+                </div>
                 <input
                   type="email"
                   placeholder="e.g. client@example.com"
+                  disabled={isEmailLocked}
                   {...register('email')}
-                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
+                  className={`w-full border rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none ${
+                    isEmailLocked
+                      ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                      : 'bg-white border-gray-200 focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]'
+                  }`}
+                  title={isEmailLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Address *</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-gray-700">Address *</label>
+                {isAddressLocked && (
+                  <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1" title="Locked by SuperAdmin">
+                    <Lock className="w-2 h-2 text-amber-600" />
+                  </span>
+                )}
+              </div>
               <textarea
                 rows={2}
                 placeholder="Site address details..."
+                disabled={isAddressLocked}
                 {...register('address')}
-                className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
+                className={`w-full border rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none ${
+                  isAddressLocked
+                    ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                    : 'bg-white border-gray-200 focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]'
+                }`}
+                title={isAddressLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
               />
               {errors.address && (
                 <p className="text-[11px] text-red-500 mt-1">{errors.address.message}</p>
@@ -404,33 +599,72 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
 
             <div className="grid grid-cols-3 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Work Order Ref No. (Optional)</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-gray-700">Work Order Ref No.</label>
+                  {isWorkOrderRefLocked && (
+                    <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1" title="Locked by SuperAdmin">
+                      <Lock className="w-2 h-2 text-amber-600" />
+                    </span>
+                  )}
+                </div>
                 <input
                   type="text"
                   placeholder="LMCHS/003/2026-27"
+                  disabled={isWorkOrderRefLocked}
                   {...register('workOrderRefNo')}
-                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
+                  className={`w-full border rounded-lg px-3 py-2 text-sm font-mono text-gray-800 focus:outline-none ${
+                    isWorkOrderRefLocked
+                      ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                      : 'bg-white border-gray-200 focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]'
+                  }`}
+                  title={isWorkOrderRefLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Work Order Period (Optional)</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-gray-700">Work Order Period</label>
+                  {isWorkOrderPeriodLocked && (
+                    <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1" title="Locked by SuperAdmin">
+                      <Lock className="w-2 h-2 text-amber-600" />
+                    </span>
+                  )}
+                </div>
                 <input
                   type="text"
                   placeholder="01st April 2026 to 31st March 2027"
+                  disabled={isWorkOrderPeriodLocked}
                   {...register('workOrderPeriod')}
-                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
+                  className={`w-full border rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none ${
+                    isWorkOrderPeriodLocked
+                      ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                      : 'bg-white border-gray-200 focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]'
+                  }`}
+                  title={isWorkOrderPeriodLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-700 mb-1">Management Fee (%)</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-gray-700">Management Fee (%)</label>
+                  {isMgmtPercentLocked && (
+                    <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1" title="Locked by SuperAdmin">
+                      <Lock className="w-2 h-2 text-amber-600" />
+                    </span>
+                  )}
+                </div>
                 <input
                   type="number"
                   step="0.01"
                   placeholder="5"
+                  disabled={isMgmtPercentLocked}
                   {...register('mgmtPercent', { valueAsNumber: true })}
-                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono text-gray-800 focus:outline-none focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]"
+                  className={`w-full border rounded-lg px-3 py-2 text-sm font-mono text-gray-800 focus:outline-none ${
+                    isMgmtPercentLocked
+                      ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                      : 'bg-white border-gray-200 focus:ring-2 focus:ring-[#20B2AA]/20 focus:border-[#20B2AA]'
+                  }`}
+                  title={isMgmtPercentLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                 />
               </div>
             </div>
@@ -441,7 +675,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
                 <button
                   type="button"
                   onClick={() => appendAdditionalCharge({ name: '', amount: 0 })}
-                  className="text-xs text-[#20B2AA] hover:text-[#188B85] font-semibold flex items-center gap-1"
+                  className="text-xs text-[#20B2AA] hover:text-[#188B85] font-semibold flex items-center gap-1 cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   Add Charge Field
@@ -466,7 +700,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
                   <button
                     type="button"
                     onClick={() => removeAdditionalCharge(idx)}
-                    className="text-gray-400 hover:text-red-500 p-2 rounded-lg hover:bg-red-50 transition-colors"
+                    className="text-gray-400 hover:text-red-500 p-2 rounded-lg hover:bg-red-50 transition-colors cursor-pointer"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -487,7 +721,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
                 onClick={() =>
                   append({ roleName: '', monthlyRate: 0, workingDays: 31, hsnCode: '9985', persons: 1 })
                 }
-                className="text-xs px-3 py-1.5 rounded-lg bg-[#20B2AA]/10 text-[#20B2AA] hover:bg-[#20B2AA]/20 border border-[#20B2AA]/30 flex items-center gap-1 font-semibold transition-colors"
+                className="text-xs px-3 py-1.5 rounded-lg bg-[#20B2AA]/10 text-[#20B2AA] hover:bg-[#20B2AA]/20 border border-[#20B2AA]/30 flex items-center gap-1 font-semibold transition-colors cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Add Role Rate</span>
@@ -549,7 +783,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
                       <button
                         type="button"
                         onClick={() => remove(idx)}
-                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-200 rounded-lg transition-colors"
+                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-200 rounded-lg transition-colors cursor-pointer"
                         title="Remove Role"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -566,16 +800,31 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-semibold text-gray-600 hover:text-gray-900 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors"
+              className="px-4 py-2 text-xs font-semibold text-gray-600 hover:text-gray-900 rounded-lg bg-gray-100 hover:bg-gray-200 transition-colors cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-5 py-2 text-xs font-semibold text-white rounded-lg bg-[#20B2AA] hover:bg-[#1ca19a] disabled:opacity-50 shadow-sm transition-all"
+              className="px-5 py-2 text-xs font-semibold text-white rounded-lg bg-[#20B2AA] hover:bg-[#1ca19a] disabled:opacity-50 shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
+              title={isPartiallyLocked ? 'Only newly filled empty fields and new documents will be saved' : undefined}
             >
-              {isSubmitting ? 'Saving Site...' : editingSite ? 'Update Site Master' : 'Save Site Master'}
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Saving Site...</span>
+                </>
+              ) : isPartiallyLocked ? (
+                <>
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>Save Blank Fields &amp; Documents</span>
+                </>
+              ) : editingSite ? (
+                'Update Site Master'
+              ) : (
+                'Save Site Master'
+              )}
             </button>
           </div>
         </form>

@@ -549,27 +549,30 @@ export const SecurityCenter: React.FC = () => {
                       {/* Action Buttons: ZERO page redirects */}
                       <td className="p-3 py-2.5 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          {/* Uploaded Copy Button */}
-                          <button
-                            type="button"
-                            onClick={() => openUploadedCopyPreview(item)}
-                            className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
-                            title="Preview Uploaded Copy In-Page"
-                          >
-                            <Paperclip size={13} />
-                            <span>Uploaded Copy</span>
-                          </button>
+                          {/* Uploaded Copy & Software Copy Buttons (Pending Locks view ONLY) */}
+                          {viewMode === 'pending' && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => openUploadedCopyPreview(item)}
+                                className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+                                title="Preview Uploaded Copy In-Page"
+                              >
+                                <Paperclip size={13} />
+                                <span>Uploaded Copy</span>
+                              </button>
 
-                          {/* Software Copy Button (In-Page Preview) */}
-                          <button
-                            type="button"
-                            onClick={() => openSoftwareCopyPreview(item)}
-                            className="px-2.5 py-1 bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
-                            title="Preview Software Copy In-Page"
-                          >
-                            <FileCode size={13} />
-                            <span>Software Copy</span>
-                          </button>
+                              <button
+                                type="button"
+                                onClick={() => openSoftwareCopyPreview(item)}
+                                className="px-2.5 py-1 bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+                                title="Preview Software Copy In-Page"
+                              >
+                                <FileCode size={13} />
+                                <span>Software Copy</span>
+                              </button>
+                            </>
+                          )}
 
                           {/* Lock / Unlock Record Button */}
                           <button

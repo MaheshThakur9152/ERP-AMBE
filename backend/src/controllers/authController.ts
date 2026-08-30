@@ -83,7 +83,12 @@ export class AuthController {
         req.cookies?.refresh_token ||
         (typeof req.body?.refresh_token === 'string' ? req.body.refresh_token : undefined);
 
+      console.log(
+        `[auth:refresh] Incoming refresh request. Cookie present: ${Boolean(req.cookies?.refresh_token)}, Body present: ${Boolean(req.body?.refresh_token)}`
+      );
+
       if (!presentedRefreshToken) {
+        console.warn('[auth:refresh] No refresh token provided in cookies or body');
         res.status(401).json({ error: 'Refresh token required' });
         return;
       }
@@ -97,6 +102,7 @@ export class AuthController {
         const validation = await TokenService.validateAndRotate(presentedRefreshToken);
 
         if (!validation.valid) {
+          console.warn(`[auth:refresh] Token validation failed: ${validation.error}`);
           // Clear refresh cookie
           res.clearCookie('refresh_token', COOKIE_OPTIONS);
           res.clearCookie('access_token', COOKIE_OPTIONS);
@@ -118,7 +124,7 @@ export class AuthController {
         targetSupabaseRefreshToken = validation.supabaseRefreshToken || presentedRefreshToken;
         newRawRefreshToken = validation.newRawToken;
       } catch (dbErr: any) {
-        console.warn('[auth:refresh] DB validation failed, checking direct Supabase refresh:', dbErr.message);
+        console.warn('[auth:refresh] DB validation exception, checking direct Supabase refresh:', dbErr.message);
       }
 
       // Refresh session via Supabase to obtain new short-lived access token
@@ -152,20 +158,25 @@ export class AuthController {
       const finalRefreshToken = newRawRefreshToken || latestSupabaseRefreshToken;
 
       // Set new rotated 30-day refresh token cookie
-      res.cookie('refresh_token', finalRefreshToken, {
-        ...COOKIE_OPTIONS,
-        maxAge: REFRESH_TOKEN_MAX_AGE,
-      });
+      if (finalRefreshToken) {
+        res.cookie('refresh_token', finalRefreshToken, {
+          ...COOKIE_OPTIONS,
+          maxAge: REFRESH_TOKEN_MAX_AGE,
+        });
+      }
 
       // Fetch fresh role
       const userId = refreshData.user.id || targetUserId;
       const userEmail = refreshData.user.email;
       const { role } = await fetchUserRole(userId!, userEmail);
 
+      console.log(`[auth:refresh] Successfully refreshed session for user=${userEmail} (${userId}) role=${role}`);
+
       res.status(200).json({
         success: true,
         token: newAccessToken,
         access_token: newAccessToken,
+        refresh_token: finalRefreshToken,
         user: {
           id: userId,
           email: userEmail,

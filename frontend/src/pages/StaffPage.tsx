@@ -20,11 +20,13 @@ import {
   Eye,
   RefreshCw,
   Loader2,
+  Lock,
 } from 'lucide-react';
 import { AddStaffModal } from '@/features/attendance/components/AddStaffModal';
 import { supabase } from '@/lib/supabase';
 import { DocumentViewerModal } from '@/components/DocumentViewerModal';
 import { toast } from '@/components/ui/toast';
+import { useAuth } from '@/features/auth/context/AuthContext';
 
 export const isMatchingDocType = (docType?: string | null, category?: string | null): boolean => {
   if (!docType || !category) return false;
@@ -180,11 +182,14 @@ interface StaffMember {
   payeeName?: string;
   compliance_name?: string;
   complianceName?: string;
+  is_locked?: boolean;
+  isLocked?: boolean;
   documents?: StaffDocument[];
   employee_documents?: { id: string; document_type?: string; gcp_file_url?: string; view_url?: string; file_name?: string }[];
 }
 
 export const StaffPage: React.FC = () => {
+  const { isSuperAdmin } = useAuth();
   const [staffList, setStaffList] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('All');
@@ -203,6 +208,30 @@ export const StaffPage: React.FC = () => {
   const [uploadingType, setUploadingType] = useState<string | null>(null);
   const [sitesList, setSitesList] = useState<any[]>([]);
   const [rateCardsOptions, setRateCardsOptions] = useState<any[]>([]);
+
+  const isFieldFilled = (val: any) =>
+    val !== null && val !== undefined && String(val).trim() !== '' && String(val) !== '0';
+
+  const isLockedRecord = Boolean(editingStaff?.is_locked);
+  const isPartiallyLocked = isLockedRecord && !isSuperAdmin;
+
+  const isNameLocked = isPartiallyLocked && isFieldFilled(editingStaff?.employee_name || editingStaff?.name);
+  const isBiometricLocked = isPartiallyLocked && isFieldFilled(editingStaff?.biometric_code || editingStaff?.biometricCode);
+  const isPhoneLocked = isPartiallyLocked && isFieldFilled(editingStaff?.phone);
+  const isGenderLocked = isPartiallyLocked && isFieldFilled(editingStaff?.gender);
+  const isRoleLocked = isPartiallyLocked && isFieldFilled(editingStaff?.designation || editingStaff?.role);
+  const isComplianceLocked = isPartiallyLocked && isFieldFilled(editingStaff?.compliance_name || (editingStaff as any)?.complianceName);
+  const isSiteLocked = isPartiallyLocked && isFieldFilled(editingStaff?.site_id);
+  const isRateCardLocked = isPartiallyLocked && isFieldFilled(editingStaff?.rate_card_id);
+  const isIncentiveLocked = isPartiallyLocked && Boolean(editingStaff?.monthly_incentive && Number(editingStaff.monthly_incentive) > 0);
+  const isBankAccLocked = isPartiallyLocked && isFieldFilled(editingStaff?.bank_account_no || (editingStaff as any)?.bankAccountNo);
+  const isBankIfscLocked = isPartiallyLocked && isFieldFilled(editingStaff?.bank_ifsc_code || (editingStaff as any)?.bankIfsc);
+  const isBankNameLocked = isPartiallyLocked && isFieldFilled(editingStaff?.bank_name || (editingStaff as any)?.bankName);
+  const isPayeeLocked = isPartiallyLocked && isFieldFilled(editingStaff?.payee_name || (editingStaff as any)?.payeeName);
+  const isAadharLocked = isPartiallyLocked && isFieldFilled(editingStaff?.aadharNo || editingStaff?.aadhar_no);
+  const isPanLocked = isPartiallyLocked && isFieldFilled(editingStaff?.panNo || editingStaff?.pan_no);
+  const isUanLocked = isPartiallyLocked && isFieldFilled(editingStaff?.uan_no);
+  const isEsicLocked = isPartiallyLocked && isFieldFilled(editingStaff?.esic_no);
 
   // Dedicated Document Viewer Modal State
   const [isViewerOpen, setIsViewerOpen] = useState(false);
@@ -486,8 +515,19 @@ export const StaffPage: React.FC = () => {
     }
   };
 
-  const handleDeleteStaffDocument = async (documentId: string, fileName?: string) => {
+  const handleDeleteStaffDocument = async (
+    documentId: string,
+    fileName?: string,
+    targetStaffRecord?: StaffMember | null
+  ) => {
     if (!documentId) return;
+
+    const currentStaff = targetStaffRecord || viewerStaff || editingStaff;
+    if (Boolean(currentStaff?.is_locked) && !isSuperAdmin) {
+      toast.error('Cannot delete documents: Staff record is locked by SuperAdmin');
+      return;
+    }
+
     const confirmed = window.confirm(
       `Delete this document${fileName ? ` "${fileName}"` : ''}? This cannot be undone.`
     );
@@ -709,16 +749,31 @@ export const StaffPage: React.FC = () => {
       toast.error('Staff ID missing for deletion');
       return;
     }
+
+    const targetStaff = staffList.find((s) => s.id === id);
+    if (targetStaff?.is_locked && !isSuperAdmin) {
+      toast.error('Cannot delete: Staff record is locked by SuperAdmin');
+      return;
+    }
+
     if (confirm('Are you sure you want to remove this staff member?')) {
       console.log(`[StaffEdit] Deleting staff id=${id}`);
-      const { error } = await supabase.from('staff').delete().eq('id', id);
-      if (error) {
-        console.error('[StaffEdit] Delete staff DB error:', error);
-        toast.error(`Failed to delete staff: ${error.message}`);
-      } else {
+      try {
+        const response = await fetchWithRetry(`/api/staff/${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+        });
+
+        if (!response.ok) {
+          const errJson = await response.json().catch(() => ({}));
+          throw new Error(errJson.error || `Failed to delete staff (HTTP ${response.status})`);
+        }
+
         setStaffList((prev) => prev.filter((s) => s.id !== id));
         setRefreshKey((prev) => prev + 1);
         toast.success('Staff member removed successfully');
+      } catch (err: any) {
+        console.error('[StaffEdit] Delete staff error:', err);
+        toast.error(`Failed to delete staff: ${err.message || 'Server error'}`);
       }
     }
   };
@@ -772,7 +827,7 @@ export const StaffPage: React.FC = () => {
       return;
     }
 
-    const payload: any = {
+    let payload: any = {
       employee_name: empName,
       biometric_code: (formData.biometric_code || formData.biometricCode || '').trim() || null,
       phone: (formData.phone || '').trim() || null,
@@ -789,17 +844,81 @@ export const StaffPage: React.FC = () => {
       payee_name: (formData.payee_name || formData.payeeName || '').trim() || null,
       uan_no: (formData.uan_no || '').trim() || null,
       esic_no: (formData.esic_no || '').trim() || null,
+      aadhar_no: (formData.aadharNo || formData.aadhar_no || '').trim() || null,
+      pan_no: (formData.panNo || formData.pan_no || '').trim() || null,
     };
+
+    // If partially locked, strictly preserve original filled values from DB record
+    if (isPartiallyLocked && editingStaff) {
+      if (isFieldFilled(editingStaff.employee_name || editingStaff.name)) {
+        payload.employee_name = editingStaff.employee_name || editingStaff.name;
+      }
+      if (isFieldFilled(editingStaff.biometric_code || editingStaff.biometricCode)) {
+        payload.biometric_code = editingStaff.biometric_code || editingStaff.biometricCode;
+      }
+      if (isFieldFilled(editingStaff.phone)) {
+        payload.phone = editingStaff.phone;
+      }
+      if (isFieldFilled(editingStaff.designation || editingStaff.role)) {
+        payload.designation = editingStaff.designation || editingStaff.role;
+      }
+      if (isFieldFilled(editingStaff.gender)) {
+        payload.gender = editingStaff.gender;
+      }
+      if (editingStaff.monthly_incentive && Number(editingStaff.monthly_incentive) > 0) {
+        payload.monthly_incentive = Number(editingStaff.monthly_incentive);
+      }
+      if (isFieldFilled(editingStaff.site_id)) {
+        payload.site_id = editingStaff.site_id;
+      }
+      if (isFieldFilled(editingStaff.rate_card_id)) {
+        payload.rate_card_id = editingStaff.rate_card_id;
+      }
+      if (isFieldFilled(editingStaff.compliance_name || (editingStaff as any).complianceName)) {
+        payload.compliance_name = editingStaff.compliance_name || (editingStaff as any).complianceName;
+      }
+      if (isFieldFilled(editingStaff.bank_account_no || (editingStaff as any).bankAccountNo)) {
+        payload.bank_account_no = editingStaff.bank_account_no || (editingStaff as any).bankAccountNo;
+      }
+      if (isFieldFilled(editingStaff.bank_ifsc_code || (editingStaff as any).bankIfsc)) {
+        payload.bank_ifsc_code = editingStaff.bank_ifsc_code || (editingStaff as any).bankIfsc;
+      }
+      if (isFieldFilled(editingStaff.bank_name || (editingStaff as any).bankName)) {
+        payload.bank_name = editingStaff.bank_name || (editingStaff as any).bankName;
+      }
+      if (isFieldFilled(editingStaff.payee_name || (editingStaff as any).payeeName)) {
+        payload.payee_name = editingStaff.payee_name || (editingStaff as any).payeeName;
+      }
+      if (isFieldFilled(editingStaff.uan_no)) {
+        payload.uan_no = editingStaff.uan_no;
+      }
+      if (isFieldFilled(editingStaff.esic_no)) {
+        payload.esic_no = editingStaff.esic_no;
+      }
+      if (isFieldFilled(editingStaff.aadharNo || editingStaff.aadhar_no)) {
+        payload.aadhar_no = editingStaff.aadharNo || editingStaff.aadhar_no;
+      }
+      if (isFieldFilled(editingStaff.panNo || editingStaff.pan_no)) {
+        payload.pan_no = editingStaff.panNo || editingStaff.pan_no;
+      }
+    }
 
     console.log(`[StaffEdit] Updating employee id=${staffId} payload:`, payload);
 
     try {
-      const { error } = await supabase.from('staff').update(payload).eq('id', staffId);
-      if (error) {
-        console.error('[StaffEdit] Update DB error:', error);
-        toast.error(`Failed to update staff: ${error.message}`);
-        return;
+      const response = await fetchWithRetry(`/api/staff/${encodeURIComponent(staffId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || `Update failed (HTTP ${response.status})`);
       }
+
+      const resData = await response.json();
+      const updatedRow = resData.data || payload;
 
       // Update local state in-place so table updates immediately even with active filters
       setStaffList((prevList) =>
@@ -807,10 +926,10 @@ export const StaffPage: React.FC = () => {
           s.id === staffId
             ? {
                 ...s,
-                ...payload,
-                name: payload.employee_name,
-                role: payload.designation,
-                biometricCode: payload.biometric_code,
+                ...updatedRow,
+                name: updatedRow.employee_name || payload.employee_name,
+                role: updatedRow.designation || payload.designation,
+                biometricCode: updatedRow.biometric_code || payload.biometric_code,
                 sites: sitesList.find((site) => site.id === payload.site_id) || s.sites,
               }
             : s
@@ -819,11 +938,24 @@ export const StaffPage: React.FC = () => {
 
       // Keep editingStaff object in sync
       if (editingStaff) {
-        setEditingStaff((prev) => (prev ? { ...prev, ...payload, name: payload.employee_name, role: payload.designation } : null));
+        setEditingStaff((prev) =>
+          prev
+            ? {
+                ...prev,
+                ...updatedRow,
+                name: updatedRow.employee_name || payload.employee_name,
+                role: updatedRow.designation || payload.designation,
+              }
+            : null
+        );
       }
 
       setRefreshKey((prev) => prev + 1);
-      toast.success('Staff record updated successfully');
+      toast.success(
+        isPartiallyLocked
+          ? 'Staff updated (blank fields & new details saved)'
+          : 'Staff record updated successfully'
+      );
       setIsModalOpen(false);
     } catch (err: any) {
       console.error('[StaffEdit] Unexpected error updating staff:', err);
@@ -1263,9 +1395,14 @@ export const StaffPage: React.FC = () => {
 
                           <button
                             type="button"
+                            disabled={staff.is_locked && !isSuperAdmin}
                             onClick={() => handleDeleteStaff(staff.id)}
-                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded-lg transition-colors"
-                            title="Delete Staff Record"
+                            className={`p-1.5 rounded-lg transition-colors ${
+                              staff.is_locked && !isSuperAdmin
+                                ? 'text-gray-300 cursor-not-allowed opacity-40'
+                                : 'text-gray-400 hover:text-red-600 hover:bg-gray-100 cursor-pointer'
+                            }`}
+                            title={staff.is_locked && !isSuperAdmin ? 'Staff record is locked by SuperAdmin' : 'Delete Staff Record'}
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -1290,14 +1427,29 @@ export const StaffPage: React.FC = () => {
                 <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center text-white">
                   <User className="w-5 h-5" />
                 </div>
-                <h2 className="font-bold text-base">
-                  {editingStaff ? `Edit Staff: ${editingStaff.employee_name || editingStaff.name || ''}` : 'Add New Staff Member'}
-                </h2>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="font-bold text-base">
+                      {editingStaff ? `Edit Staff: ${editingStaff.employee_name || editingStaff.name || ''}` : 'Add New Staff Member'}
+                    </h2>
+                    {isLockedRecord && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-400/40 flex items-center gap-1">
+                        <Lock className="w-2.5 h-2.5" />
+                        <span>Locked Record</span>
+                      </span>
+                    )}
+                  </div>
+                  {isPartiallyLocked && (
+                    <p className="text-[11px] text-amber-200/90 mt-0.5">
+                      Existing filled fields are read-only. Empty fields &amp; new KYC uploads can be saved.
+                    </p>
+                  )}
+                </div>
               </div>
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="text-gray-300 hover:text-white transition-colors p-1"
+                className="text-gray-300 hover:text-white transition-colors p-1 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1305,6 +1457,16 @@ export const StaffPage: React.FC = () => {
 
             {/* Modal Scrollable Body */}
             <form onSubmit={handleSaveStaff} className="p-6 space-y-6 overflow-y-auto flex-1 bg-slate-50 text-xs">
+              {/* Lock Notice Banner */}
+              {isPartiallyLocked && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 flex items-start gap-2.5 text-xs text-amber-900 shadow-xs">
+                  <Lock className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold">Partial Lock Active:</span> Existing filled fields cannot be modified by Admins. You can still enter data for any missing/empty fields and upload new KYC documents.
+                  </div>
+                </div>
+              )}
+
               {/* Photo & Basic Details */}
               <div className="bg-white p-5 rounded-xl border border-gray-200 space-y-4 shadow-sm">
                 <h3 className="font-bold text-xs uppercase tracking-wider text-[#20B2AA] border-b border-gray-100 pb-2 flex items-center gap-1.5">
@@ -1340,24 +1502,52 @@ export const StaffPage: React.FC = () => {
 
                   <div className="grid grid-cols-2 gap-3 flex-1">
                     <div>
-                      <label className="block text-[11px] font-bold text-gray-700 mb-1">Full Name *</label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-[11px] font-bold text-gray-700">Full Name *</label>
+                        {isNameLocked && (
+                          <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.2" title="Locked by SuperAdmin — existing value cannot be changed">
+                            <Lock className="w-2.5 h-2.5 text-amber-600" />
+                            <span>Locked</span>
+                          </span>
+                        )}
+                      </div>
                       <input
                         type="text"
                         placeholder="e.g. Rahul Sharma"
+                        disabled={isNameLocked}
                         value={formData.employee_name || formData.name || ''}
                         onChange={(e) => setFormData({ ...formData, name: e.target.value, employee_name: e.target.value })}
-                        className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-semibold focus:outline-none focus:border-[#20B2AA]"
+                        className={`w-full border rounded-lg px-3 py-2 text-xs font-semibold focus:outline-none ${
+                          isNameLocked
+                            ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                            : 'bg-white border-gray-200 text-gray-800 focus:border-[#20B2AA]'
+                        }`}
+                        title={isNameLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                         required
                       />
                     </div>
                     <div>
-                      <label className="block text-[11px] font-bold text-gray-700 mb-1">Biometric Code</label>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-[11px] font-bold text-gray-700">Biometric Code</label>
+                        {isBiometricLocked && (
+                          <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.2" title="Locked by SuperAdmin — existing value cannot be changed">
+                            <Lock className="w-2.5 h-2.5 text-amber-600" />
+                            <span>Locked</span>
+                          </span>
+                        )}
+                      </div>
                       <input
                         type="text"
                         placeholder="e.g. 3765"
+                        disabled={isBiometricLocked}
                         value={formData.biometric_code || formData.biometricCode || ''}
                         onChange={(e) => setFormData({ ...formData, biometricCode: e.target.value, biometric_code: e.target.value })}
-                        className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-mono focus:outline-none focus:border-[#20B2AA]"
+                        className={`w-full border rounded-lg px-3 py-2 text-xs font-mono focus:outline-none ${
+                          isBiometricLocked
+                            ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                            : 'bg-white border-gray-200 text-gray-800 focus:border-[#20B2AA]'
+                        }`}
+                        title={isBiometricLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                       />
                     </div>
                   </div>
@@ -1365,22 +1555,48 @@ export const StaffPage: React.FC = () => {
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-700 mb-1">Phone Number</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-gray-700">Phone Number</label>
+                      {isPhoneLocked && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1" title="Locked by SuperAdmin">
+                          <Lock className="w-2 h-2 text-amber-600" />
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="text"
                       placeholder="9876543210"
+                      disabled={isPhoneLocked}
                       value={formData.phone || ''}
                       onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-mono"
+                      className={`w-full border rounded-lg px-3 py-2 text-xs font-mono ${
+                        isPhoneLocked
+                          ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                          : 'bg-white border-gray-200 text-gray-800'
+                      }`}
+                      title={isPhoneLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-700 mb-1">Gender</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-gray-700">Gender</label>
+                      {isGenderLocked && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1" title="Locked by SuperAdmin">
+                          <Lock className="w-2 h-2 text-amber-600" />
+                        </span>
+                      )}
+                    </div>
                     <select
                       value={formData.gender || 'Male'}
+                      disabled={isGenderLocked}
                       onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
-                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-medium"
+                      className={`w-full border rounded-lg px-3 py-2 text-xs font-medium ${
+                        isGenderLocked
+                          ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                          : 'bg-white border-gray-200 text-gray-800'
+                      }`}
+                      title={isGenderLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                     >
                       <option value="Male">Male (M)</option>
                       <option value="Female">Female (F)</option>
@@ -1388,34 +1604,50 @@ export const StaffPage: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-700 mb-1">Role / Designation</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-gray-700">Role / Designation</label>
+                      {isRoleLocked && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1" title="Locked by SuperAdmin">
+                          <Lock className="w-2 h-2 text-amber-600" />
+                        </span>
+                      )}
+                    </div>
                     {isCustomDesignationModal ? (
                       <div className="flex items-center gap-1.5">
                         <input
                           type="text"
                           autoFocus
+                          disabled={isRoleLocked}
                           placeholder="Enter new designation..."
                           value={formData.designation || formData.role || ''}
                           onChange={(e) => setFormData({ ...formData, role: e.target.value, designation: e.target.value })}
-                          className="w-full bg-white border border-[#20B2AA] rounded-lg px-3 py-2 text-xs text-gray-800 font-medium focus:outline-none"
+                          className={`w-full border rounded-lg px-3 py-2 text-xs font-medium focus:outline-none ${
+                            isRoleLocked
+                              ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                              : 'bg-white border-[#20B2AA] text-gray-800'
+                          }`}
+                          title={isRoleLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                         />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setIsCustomDesignationModal(false);
-                            if (allStaffDesignations.length > 0) {
-                              setFormData({ ...formData, role: allStaffDesignations[0], designation: allStaffDesignations[0] });
-                            }
-                          }}
-                          className="px-2 py-2 text-[10px] font-bold text-gray-600 hover:text-gray-800 bg-gray-100 hover:bg-gray-200 rounded-lg whitespace-nowrap cursor-pointer"
-                          title="Switch back to dropdown list"
-                        >
-                          List
-                        </button>
+                        {!isRoleLocked && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsCustomDesignationModal(false);
+                              if (allStaffDesignations.length > 0) {
+                                setFormData({ ...formData, role: allStaffDesignations[0], designation: allStaffDesignations[0] });
+                              }
+                            }}
+                            className="px-2 py-2 text-[10px] font-bold text-gray-600 hover:text-gray-800 bg-gray-100 hover:bg-gray-200 rounded-lg whitespace-nowrap cursor-pointer"
+                            title="Switch back to dropdown list"
+                          >
+                            List
+                          </button>
+                        )}
                       </div>
                     ) : (
                       <select
                         value={formData.designation || formData.role || 'Janitor'}
+                        disabled={isRoleLocked}
                         onChange={(e) => {
                           if (e.target.value === '__custom__') {
                             setIsCustomDesignationModal(true);
@@ -1425,23 +1657,36 @@ export const StaffPage: React.FC = () => {
                             setFormData({ ...formData, role: e.target.value, designation: e.target.value });
                           }
                         }}
-                        className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-medium"
+                        className={`w-full border rounded-lg px-3 py-2 text-xs font-medium ${
+                          isRoleLocked
+                            ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                            : 'bg-white border-gray-200 text-gray-800'
+                        }`}
+                        title={isRoleLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                       >
                         {allStaffDesignations.map((desig) => (
                           <option key={desig} value={desig}>
                             {desig}
                           </option>
                         ))}
-                        <option value="__custom__">+ Add New Designation...</option>
+                        {!isRoleLocked && <option value="__custom__">+ Add New Designation...</option>}
                       </select>
                     )}
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-700 mb-1">Compliance Name</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-gray-700">Compliance Name</label>
+                      {isComplianceLocked && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1" title="Locked by SuperAdmin">
+                          <Lock className="w-2 h-2 text-amber-600" />
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="text"
                       placeholder="e.g. Ambe Enterprises"
+                      disabled={isComplianceLocked}
                       value={formData.compliance_name || formData.complianceName || ''}
                       onChange={(e) =>
                         setFormData({
@@ -1450,16 +1695,29 @@ export const StaffPage: React.FC = () => {
                           complianceName: e.target.value,
                         })
                       }
-                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800"
+                      className={`w-full border rounded-lg px-3 py-2 text-xs ${
+                        isComplianceLocked
+                          ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                          : 'bg-white border-gray-200 text-gray-800'
+                      }`}
+                      title={isComplianceLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-700 mb-1">Assigned Site</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-gray-700">Assigned Site</label>
+                      {isSiteLocked && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1" title="Locked by SuperAdmin">
+                          <Lock className="w-2 h-2 text-amber-600" />
+                        </span>
+                      )}
+                    </div>
                     <select
                       value={formData.site_id || ''}
+                      disabled={isSiteLocked}
                       onChange={(e) => {
                         const sId = e.target.value;
                         const sObj = sitesList.find((s) => s.id === sId);
@@ -1467,7 +1725,12 @@ export const StaffPage: React.FC = () => {
                         setFormData({ ...formData, site_id: sId, siteName: sName, rate_card_id: '' });
                         fetchRateCardsForSite(sId, sName);
                       }}
-                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-medium truncate"
+                      className={`w-full border rounded-lg px-3 py-2 text-xs font-medium truncate ${
+                        isSiteLocked
+                          ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                          : 'bg-white border-gray-200 text-gray-800'
+                      }`}
+                      title={isSiteLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                     >
                       <option value="">Select a Site...</option>
                       {sitesList.map((site) => (
@@ -1479,11 +1742,24 @@ export const StaffPage: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-700 mb-1">Assigned Rate Card</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-gray-700">Assigned Rate Card</label>
+                      {isRateCardLocked && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1" title="Locked by SuperAdmin">
+                          <Lock className="w-2 h-2 text-amber-600" />
+                        </span>
+                      )}
+                    </div>
                     <select
                       value={formData.rate_card_id || ''}
+                      disabled={isRateCardLocked}
                       onChange={(e) => setFormData({ ...formData, rate_card_id: e.target.value })}
-                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-medium truncate"
+                      className={`w-full border rounded-lg px-3 py-2 text-xs font-medium truncate ${
+                        isRateCardLocked
+                          ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                          : 'bg-white border-gray-200 text-gray-800'
+                      }`}
+                      title={isRateCardLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                     >
                       <option value="">Select Rate Card...</option>
                       {rateCardsOptions.map((card) => (
@@ -1495,13 +1771,26 @@ export const StaffPage: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-700 mb-1">Monthly Incentive (₹)</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-gray-700">Monthly Incentive (₹)</label>
+                      {isIncentiveLocked && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1" title="Locked by SuperAdmin">
+                          <Lock className="w-2 h-2 text-amber-600" />
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="number"
                       placeholder="0"
+                      disabled={isIncentiveLocked}
                       value={formData.monthly_incentive || 0}
                       onChange={(e) => setFormData({ ...formData, monthly_incentive: Number(e.target.value) })}
-                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-mono font-bold"
+                      className={`w-full border rounded-lg px-3 py-2 text-xs font-mono font-bold ${
+                        isIncentiveLocked
+                          ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                          : 'bg-white border-gray-200 text-gray-800'
+                      }`}
+                      title={isIncentiveLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                     />
                   </div>
                 </div>
@@ -1516,10 +1805,19 @@ export const StaffPage: React.FC = () => {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-700 mb-1">Bank Account Number</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-gray-700">Bank Account Number</label>
+                      {isBankAccLocked && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.2" title="Locked by SuperAdmin">
+                          <Lock className="w-2.5 h-2.5 text-amber-600" />
+                          <span>Locked</span>
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="text"
                       placeholder="e.g. 68036705039"
+                      disabled={isBankAccLocked}
                       value={formData.bank_account_no || formData.bankAccountNo || ''}
                       onChange={(e) =>
                         setFormData({
@@ -1528,15 +1826,29 @@ export const StaffPage: React.FC = () => {
                           bankAccountNo: e.target.value,
                         })
                       }
-                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono text-gray-800"
+                      className={`w-full border rounded-lg px-3 py-2 text-xs font-mono ${
+                        isBankAccLocked
+                          ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                          : 'bg-white border-gray-200 text-gray-800'
+                      }`}
+                      title={isBankAccLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-700 mb-1">Bank IFSC Code</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-gray-700">Bank IFSC Code</label>
+                      {isBankIfscLocked && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.2" title="Locked by SuperAdmin">
+                          <Lock className="w-2.5 h-2.5 text-amber-600" />
+                          <span>Locked</span>
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="text"
                       placeholder="e.g. MAHB0000294"
+                      disabled={isBankIfscLocked}
                       value={formData.bank_ifsc_code || formData.bankIfsc || ''}
                       onChange={(e) =>
                         setFormData({
@@ -1545,15 +1857,29 @@ export const StaffPage: React.FC = () => {
                           bankIfsc: e.target.value,
                         })
                       }
-                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono uppercase text-gray-800"
+                      className={`w-full border rounded-lg px-3 py-2 text-xs font-mono uppercase ${
+                        isBankIfscLocked
+                          ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                          : 'bg-white border-gray-200 text-gray-800'
+                      }`}
+                      title={isBankIfscLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-700 mb-1">Bank Name</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-gray-700">Bank Name</label>
+                      {isBankNameLocked && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.2" title="Locked by SuperAdmin">
+                          <Lock className="w-2.5 h-2.5 text-amber-600" />
+                          <span>Locked</span>
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="text"
                       placeholder="e.g. Bank of Maharashtra"
+                      disabled={isBankNameLocked}
                       value={formData.bank_name || formData.bankName || ''}
                       onChange={(e) =>
                         setFormData({
@@ -1562,15 +1888,29 @@ export const StaffPage: React.FC = () => {
                           bankName: e.target.value,
                         })
                       }
-                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800"
+                      className={`w-full border rounded-lg px-3 py-2 text-xs ${
+                        isBankNameLocked
+                          ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                          : 'bg-white border-gray-200 text-gray-800'
+                      }`}
+                      title={isBankNameLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-700 mb-1">Payee Name (as per Bank)</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-gray-700">Payee Name (as per Bank)</label>
+                      {isPayeeLocked && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.2" title="Locked by SuperAdmin">
+                          <Lock className="w-2.5 h-2.5 text-amber-600" />
+                          <span>Locked</span>
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="text"
                       placeholder="e.g. Feroj Mohammad Shakeel Shaikh"
+                      disabled={isPayeeLocked}
                       value={formData.payee_name || formData.payeeName || ''}
                       onChange={(e) =>
                         setFormData({
@@ -1579,7 +1919,12 @@ export const StaffPage: React.FC = () => {
                           payeeName: e.target.value,
                         })
                       }
-                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800"
+                      className={`w-full border rounded-lg px-3 py-2 text-xs ${
+                        isPayeeLocked
+                          ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                          : 'bg-white border-gray-200 text-gray-800'
+                      }`}
+                      title={isPayeeLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                     />
                   </div>
                 </div>
@@ -1594,56 +1939,108 @@ export const StaffPage: React.FC = () => {
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-700 mb-1">Aadhar Card Number</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-gray-700">Aadhar Card Number</label>
+                      {isAadharLocked && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1" title="Locked by SuperAdmin">
+                          <Lock className="w-2 h-2 text-amber-600" />
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="text"
                       placeholder="4839-2938-1928"
+                      disabled={isAadharLocked}
                       value={formData.aadharNo || formData.aadhar_no || ''}
                       onChange={(e) => setFormData({ ...formData, aadharNo: e.target.value, aadhar_no: e.target.value })}
-                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono text-gray-800"
+                      className={`w-full border rounded-lg px-3 py-2 text-xs font-mono ${
+                        isAadharLocked
+                          ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                          : 'bg-white border-gray-200 text-gray-800'
+                      }`}
+                      title={isAadharLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-700 mb-1">PAN Card Number</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-gray-700">PAN Card Number</label>
+                      {isPanLocked && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1" title="Locked by SuperAdmin">
+                          <Lock className="w-2 h-2 text-amber-600" />
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="text"
                       placeholder="ABCDE1234F"
+                      disabled={isPanLocked}
                       value={formData.panNo || formData.pan_no || ''}
                       onChange={(e) => setFormData({ ...formData, panNo: e.target.value, pan_no: e.target.value })}
-                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono uppercase text-gray-800"
+                      className={`w-full border rounded-lg px-3 py-2 text-xs font-mono uppercase ${
+                        isPanLocked
+                          ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                          : 'bg-white border-gray-200 text-gray-800'
+                      }`}
+                      title={isPanLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-700 mb-1">
-                      UAN Number
-                      {staffDocs.some((d) => isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'UAN Card')) && !formData.uan_no && (
-                        <span className="text-[10px] text-amber-600 font-normal ml-1">(Card uploaded — add UAN number?)</span>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-gray-700">
+                        UAN Number
+                        {staffDocs.some((d) => isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'UAN Card')) && !formData.uan_no && (
+                          <span className="text-[10px] text-amber-600 font-normal ml-1">(Card uploaded)</span>
+                        )}
+                      </label>
+                      {isUanLocked && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1" title="Locked by SuperAdmin">
+                          <Lock className="w-2 h-2 text-amber-600" />
+                        </span>
                       )}
-                    </label>
+                    </div>
                     <input
                       type="text"
                       placeholder="100123456789"
+                      disabled={isUanLocked}
                       value={formData.uan_no || ''}
                       onChange={(e) => setFormData({ ...formData, uan_no: e.target.value })}
-                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono text-gray-800"
+                      className={`w-full border rounded-lg px-3 py-2 text-xs font-mono ${
+                        isUanLocked
+                          ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                          : 'bg-white border-gray-200 text-gray-800'
+                      }`}
+                      title={isUanLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold text-gray-700 mb-1">
-                      ESIC Number
-                      {staffDocs.some((d) => isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'ESIC Card')) && !formData.esic_no && (
-                        <span className="text-[10px] text-orange-600 font-normal ml-1">(Card uploaded — add ESIC number?)</span>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-gray-700">
+                        ESIC Number
+                        {staffDocs.some((d) => isMatchingDocType(d.document_type || d.doc_type || d.type || d.file_name, 'ESIC Card')) && !formData.esic_no && (
+                          <span className="text-[10px] text-orange-600 font-normal ml-1">(Card uploaded)</span>
+                        )}
+                      </label>
+                      {isEsicLocked && (
+                        <span className="inline-flex items-center gap-0.5 text-[9px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 rounded px-1" title="Locked by SuperAdmin">
+                          <Lock className="w-2 h-2 text-amber-600" />
+                        </span>
                       )}
-                    </label>
+                    </div>
                     <input
                       type="text"
                       placeholder="31001234560000001"
+                      disabled={isEsicLocked}
                       value={formData.esic_no || ''}
                       onChange={(e) => setFormData({ ...formData, esic_no: e.target.value })}
-                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono text-gray-800"
+                      className={`w-full border rounded-lg px-3 py-2 text-xs font-mono ${
+                        isEsicLocked
+                          ? 'bg-slate-100 text-gray-500 border-gray-200 cursor-not-allowed'
+                          : 'bg-white border-gray-200 text-gray-800'
+                      }`}
+                      title={isEsicLocked ? "Locked by SuperAdmin — existing value cannot be changed" : undefined}
                     />
                   </div>
                 </div>
@@ -1668,27 +2065,29 @@ export const StaffPage: React.FC = () => {
                                 url: aadhaarDoc.view_url || aadhaarDoc.gcp_file_url,
                               })
                             }
-                            className="flex-1 text-center text-xs font-bold text-teal-700 hover:text-teal-900 truncate"
+                            className="flex-1 text-center text-xs font-bold text-teal-700 hover:text-teal-900 truncate cursor-pointer"
                           >
                             View Aadhaar
                           </button>
-                          <label
-                            className="p-1 text-gray-500 hover:text-teal-600 cursor-pointer rounded transition-colors"
-                            title="Replace Document"
-                          >
-                            {uploadingType === 'Aadhaar Card' ? (
-                              <RefreshCw className="w-4 h-4 animate-spin text-teal-600" />
-                            ) : (
-                              <Upload className="w-4 h-4" />
-                            )}
-                            <input
-                              type="file"
-                              accept=".pdf,.png,.jpg,.jpeg"
-                              className="hidden"
-                              onChange={(e) => handleUploadStaffDoc(e, 'Aadhaar Card')}
-                              disabled={!editingStaff || !!uploadingType}
-                            />
-                          </label>
+                          {!isPartiallyLocked && (
+                            <label
+                              className="p-1 text-gray-500 hover:text-teal-600 cursor-pointer rounded transition-colors"
+                              title="Replace Document"
+                            >
+                              {uploadingType === 'Aadhaar Card' ? (
+                                <RefreshCw className="w-4 h-4 animate-spin text-teal-600" />
+                              ) : (
+                                <Upload className="w-4 h-4" />
+                              )}
+                              <input
+                                type="file"
+                                accept=".pdf,.png,.jpg,.jpeg"
+                                className="hidden"
+                                onChange={(e) => handleUploadStaffDoc(e, 'Aadhaar Card')}
+                                disabled={!editingStaff || !!uploadingType}
+                              />
+                            </label>
+                          )}
                         </div>
                       );
                     }
@@ -1735,29 +2134,31 @@ export const StaffPage: React.FC = () => {
                                 url: panDoc.view_url || panDoc.gcp_file_url,
                               })
                             }
-                            className="flex-1 text-center text-xs font-bold text-indigo-700 hover:text-indigo-900 truncate"
+                            className="flex-1 text-center text-xs font-bold text-indigo-700 hover:text-indigo-900 truncate cursor-pointer"
                           >
                             View PAN
                           </button>
-                          <label
-                            className={`p-1 text-gray-500 hover:text-indigo-600 rounded transition-colors ${
-                              uploadingType ? 'opacity-50 pointer-events-none cursor-not-allowed' : 'cursor-pointer'
-                            }`}
-                            title="Replace Document"
-                          >
-                            {uploadingType === 'PAN Card' ? (
-                              <RefreshCw className="w-4 h-4 animate-spin text-indigo-600" />
-                            ) : (
-                              <Upload className="w-4 h-4" />
-                            )}
-                            <input
-                              type="file"
-                              accept=".pdf,.png,.jpg,.jpeg"
-                              className="hidden"
-                              onChange={(e) => handleUploadStaffDoc(e, 'PAN Card')}
-                              disabled={!editingStaff || !!uploadingType}
-                            />
-                          </label>
+                          {!isPartiallyLocked && (
+                            <label
+                              className={`p-1 text-gray-500 hover:text-indigo-600 rounded transition-colors ${
+                                uploadingType ? 'opacity-50 pointer-events-none cursor-not-allowed' : 'cursor-pointer'
+                              }`}
+                              title="Replace Document"
+                            >
+                              {uploadingType === 'PAN Card' ? (
+                                <RefreshCw className="w-4 h-4 animate-spin text-indigo-600" />
+                              ) : (
+                                <Upload className="w-4 h-4" />
+                              )}
+                              <input
+                                type="file"
+                                accept=".pdf,.png,.jpg,.jpeg"
+                                className="hidden"
+                                onChange={(e) => handleUploadStaffDoc(e, 'PAN Card')}
+                                disabled={!editingStaff || !!uploadingType}
+                              />
+                            </label>
+                          )}
                         </div>
                       );
                     }
@@ -1804,29 +2205,31 @@ export const StaffPage: React.FC = () => {
                                 url: bankDoc.view_url || bankDoc.gcp_file_url,
                               })
                             }
-                            className="flex-1 text-center text-xs font-bold text-purple-700 hover:text-purple-900 truncate"
+                            className="flex-1 text-center text-xs font-bold text-purple-700 hover:text-purple-900 truncate cursor-pointer"
                           >
                             View Passbook
                           </button>
-                          <label
-                            className={`p-1 text-gray-500 hover:text-purple-600 rounded transition-colors ${
-                              uploadingType ? 'opacity-50 pointer-events-none cursor-not-allowed' : 'cursor-pointer'
-                            }`}
-                            title="Replace Document"
-                          >
-                            {uploadingType === 'Bank Details' ? (
-                              <RefreshCw className="w-4 h-4 animate-spin text-purple-600" />
-                            ) : (
-                              <Upload className="w-4 h-4" />
-                            )}
-                            <input
-                              type="file"
-                              accept=".pdf,.png,.jpg,.jpeg"
-                              className="hidden"
-                              onChange={(e) => handleUploadStaffDoc(e, 'Bank Details')}
-                              disabled={!editingStaff || !!uploadingType}
-                            />
-                          </label>
+                          {!isPartiallyLocked && (
+                            <label
+                              className={`p-1 text-gray-500 hover:text-purple-600 rounded transition-colors ${
+                                uploadingType ? 'opacity-50 pointer-events-none cursor-not-allowed' : 'cursor-pointer'
+                              }`}
+                              title="Replace Document"
+                            >
+                              {uploadingType === 'Bank Details' ? (
+                                <RefreshCw className="w-4 h-4 animate-spin text-purple-600" />
+                              ) : (
+                                <Upload className="w-4 h-4" />
+                              )}
+                              <input
+                                type="file"
+                                accept=".pdf,.png,.jpg,.jpeg"
+                                className="hidden"
+                                onChange={(e) => handleUploadStaffDoc(e, 'Bank Details')}
+                                disabled={!editingStaff || !!uploadingType}
+                              />
+                            </label>
+                          )}
                         </div>
                       );
                     }
@@ -1873,29 +2276,31 @@ export const StaffPage: React.FC = () => {
                                 url: uanDoc.view_url || uanDoc.gcp_file_url,
                               })
                             }
-                            className="flex-1 text-center text-xs font-bold text-amber-700 hover:text-amber-900 truncate"
+                            className="flex-1 text-center text-xs font-bold text-amber-700 hover:text-amber-900 truncate cursor-pointer"
                           >
                             View UAN
                           </button>
-                          <label
-                            className={`p-1 text-gray-500 hover:text-amber-600 rounded transition-colors ${
-                              uploadingType ? 'opacity-50 pointer-events-none cursor-not-allowed' : 'cursor-pointer'
-                            }`}
-                            title="Replace Document"
-                          >
-                            {uploadingType === 'UAN Card' ? (
-                              <RefreshCw className="w-4 h-4 animate-spin text-amber-600" />
-                            ) : (
-                              <Upload className="w-4 h-4" />
-                            )}
-                            <input
-                              type="file"
-                              accept=".pdf,.png,.jpg,.jpeg"
-                              className="hidden"
-                              onChange={(e) => handleUploadStaffDoc(e, 'UAN Card')}
-                              disabled={!editingStaff || !!uploadingType}
-                            />
-                          </label>
+                          {!isPartiallyLocked && (
+                            <label
+                              className={`p-1 text-gray-500 hover:text-amber-600 rounded transition-colors ${
+                                uploadingType ? 'opacity-50 pointer-events-none cursor-not-allowed' : 'cursor-pointer'
+                              }`}
+                              title="Replace Document"
+                            >
+                              {uploadingType === 'UAN Card' ? (
+                                <RefreshCw className="w-4 h-4 animate-spin text-amber-600" />
+                              ) : (
+                                <Upload className="w-4 h-4" />
+                              )}
+                              <input
+                                type="file"
+                                accept=".pdf,.png,.jpg,.jpeg"
+                                className="hidden"
+                                onChange={(e) => handleUploadStaffDoc(e, 'UAN Card')}
+                                disabled={!editingStaff || !!uploadingType}
+                              />
+                            </label>
+                          )}
                         </div>
                       );
                     }
@@ -1942,29 +2347,31 @@ export const StaffPage: React.FC = () => {
                                 url: esicDoc.view_url || esicDoc.gcp_file_url,
                               })
                             }
-                            className="flex-1 text-center text-xs font-bold text-orange-700 hover:text-orange-900 truncate"
+                            className="flex-1 text-center text-xs font-bold text-orange-700 hover:text-orange-900 truncate cursor-pointer"
                           >
                             View ESIC
                           </button>
-                          <label
-                            className={`p-1 text-gray-500 hover:text-orange-600 rounded transition-colors ${
-                              uploadingType ? 'opacity-50 pointer-events-none cursor-not-allowed' : 'cursor-pointer'
-                            }`}
-                            title="Replace Document"
-                          >
-                            {uploadingType === 'ESIC Card' ? (
-                              <RefreshCw className="w-4 h-4 animate-spin text-orange-600" />
-                            ) : (
-                              <Upload className="w-4 h-4" />
-                            )}
-                            <input
-                              type="file"
-                              accept=".pdf,.png,.jpg,.jpeg"
-                              className="hidden"
-                              onChange={(e) => handleUploadStaffDoc(e, 'ESIC Card')}
-                              disabled={!editingStaff || !!uploadingType}
-                            />
-                          </label>
+                          {!isPartiallyLocked && (
+                            <label
+                              className={`p-1 text-gray-500 hover:text-orange-600 rounded transition-colors ${
+                                uploadingType ? 'opacity-50 pointer-events-none cursor-not-allowed' : 'cursor-pointer'
+                              }`}
+                              title="Replace Document"
+                            >
+                              {uploadingType === 'ESIC Card' ? (
+                                <RefreshCw className="w-4 h-4 animate-spin text-orange-600" />
+                              ) : (
+                                <Upload className="w-4 h-4" />
+                              )}
+                              <input
+                                type="file"
+                                accept=".pdf,.png,.jpg,.jpeg"
+                                className="hidden"
+                                onChange={(e) => handleUploadStaffDoc(e, 'ESIC Card')}
+                                disabled={!editingStaff || !!uploadingType}
+                              />
+                            </label>
+                          )}
                         </div>
                       );
                     }
@@ -2031,19 +2438,21 @@ export const StaffPage: React.FC = () => {
                               <span>View</span>
                               <Eye className="w-3 h-3" />
                             </button>
-                            <button
-                              type="button"
-                              disabled={deletingDocId === doc.id}
-                              onClick={() => handleDeleteStaffDocument(doc.id, doc.file_name)}
-                              className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors cursor-pointer disabled:opacity-50"
-                              title="Delete Document"
-                            >
-                              {deletingDocId === doc.id ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin text-red-500" />
-                              ) : (
-                                <Trash2 className="w-3.5 h-3.5" />
-                              )}
-                            </button>
+                            {!isPartiallyLocked && (
+                              <button
+                                type="button"
+                                disabled={deletingDocId === doc.id}
+                                onClick={() => handleDeleteStaffDocument(doc.id, doc.file_name, editingStaff)}
+                                className="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors cursor-pointer disabled:opacity-50"
+                                title="Delete Document"
+                              >
+                                {deletingDocId === doc.id ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin text-red-500" />
+                                ) : (
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -2057,15 +2466,25 @@ export const StaffPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold transition-colors"
+                  className="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-lg bg-[#20B2AA] hover:bg-[#1ca19a] text-white font-bold transition-all shadow-sm"
+                  className="px-5 py-2 rounded-lg bg-[#20B2AA] hover:bg-[#1ca19a] text-white font-bold transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+                  title={isPartiallyLocked ? 'Only newly filled empty fields and new documents will be saved' : undefined}
                 >
-                  {editingStaff ? 'Update Staff Record' : 'Save Staff Record'}
+                  {isPartiallyLocked ? (
+                    <>
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>Save Blank Fields &amp; KYC</span>
+                    </>
+                  ) : editingStaff ? (
+                    'Update Staff Record'
+                  ) : (
+                    'Save Staff Record'
+                  )}
                 </button>
               </div>
             </form>
@@ -2085,10 +2504,18 @@ export const StaffPage: React.FC = () => {
           >
             {/* Header */}
             <div className="flex justify-between items-center px-5 py-4 border-b border-gray-200 bg-gray-50">
-              <h3 className="text-sm font-bold text-gray-800 flex items-center gap-2">
+              <div className="flex items-center gap-2">
                 <Eye className="w-4 h-4 text-[#20B2AA]" />
-                <span>KYC Documents: {viewerStaffName}</span>
-              </h3>
+                <h3 className="text-sm font-bold text-gray-800">
+                  KYC Documents: {viewerStaffName}
+                </h3>
+                {Boolean(viewerStaff?.is_locked) && (
+                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-700 border border-amber-300 flex items-center gap-0.5">
+                    <Lock className="w-2.5 h-2.5" />
+                    <span>Locked</span>
+                  </span>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => setIsViewerOpen(false)}
@@ -2107,6 +2534,7 @@ export const StaffPage: React.FC = () => {
                 );
                 const isUploading = uploadingDocType === docType;
                 const isDraggingOver = dragOverDocType === docType;
+                const isViewerStaffLocked = Boolean(viewerStaff?.is_locked) && !isSuperAdmin;
 
                 return (
                   <div
@@ -2165,19 +2593,21 @@ export const StaffPage: React.FC = () => {
                         >
                           <Eye className="w-3.5 h-3.5" /> View
                         </button>
-                        <button
-                          type="button"
-                          disabled={deletingDocId === uploadedDoc.id}
-                          onClick={() => handleDeleteStaffDocument(uploadedDoc.id, uploadedDoc.file_name || docType)}
-                          className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
-                          title="Delete Document"
-                        >
-                          {deletingDocId === uploadedDoc.id ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-red-500" />
-                          ) : (
-                            <Trash2 className="w-3.5 h-3.5" />
-                          )}
-                        </button>
+                        {!isViewerStaffLocked && (
+                          <button
+                            type="button"
+                            disabled={deletingDocId === uploadedDoc.id}
+                            onClick={() => handleDeleteStaffDocument(uploadedDoc.id, uploadedDoc.file_name || docType, viewerStaff)}
+                            className="p-1.5 rounded-lg transition-colors text-gray-400 hover:text-red-600 hover:bg-red-50 cursor-pointer disabled:opacity-50"
+                            title="Delete Document"
+                          >
+                            {deletingDocId === uploadedDoc.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-red-500" />
+                            ) : (
+                              <Trash2 className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        )}
                       </div>
                     ) : (
                       <label

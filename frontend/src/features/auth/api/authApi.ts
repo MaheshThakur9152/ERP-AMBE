@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase';
-import { fetchWithRetry, setInMemoryToken, getApiUrl, getOrRefreshToken } from '@/lib/apiClient';
+import { fetchWithRetry, setInMemoryToken, getApiUrl, getOrRefreshSession } from '@/lib/apiClient';
 import { UserProfile, UserRole } from '../types';
 
 const AUTH_API_BASE = '/api/auth';
@@ -50,25 +50,20 @@ export async function loginApi(email: string, password: string): Promise<LoginRe
 }
 
 /**
- * Performs silent access token refresh using the single-flight shared getOrRefreshToken promise.
+ * Performs silent access token refresh using the single-flight shared getOrRefreshSession promise.
  */
 export async function refreshTokenApi(): Promise<LoginResponse | null> {
   try {
-    const token = await getOrRefreshToken();
-    if (!token) {
-      return null;
-    }
-
-    const me = await fetchMeApi();
-    if (!me?.user) {
+    const session = await getOrRefreshSession();
+    if (!session?.token || !session?.user) {
       return null;
     }
 
     return {
       success: true,
-      token,
-      access_token: token,
-      user: me.user,
+      token: session.token,
+      access_token: session.token,
+      user: session.user,
     };
   } catch (err) {
     return null;

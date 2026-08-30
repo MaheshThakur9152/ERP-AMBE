@@ -57,36 +57,44 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
       console.log(`[KYCPreview] Request start - documentId: ${documentId || 'none'}, fileName: ${fileName}, targetUrl: ${targetUrl}`);
 
       try {
-        // Use shared fetchWithRetry which automatically attaches in-memory access token,
-        // credentials: 'include', and coordinates single-flight 401 refresh + retry
-        const res = await fetchWithRetry(targetUrl, {
-          method: 'GET',
-          signal: abortController.signal,
-          skipErrorToast: true,
-        });
+        let res: Response;
+        try {
+          res = await fetchWithRetry(targetUrl, {
+            method: 'GET',
+            signal: abortController.signal,
+            skipErrorToast: true,
+          });
+        } catch (fetchErr: any) {
+          if (documentId && targetUrl !== `/api/documents/${documentId}/view`) {
+            console.log(`[KYCPreview] Fetch error on direct URL, falling back to /api/documents/${documentId}/view`);
+            res = await fetchWithRetry(`/api/documents/${documentId}/view`, {
+              method: 'GET',
+              signal: abortController.signal,
+              skipErrorToast: true,
+            });
+          } else {
+            throw fetchErr;
+          }
+        }
 
         console.log(`[KYCPreview] HTTP status: ${res.status} ${res.statusText}`);
 
         if (!res.ok) {
-          // If direct url fallback exists and differs, try it
-          if (url && url !== targetUrl) {
-            console.log(`[KYCPreview] Trying fallback URL: ${url}`);
-            const fallbackRes = await fetchWithRetry(url, { signal: abortController.signal, skipErrorToast: true });
+          if (documentId && targetUrl !== `/api/documents/${documentId}/view`) {
+            console.log(`[KYCPreview] Direct URL returned ${res.status}, trying fallback /api/documents/${documentId}/view`);
+            const fallbackRes = await fetchWithRetry(`/api/documents/${documentId}/view`, {
+              method: 'GET',
+              signal: abortController.signal,
+              skipErrorToast: true,
+            });
             if (fallbackRes.ok) {
-              const fallbackBlob = await fallbackRes.blob();
-              const newBlobUrl = URL.createObjectURL(fallbackBlob);
-              if (currentBlobUrlRef.current) {
-                console.log(`[KYCPreview] Revoking previous blob: ${currentBlobUrlRef.current}`);
-                URL.revokeObjectURL(currentBlobUrlRef.current);
-              }
-              currentBlobUrlRef.current = newBlobUrl;
-              setBlobUrl(newBlobUrl);
-              setIsImageType(fallbackBlob.type.startsWith('image/') || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(fileName));
-              setLoading(false);
-              return;
+              res = fallbackRes;
+            } else {
+              throw new Error(`Server returned HTTP ${res.status}: ${res.statusText}`);
             }
+          } else {
+            throw new Error(`Server returned HTTP ${res.status}: ${res.statusText}`);
           }
-          throw new Error(`Server returned HTTP ${res.status}: ${res.statusText}`);
         }
 
         const contentType = res.headers.get('content-type') || '';

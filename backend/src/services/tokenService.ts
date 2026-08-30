@@ -83,6 +83,9 @@ export class TokenService {
     }
 
     const tokenHash = this.hashToken(presentedRawToken);
+    const shortHash = tokenHash.substring(0, 12);
+
+    console.log(`[TokenService:validate] Checking token shortHash=${shortHash}...`);
 
     // Look up token by hash
     const { data: record, error } = await supabaseAdmin
@@ -92,19 +95,55 @@ export class TokenService {
       .maybeSingle();
 
     if (error) {
-      console.error('[TokenService:lookup] DB query failed:', error.message);
+      console.error(`[TokenService:lookup] DB query failed for shortHash=${shortHash}:`, error.message);
       return { valid: false, error: 'Database lookup error' };
     }
 
     if (!record) {
-      console.warn('[TokenService] Token hash not found in database');
+      console.warn(`[TokenService] Token hash ${shortHash} not found in database`);
       return { valid: false, error: 'Invalid refresh token' };
     }
 
-    // 🚨 Reuse Detection: If token is already revoked, treat as token theft!
+    const now = Date.now();
+    const expiresAtMs = new Date(record.expires_at).getTime();
+    console.log(
+      `[TokenService:lookup] Found record id=${record.id}, user_id=${record.user_id}, family_id=${record.family_id}, revoked_at=${record.revoked_at}, expires_at=${record.expires_at} (now=${new Date(now).toISOString()})`
+    );
+
+    // 🚨 Reuse Detection: If token is already revoked, check grace period (30s)
     if (record.revoked_at) {
+      const revokedAtMs = new Date(record.revoked_at).getTime();
+      const revokedAgoMs = now - revokedAtMs;
+
+      // Grace period (30s) to handle concurrent requests / React StrictMode double mounts
+      if (revokedAgoMs <= 30000 && revokedAgoMs >= 0) {
+        console.warn(
+          `[TokenService:grace] Token ${shortHash} revoked ${revokedAgoMs}ms ago (within 30s grace window). Finding active family token for user ${record.user_id}...`
+        );
+
+        // Find active token in same family
+        const { data: activeToken } = await supabaseAdmin
+          .from('refresh_tokens')
+          .select('*')
+          .eq('family_id', record.family_id)
+          .is('revoked_at', null)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (activeToken && new Date(activeToken.expires_at).getTime() > now) {
+          console.log(`[TokenService:grace] Returning existing active family token id=${activeToken.id}`);
+          return {
+            valid: true,
+            userId: activeToken.user_id,
+            supabaseRefreshToken: activeToken.supabase_refresh_token,
+            familyId: activeToken.family_id,
+          };
+        }
+      }
+
       console.error(
-        `🚨 [tokenService] Reuse of revoked token detected for family ${record.family_id} (user_id=${record.user_id}, revoked_at=${record.revoked_at}) — check for concurrent refresh calls`
+        `🚨 [TokenService:theft] Reuse of revoked token detected for family ${record.family_id} (user_id=${record.user_id}, revoked_at=${record.revoked_at}, revokedAgo=${revokedAgoMs}ms > 30s)`
       );
       // Invalidate entire token family for this user
       await this.revokeFamily(record.family_id, record.user_id);
@@ -117,8 +156,7 @@ export class TokenService {
     }
 
     // Check expiration
-    const expiresAtMs = new Date(record.expires_at).getTime();
-    if (expiresAtMs <= Date.now()) {
+    if (expiresAtMs <= now) {
       console.warn(`[TokenService] Token expired at ${record.expires_at}`);
       await supabaseAdmin
         .from('refresh_tokens')

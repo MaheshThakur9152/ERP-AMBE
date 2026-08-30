@@ -45,6 +45,13 @@ export type SiteFormData = z.infer<typeof siteSchema>;
 export interface Site extends SiteFormData {
   id: string;
   createdAt: string;
+  is_locked?: boolean;
+  isLocked?: boolean;
+  site_name?: string;
+  client_name?: string;
+  contact_no?: string;
+  work_order_ref_no?: string;
+  work_order_period?: string;
   company_id?: string;
   companyId?: string;
   code_name?: string;
