@@ -12,6 +12,7 @@ import {
   Wallet,
   X,
   Save,
+  RefreshCw,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { calculatePayroll, RateCard, PayrollCalculationResult } from '../utils/payrollCalculator';
@@ -335,11 +336,15 @@ export const PayrollHub: React.FC = () => {
         updated_at: new Date().toISOString(),
       };
 
+      console.log('Attempting full save for', row.name, recordToSave);
+      console.log('SAVING total_net_salary:', row.name, row.calc.totalNetSalary, recordToSave.total_net_salary);
+
       const { error: fullError } = await supabase.from('payroll_records').upsert([recordToSave], {
         onConflict: 'month_year,staff_id',
       });
 
       if (fullError) {
+        console.error('FULL UPSERT FAILED:', fullError);
         console.warn('Full advance record upsert failed, retrying fallback to core advances column:', fullError.message);
         const fallbackRecord: any = { ...recordToSave };
         delete fallbackRecord.adv_amt;
@@ -479,6 +484,33 @@ export const PayrollHub: React.FC = () => {
     setRows((prev) => prev.map((r) => (r.id === activeAdvanceRow.id ? updatedRow : r)));
     await handleAutoSave(updatedRow);
     setActiveAdvanceRow(null);
+  };
+
+  const [isRepairing, setIsRepairing] = useState(false);
+
+  // Bulk Recalculate and Re-save all loaded rows
+  const handleRecalculateAndRepairAll = async () => {
+    if (!rows.length) return;
+    setIsRepairing(true);
+    let successCount = 0;
+    let failCount = 0;
+    try {
+      for (const row of rows) {
+        if (!row.calc) continue;
+        try {
+          await handleAutoSave(row);
+          successCount++;
+        } catch {
+          failCount++;
+        }
+      }
+      setStatusMessage({
+        type: 'success',
+        text: `Bulk re-save completed: ${successCount} updated successfully${failCount > 0 ? `, ${failCount} failed` : ''}.`,
+      });
+    } finally {
+      setIsRepairing(false);
+    }
   };
 
   // Bulk Mark Selected Employees as PAID
@@ -924,6 +956,18 @@ export const PayrollHub: React.FC = () => {
               ))}
             </select>
           </div>
+
+          {/* Bulk Recalculate & Re-Save Button */}
+          <button
+            type="button"
+            onClick={handleRecalculateAndRepairAll}
+            disabled={isRepairing || !rows.length}
+            className="bg-slate-700 hover:bg-slate-800 disabled:opacity-50 text-white px-3 py-2 rounded-xl text-xs font-semibold shadow-xs flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer"
+            title="Recalculate and re-save total net salary and all fields for all loaded rows"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isRepairing ? 'animate-spin' : ''}`} />
+            <span>{isRepairing ? 'Re-saving...' : 'Re-save All'}</span>
+          </button>
 
           {/* Post / Designation Filter Dropdown */}
           <div className="flex items-center border border-gray-300 rounded-xl px-3 py-2 bg-white text-xs font-semibold text-gray-800 shadow-xs gap-2">
