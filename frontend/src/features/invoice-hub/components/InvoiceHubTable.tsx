@@ -28,6 +28,7 @@ import {
   FileCode,
   Lock,
   Unlock,
+  FileText,
 } from 'lucide-react';
 import { formatCurrency, computeInvoiceCalculations } from '@/features/invoices/utils/invoiceCalculator';
 import { InvoiceData } from '@/features/invoices/types/invoice';
@@ -258,10 +259,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
   const [isEditModalOpen, setIsEditModalOpen] = useState<boolean>(false);
   const [editingRecord, setEditingRecord] = useState<InvoiceRecord | null>(null);
 
-  // Inline Attachment Upload state
-  const [selectedInvoiceForAttachment, setSelectedInvoiceForAttachment] = useState<InvoiceRecord | null>(null);
-  const [uploadingAttachmentId, setUploadingAttachmentId] = useState<string | null>(null);
-  const attachmentInputRef = React.useRef<HTMLInputElement>(null);
+
 
   // Master database reference state for Real Sites and Companies
   const [dbSites, setDbSites] = useState<Array<{ id: string; site_name: string; client_name?: string; code_name?: string; company_id?: string }>>([]);
@@ -281,9 +279,37 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
   const [legacyBillNumber, setLegacyBillNumber] = useState<string>('');
   const [legacyAmount, setLegacyAmount] = useState<string>('');
   const [legacyFile, setLegacyFile] = useState<File | null>(null);
+  const [legacyPreviewUrl, setLegacyPreviewUrl] = useState<string | null>(null);
   const [isSubmittingLegacy, setIsSubmittingLegacy] = useState(false);
   const [isLegacyDragging, setIsLegacyDragging] = useState(false);
   const legacyFileInputRef = React.useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!legacyFile) {
+      setLegacyPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(legacyFile);
+    setLegacyPreviewUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [legacyFile]);
+
+  const handleSelectLegacyFile = (file: File) => {
+    const validExts = /\.(pdf|png|jpe?g|webp)$/i;
+    const validTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+
+    if (validTypes.includes(file.type) || validExts.test(file.name)) {
+      if (file.size > 10 * 1024 * 1024) {
+        toast.error('File size exceeds 10MB limit');
+        return;
+      }
+      setLegacyFile(file);
+    } else {
+      toast.error('Please upload a valid PDF, PNG, JPG, or WEBP document');
+    }
+  };
 
   const handleLegacyDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -294,7 +320,9 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
   const handleLegacyDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsLegacyDragging(false);
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setIsLegacyDragging(false);
+    }
   };
 
   const handleLegacyDrop = (e: React.DragEvent<HTMLDivElement>) => {
@@ -303,19 +331,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
     setIsLegacyDragging(false);
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const file = e.dataTransfer.files[0];
-      const validExts = /\.(pdf|png|jpe?g|webp)$/i;
-      const validTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
-
-      if (validTypes.includes(file.type) || validExts.test(file.name)) {
-        if (file.size > 10 * 1024 * 1024) {
-          toast.error('File size exceeds 10MB limit');
-          return;
-        }
-        setLegacyFile(file);
-      } else {
-        toast.error('Please upload a PDF, PNG, or JPG document');
-      }
+      handleSelectLegacyFile(e.dataTransfer.files[0]);
     }
   };
 
@@ -324,19 +340,78 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
     ? (selectedCompany?.proforma_prefix || (selectedCompany?.entity_code === 'ASF' || selectedCompany?.name?.includes('ASF') ? 'ASF/P/26-27/' : 'AS/P/26-27/'))
     : (selectedCompany?.tax_prefix || (selectedCompany?.entity_code === 'ASF' || selectedCompany?.name?.includes('ASF') ? 'ASF/26-27/' : 'AS/26-27/'));
 
-  const handleAttachmentClick = (inv: InvoiceRecord) => {
-    setSelectedInvoiceForAttachment(inv);
-    setTimeout(() => {
-      attachmentInputRef.current?.click();
-    }, 50);
+  // Inline Attachment Upload Modal state
+  const [attachmentModalInvoice, setAttachmentModalInvoice] = useState<InvoiceRecord | null>(null);
+  const [attachmentModalFile, setAttachmentModalFile] = useState<File | null>(null);
+  const [attachmentModalPreviewUrl, setAttachmentModalPreviewUrl] = useState<string | null>(null);
+  const [isAttachmentDragging, setIsAttachmentDragging] = useState(false);
+  const [isSubmittingAttachment, setIsSubmittingAttachment] = useState(false);
+  const attachmentModalFileInputRef = React.useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!attachmentModalFile) {
+      setAttachmentModalPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(attachmentModalFile);
+    setAttachmentModalPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [attachmentModalFile]);
+
+  const handleSelectAttachmentFile = (file: File) => {
+    const validExts = /\.(pdf|png|jpe?g|webp)$/i;
+    const validTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+
+    if (validTypes.includes(file.type) || validExts.test(file.name)) {
+      if (file.size > 10 * 1024 * 1024) {
+        toast.error('File size exceeds 10MB limit');
+        return;
+      }
+      setAttachmentModalFile(file);
+    } else {
+      toast.error('Please upload a valid PDF, PNG, JPG, or WEBP document');
+    }
   };
 
-  const handleAttachmentFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedInvoiceForAttachment) return;
+  const handleAttachmentClick = (inv: InvoiceRecord) => {
+    setAttachmentModalInvoice(inv);
+    setAttachmentModalFile(null);
+    setIsAttachmentDragging(false);
+  };
 
-    const inv = selectedInvoiceForAttachment;
-    setUploadingAttachmentId(inv.id);
+  const handleAttachmentDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsAttachmentDragging(true);
+  };
+
+  const handleAttachmentDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setIsAttachmentDragging(false);
+    }
+  };
+
+  const handleAttachmentDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsAttachmentDragging(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleSelectAttachmentFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleUploadAttachmentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!attachmentModalFile || !attachmentModalInvoice) {
+      toast.error('Please select a document file to upload');
+      return;
+    }
+
+    const inv = attachmentModalInvoice;
+    setIsSubmittingAttachment(true);
 
     try {
       const entity = inv.companies?.name?.includes('ASF') ? 'ASF' : (inv.companies?.name ? inv.companies.name.replace(/[^a-zA-Z0-9]/g, '') : 'Ambe');
@@ -346,12 +421,12 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
       const rawPeriod = inv.monthYear || inv.billing_period || (inv as any).month_year || 'June2026';
       const monthYear = rawPeriod.replace(/\s+/g, '');
       const billNo = inv.invoiceNo || inv.id;
-      const ext = file.name.split('.').pop() || 'pdf';
+      const ext = attachmentModalFile.name.split('.').pop() || 'pdf';
 
       const generatedName = `${entity}_${type}_${cleanSite}_${monthYear}_Bill-${billNo}.${ext}`;
 
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', attachmentModalFile);
       formData.append('fileName', generatedName);
       formData.append('invoiceId', inv.id);
 
@@ -376,16 +451,17 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
         )
       );
 
+      toast.success(`Certified document attached to #${inv.invoiceNo} successfully!`);
+      setAttachmentModalInvoice(null);
+      setAttachmentModalFile(null);
+
       // Refresh table data
       await loadInvoicesFromApi();
-      toast.success('Certified attachment uploaded & linked successfully!');
     } catch (err: any) {
       console.error('Attachment upload error:', err);
       toast.error(err.message || 'Failed to upload attachment');
     } finally {
-      setUploadingAttachmentId(null);
-      setSelectedInvoiceForAttachment(null);
-      e.target.value = '';
+      setIsSubmittingAttachment(false);
     }
   };
 
@@ -1011,14 +1087,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
           </div>
         )}
 
-        {/* Hidden File Input for Certified Invoice Attachment */}
-        <input
-          ref={attachmentInputRef}
-          type="file"
-          className="hidden"
-          accept=".pdf,.png,.jpg,.jpeg"
-          onChange={handleAttachmentFileSelected}
-        />
+
 
         {/* Main Data Table Container */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-300 overflow-hidden">
@@ -1196,7 +1265,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                               </button>
                             </>
                           )}
-                          {/* Certified Invoice Attachment UI (Paperclip vs Eye) */}
+                          {/* Certified Invoice Attachment UI (Paperclip vs Doc Badge) */}
                           {inv.certified_doc_view_url || inv.certified_doc_url || inv.certifiedDocUrl || (inv as any).view_url ? (
                             <button
                               type="button"
@@ -1208,15 +1277,12 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                                   title: `Invoice ${inv.invoiceNo} - Certified Attachment`,
                                 })
                               }
-                              className="text-teal-600 hover:text-teal-800 transition-colors p-1 cursor-pointer"
-                              title="View Certified Invoice Attachment"
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-700 hover:text-emerald-900 border border-emerald-300/80 hover:border-emerald-400 text-[11px] font-bold transition-all shadow-2xs cursor-pointer transform hover:scale-105"
+                              title="View Uploaded Certified Document"
                             >
-                              <Eye size={17} />
+                              <FileCheck size={13} className="text-emerald-600" />
+                              <span>Doc</span>
                             </button>
-                          ) : uploadingAttachmentId === inv.id ? (
-                            <span className="p-1" title="Uploading Attachment...">
-                              <Loader2 size={17} className="animate-spin text-teal-600" />
-                            </span>
                           ) : (
                             <button
                               type="button"
@@ -1441,9 +1507,9 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
       {/* Log Legacy Bill Modal */}
       {isLegacyModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden border border-gray-200 animate-in zoom-in-95 duration-150">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden border border-gray-200 animate-in zoom-in-95 duration-150">
             {/* Modal Header */}
-            <div className="bg-[#34495E] px-6 py-4 text-white flex justify-between items-center">
+            <div className="bg-[#34495E] px-6 py-4 text-white flex justify-between items-center shrink-0">
               <h3 className="font-bold text-base flex items-center gap-2">
                 {editingLegacyId ? <Edit2 className="w-5 h-5 text-[#20B2AA]" /> : <Plus className="w-5 h-5 text-[#20B2AA]" />}
                 <span>{editingLegacyId ? 'Edit Legacy Historical Bill' : 'Log Legacy Historical Bill'}</span>
@@ -1458,7 +1524,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
             </div>
 
             {/* Modal Form */}
-            <form onSubmit={handleSaveLegacyBill} className="p-6 space-y-4 text-xs">
+            <form onSubmit={handleSaveLegacyBill} className="p-6 space-y-4 text-xs overflow-y-auto flex-1">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] font-bold text-gray-700 mb-1">Invoice Type *</label>
@@ -1613,22 +1679,38 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                 </div>
               </div>
 
-              {/* Dashed Drag & Drop File Upload Zone */}
+              {/* Dashed Drag & Drop File Upload Zone & Mini Preview Screen */}
               <div>
-                <label className="block text-[11px] font-bold text-gray-700 mb-1">
-                  {editingLegacyId ? 'Bill Document (Optional to replace)' : 'Upload Bill Document *'}
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] font-bold text-gray-700">
+                    {editingLegacyId ? 'Bill Document (Optional to replace)' : 'Upload Bill Document *'}
+                  </label>
+                  {legacyFile && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setLegacyFile(null);
+                        if (legacyFileInputRef.current) legacyFileInputRef.current.value = '';
+                      }}
+                      className="text-[10px] text-red-500 hover:text-red-700 font-semibold cursor-pointer"
+                    >
+                      Clear File
+                    </button>
+                  )}
+                </div>
+
                 <div
                   onClick={() => legacyFileInputRef.current?.click()}
                   onDragOver={handleLegacyDragOver}
                   onDragEnter={handleLegacyDragOver}
                   onDragLeave={handleLegacyDragLeave}
                   onDrop={handleLegacyDrop}
-                  className={`border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-all ${
+                  className={`relative border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all ${
                     isLegacyDragging
-                      ? 'border-[#20B2AA] bg-teal-50/80 scale-[1.01] shadow-inner ring-2 ring-[#20B2AA]/20'
+                      ? 'border-[#20B2AA] bg-teal-50/90 scale-[1.01] shadow-inner ring-2 ring-[#20B2AA]/20'
                       : legacyFile
-                      ? 'border-green-400 bg-green-50/40 hover:bg-green-50/60'
+                      ? 'border-emerald-400 bg-emerald-50/30 hover:bg-emerald-50/50'
                       : editingLegacyId && legacyExistingDocUrl
                       ? 'border-teal-300 bg-teal-50/30 hover:bg-teal-50/50'
                       : 'border-gray-300 bg-slate-50 hover:border-[#20B2AA] hover:bg-slate-100/60'
@@ -1639,39 +1721,97 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                     type="file"
                     accept=".pdf,.png,.jpg,.jpeg,.webp"
                     className="hidden"
-                    onChange={(e) => e.target.files?.[0] && setLegacyFile(e.target.files[0])}
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        handleSelectLegacyFile(e.target.files[0]);
+                      }
+                    }}
                   />
+
                   {legacyFile ? (
-                    <div className="flex flex-col items-center gap-1">
-                      <FileCheck className="w-6 h-6 text-green-600" />
-                      <span className="font-bold text-gray-800 text-xs">{legacyFile.name}</span>
-                      <span className="text-[10px] text-gray-500 font-mono">
-                        {(legacyFile.size / 1024).toFixed(1)} KB • Click or drop new file to change
-                      </span>
+                    <div className="flex flex-col items-center gap-2">
+                      {/* Mini Preview Screen */}
+                      {legacyPreviewUrl && (legacyFile.type.startsWith('image/') || legacyFile.name.match(/\.(png|jpe?g|webp)$/i)) ? (
+                        <div className="relative w-full max-h-32 bg-slate-900/5 rounded-lg overflow-hidden flex items-center justify-center border border-emerald-200">
+                          <img
+                            src={legacyPreviewUrl}
+                            alt="Document Preview"
+                            className="max-h-28 max-w-full object-contain rounded"
+                          />
+                        </div>
+                      ) : (
+                        <div className="w-full py-3 px-4 bg-slate-100/80 rounded-lg flex items-center justify-between border border-slate-200 text-left">
+                          <div className="flex items-center gap-2 overflow-hidden">
+                            <FileText className="w-7 h-7 text-indigo-600 shrink-0" />
+                            <div className="truncate">
+                              <p className="font-bold text-gray-800 text-xs truncate">{legacyFile.name}</p>
+                              <p className="text-[10px] text-gray-500 font-mono">{(legacyFile.size / 1024).toFixed(1)} KB • PDF Document</p>
+                            </div>
+                          </div>
+                          {legacyPreviewUrl && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                window.open(legacyPreviewUrl, '_blank');
+                              }}
+                              className="px-2 py-1 bg-white hover:bg-gray-50 text-indigo-600 border border-gray-200 rounded text-[10px] font-semibold flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
+                            >
+                              <Eye size={12} />
+                              <span>View</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-center gap-1.5 text-[11px] text-emerald-700 font-semibold">
+                        <FileCheck className="w-4 h-4" />
+                        <span>Ready to upload: {legacyFile.name} ({(legacyFile.size / 1024).toFixed(1)} KB)</span>
+                      </div>
+                      <span className="text-[10px] text-gray-400">Click or drop another file to replace</span>
                     </div>
                   ) : editingLegacyId && legacyExistingDocUrl ? (
-                    <div className="flex flex-col items-center gap-1">
-                      <FileCheck className="w-6 h-6 text-teal-600" />
-                      <span className="text-xs font-bold text-teal-800">
-                        Existing document attached
-                      </span>
-                      <span className="text-[10px] text-gray-500">
-                        Click or drop new PDF/image to replace current file
-                      </span>
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="w-full py-2.5 px-3 bg-teal-50/80 rounded-lg flex items-center justify-between border border-teal-200 text-left">
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <FileCheck className="w-6 h-6 text-teal-600 shrink-0" />
+                          <div className="truncate">
+                            <p className="font-bold text-teal-900 text-xs">Existing document attached</p>
+                            <p className="text-[10px] text-teal-700">Currently saved bill document</p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setViewingDoc({
+                              id: editingLegacyId,
+                              url: legacyExistingDocUrl,
+                              fileName: `${legacyBillNumber || 'Legacy'}_Certified.pdf`,
+                              title: `Legacy Bill - Document Preview`,
+                            });
+                          }}
+                          className="px-2.5 py-1 bg-teal-600 hover:bg-teal-700 text-white rounded text-[10px] font-semibold flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
+                        >
+                          <Eye size={12} />
+                          <span>View Current</span>
+                        </button>
+                      </div>
+                      <span className="text-[10px] text-gray-500">Click or drag &amp; drop new PDF/image here to replace</span>
                     </div>
                   ) : (
-                    <div className="flex flex-col items-center gap-1">
-                      <UploadCloud className={`w-6 h-6 ${isLegacyDragging ? 'text-[#20B2AA] animate-bounce' : 'text-[#20B2AA]'}`} />
+                    <div className="flex flex-col items-center gap-1 pointer-events-none">
+                      <UploadCloud className={`w-7 h-7 ${isLegacyDragging ? 'text-[#20B2AA] scale-110' : 'text-[#20B2AA]'}`} />
                       <span className="text-xs font-bold text-gray-700">
-                        {isLegacyDragging ? 'Drop file here' : 'Drag & drop PDF/image or browse'}
+                        {isLegacyDragging ? 'Drop file here to attach' : 'Drag & drop PDF / image here or click to browse'}
                       </span>
-                      <span className="text-[10px] text-gray-400">PDF, PNG, JPG (Max 10MB)</span>
+                      <span className="text-[10px] text-gray-400">Supported: PDF, PNG, JPG, WEBP (Max 10MB)</span>
                     </div>
                   )}
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3 pt-2">
+              <div className="flex justify-end gap-3 pt-2 shrink-0">
                 <button
                   type="button"
                   onClick={() => setIsLegacyModalOpen(false)}
@@ -1691,6 +1831,162 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                     </>
                   ) : (
                     <span>{editingLegacyId ? 'Update Legacy Bill' : 'Save & Upload'}</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Upload Certified Attachment Modal Box */}
+      {attachmentModalInvoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden border border-gray-200 animate-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="bg-[#34495E] px-6 py-4 text-white flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-teal-500/20 rounded-lg text-[#20B2AA]">
+                  <Paperclip className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm leading-tight text-white">Attach Certified Bill Document</h3>
+                  <p className="text-[11px] text-gray-300 font-medium">
+                    Invoice #{attachmentModalInvoice.invoiceNo} • {attachmentModalInvoice.siteName || (attachmentModalInvoice as any).sites?.site_name || 'Site'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAttachmentModalInvoice(null)}
+                className="text-gray-300 hover:text-white transition-colors p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form onSubmit={handleUploadAttachmentSubmit} className="p-6 space-y-4 text-xs overflow-y-auto flex-1">
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[11px] font-bold text-gray-700">
+                    Upload Signed / Certified Document *
+                  </label>
+                  {attachmentModalFile && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setAttachmentModalFile(null);
+                        if (attachmentModalFileInputRef.current) attachmentModalFileInputRef.current.value = '';
+                      }}
+                      className="text-[10px] text-red-500 hover:text-red-700 font-semibold cursor-pointer"
+                    >
+                      Clear File
+                    </button>
+                  )}
+                </div>
+
+                <div
+                  onClick={() => attachmentModalFileInputRef.current?.click()}
+                  onDragOver={handleAttachmentDragOver}
+                  onDragEnter={handleAttachmentDragOver}
+                  onDragLeave={handleAttachmentDragLeave}
+                  onDrop={handleAttachmentDrop}
+                  className={`relative border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-all ${
+                    isAttachmentDragging
+                      ? 'border-[#20B2AA] bg-teal-50/90 scale-[1.01] shadow-inner ring-2 ring-[#20B2AA]/20'
+                      : attachmentModalFile
+                      ? 'border-emerald-400 bg-emerald-50/30 hover:bg-emerald-50/50'
+                      : 'border-gray-300 bg-slate-50 hover:border-[#20B2AA] hover:bg-slate-100/60'
+                  }`}
+                >
+                  <input
+                    ref={attachmentModalFileInputRef}
+                    type="file"
+                    accept=".pdf,.png,.jpg,.jpeg,.webp"
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        handleSelectAttachmentFile(e.target.files[0]);
+                      }
+                    }}
+                  />
+
+                  {attachmentModalFile ? (
+                    <div className="flex flex-col items-center gap-2">
+                      {/* Mini Preview Screen */}
+                      {attachmentModalPreviewUrl && (attachmentModalFile.type.startsWith('image/') || attachmentModalFile.name.match(/\.(png|jpe?g|webp)$/i)) ? (
+                        <div className="relative w-full max-h-36 bg-slate-900/5 rounded-lg overflow-hidden flex items-center justify-center border border-emerald-200">
+                          <img
+                            src={attachmentModalPreviewUrl}
+                            alt="Attachment Preview"
+                            className="max-h-32 max-w-full object-contain rounded"
+                          />
+                        </div>
+                      ) : (
+                        <div className="w-full py-3 px-4 bg-slate-100/80 rounded-lg flex items-center justify-between border border-slate-200 text-left">
+                          <div className="flex items-center gap-2 overflow-hidden">
+                            <FileText className="w-7 h-7 text-indigo-600 shrink-0" />
+                            <div className="truncate">
+                              <p className="font-bold text-gray-800 text-xs truncate">{attachmentModalFile.name}</p>
+                              <p className="text-[10px] text-gray-500 font-mono">{(attachmentModalFile.size / 1024).toFixed(1)} KB • PDF Document</p>
+                            </div>
+                          </div>
+                          {attachmentModalPreviewUrl && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                window.open(attachmentModalPreviewUrl, '_blank');
+                              }}
+                              className="px-2 py-1 bg-white hover:bg-gray-50 text-indigo-600 border border-gray-200 rounded text-[10px] font-semibold flex items-center gap-1 shadow-2xs cursor-pointer shrink-0"
+                            >
+                              <Eye size={12} />
+                              <span>View</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-center gap-1.5 text-[11px] text-emerald-700 font-semibold">
+                        <FileCheck className="w-4 h-4" />
+                        <span>Ready to attach: {attachmentModalFile.name} ({(attachmentModalFile.size / 1024).toFixed(1)} KB)</span>
+                      </div>
+                      <span className="text-[10px] text-gray-400">Click or drop another file to change</span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-1.5 pointer-events-none">
+                      <UploadCloud className={`w-8 h-8 ${isAttachmentDragging ? 'text-[#20B2AA] scale-110' : 'text-[#20B2AA]'}`} />
+                      <span className="text-xs font-bold text-gray-700">
+                        {isAttachmentDragging ? 'Drop document here to attach' : 'Drag & drop signed document or browse'}
+                      </span>
+                      <span className="text-[10px] text-gray-400">Supported formats: PDF, PNG, JPG, WEBP (Max 10MB)</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setAttachmentModalInvoice(null)}
+                  className="px-4 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingAttachment || !attachmentModalFile}
+                  className="px-5 py-2 rounded-lg bg-[#20B2AA] hover:bg-[#1ca19a] text-white font-bold transition-all shadow-sm disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isSubmittingAttachment ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Uploading &amp; Attaching...</span>
+                    </>
+                  ) : (
+                    <span>Upload &amp; Attach</span>
                   )}
                 </button>
               </div>
