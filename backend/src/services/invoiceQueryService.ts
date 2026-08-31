@@ -48,6 +48,10 @@ const InvoiceRowSchema = z.object({
   additionalCharges: z.any().optional().nullable(),
   is_material: z.boolean().optional().nullable(),
   is_locked: z.boolean().optional().nullable(),
+  is_legacy: z.boolean().optional().nullable(),
+  isLegacy: z.boolean().optional().nullable(),
+  legacy_uploaded_by: z.string().optional().nullable(),
+  legacy_notes: z.string().optional().nullable(),
   challan_no: z.string().optional().nullable(),
   challan_date: z.string().optional().nullable(),
   buyer_order_no: z.string().optional().nullable(),
@@ -199,6 +203,10 @@ export function mapRowToInvoiceRecord(rawRow: any): InvoiceRecord {
     is_material: row.is_material || row.payload?.isMaterial || false,
     is_locked: row.is_locked ?? false,
     isLocked: row.is_locked ?? false,
+    is_legacy: Boolean(row.is_legacy || row.isLegacy),
+    isLegacy: Boolean(row.is_legacy || row.isLegacy),
+    legacy_uploaded_by: row.legacy_uploaded_by || null,
+    legacy_notes: row.legacy_notes || '',
     storage_provider: (row.storage_provider || row.storageProvider) ? String(row.storage_provider || row.storageProvider) : null,
     storage_key: (row.storage_key || row.storageKey) ? String(row.storage_key || row.storageKey) : null,
     invoice_storage_provider: (row.invoice_storage_provider || row.invoiceStorageProvider) ? String(row.invoice_storage_provider || row.invoiceStorageProvider) : null,
@@ -1034,29 +1042,6 @@ export class InvoiceQueryService {
       certified_doc_confirmed_at: nowIso,
       invoice_storage_provider: 'minio',
       is_locked: false,
-      payload: {
-        entity: company.name,
-        meta: {
-          invoiceNo: finalInvoiceNo,
-          invoiceDate: lastDay,
-          billingPeriod: `${monthStr} ${yNum}`,
-          invoiceType,
-          isLegacy: true,
-        },
-        party: {
-          name: site?.client_name || site?.site_name || body.siteName || 'Legacy Client',
-          siteName: site?.site_name || body.siteName || 'Legacy Site',
-        },
-        items: [
-          {
-            id: 'item-1',
-            srNo: 1,
-            description: 'Legacy Bill (Historical Record)',
-            rate: numericAmount,
-            amount: numericAmount,
-          },
-        ],
-      },
       created_at: nowIso,
     };
 

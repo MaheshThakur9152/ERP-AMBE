@@ -1081,7 +1081,14 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                             </span>
                           )}
                         </div>
-                        <div className="text-xs text-gray-400 font-mono mt-0.5">{inv.invoiceNo}</div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-xs text-gray-400 font-mono">{inv.invoiceNo}</span>
+                          {(inv.is_legacy || (inv as any).isLegacy) && (
+                            <span className="bg-indigo-50 text-indigo-700 border border-indigo-200 rounded text-[9px] font-semibold px-1.5 py-0.5">
+                              Legacy
+                            </span>
+                          )}
+                        </div>
                         <div className="text-xs text-[#20B2AA] font-semibold mt-0.5">{displayMonthYear}</div>
                       </td>
 
@@ -1111,7 +1118,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                       <td className="p-4 py-3.5 text-right">
                         <div className="flex items-center justify-end gap-2 text-teal-600">
                           {/* Proforma Actions: Create Revision & Convert to Tax */}
-                          {inv.type === 'Proforma Invoice' && (
+                          {inv.type === 'Proforma Invoice' && !(inv.is_legacy || (inv as any).isLegacy) && (
                             <>
                               <button
                                 type="button"
@@ -1165,22 +1172,26 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                             </button>
                           )}
 
-                          <button
-                            type="button"
-                            onClick={() => handlePreview(inv)}
-                            className="hover:text-teal-800 transition-colors p-1"
-                            title="Preview Invoice"
-                          >
-                            <Eye size={17} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDownload(inv)}
-                            className="hover:text-teal-800 transition-colors p-1"
-                            title="Download PDF"
-                          >
-                            <Download size={17} />
-                          </button>
+                          {!(inv.is_legacy || (inv as any).isLegacy) && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handlePreview(inv)}
+                                className="hover:text-teal-800 transition-colors p-1"
+                                title="Preview Invoice"
+                              >
+                                <Eye size={17} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDownload(inv)}
+                                className="hover:text-teal-800 transition-colors p-1"
+                                title="Download PDF"
+                              >
+                                <Download size={17} />
+                              </button>
+                            </>
+                          )}
                           {/* Lock / Unlock Toggle Button for SuperAdmin or Indicator */}
                           {isSuperAdmin ? (
                             <button
@@ -1199,19 +1210,21 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                             </span>
                           ) : null}
 
-                          <button
-                            type="button"
-                            disabled={inv.is_locked && !isSuperAdmin}
-                            onClick={() => handleEdit(inv)}
-                            className={`p-1 transition-colors ${
-                              inv.is_locked && !isSuperAdmin
-                                ? 'opacity-30 cursor-not-allowed text-gray-300'
-                                : 'hover:text-teal-800'
-                            }`}
-                            title={inv.is_locked && !isSuperAdmin ? 'Invoice is locked by SuperAdmin' : 'Edit Invoice'}
-                          >
-                            <Edit2 size={17} />
-                          </button>
+                          {!(inv.is_legacy || (inv as any).isLegacy) && (
+                            <button
+                              type="button"
+                              disabled={inv.is_locked && !isSuperAdmin}
+                              onClick={() => handleEdit(inv)}
+                              className={`p-1 transition-colors ${
+                                inv.is_locked && !isSuperAdmin
+                                  ? 'opacity-30 cursor-not-allowed text-gray-300'
+                                  : 'hover:text-teal-800'
+                              }`}
+                              title={inv.is_locked && !isSuperAdmin ? 'Invoice is locked by SuperAdmin' : 'Edit Invoice'}
+                            >
+                              <Edit2 size={17} />
+                            </button>
+                          )}
                           <button
                             type="button"
                             disabled={inv.is_locked && !isSuperAdmin}

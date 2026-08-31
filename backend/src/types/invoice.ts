@@ -35,6 +35,10 @@ export interface InvoiceRecord {
   is_material?: boolean;
   is_locked?: boolean | null;
   isLocked?: boolean | null;
+  is_legacy?: boolean | null;
+  isLegacy?: boolean | null;
+  legacy_uploaded_by?: string | null;
+  legacy_notes?: string | null;
   sites?: {
 
     client_name?: string;
