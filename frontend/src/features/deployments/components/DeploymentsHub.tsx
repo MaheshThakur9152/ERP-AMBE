@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   Plus,
   Trash2,
+  X,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
@@ -41,6 +42,7 @@ export interface DeploymentRecord {
   employee_name?: string;
   shift?: string;
   role?: string;
+  rate_card_id?: string;
 }
 
 const MONTHS = [
@@ -73,9 +75,18 @@ export const DeploymentsHub: React.FC = () => {
 
   const [sites, setSites] = useState<SiteOption[]>([]);
   const [staffList, setStaffList] = useState<StaffOption[]>([]);
+  const [rateCards, setRateCards] = useState<any[]>([]);
   const [deployments, setDeployments] = useState<DeploymentRecord[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Active Assignment Modal Target
+  const [activeModal, setActiveModal] = useState<{
+    staff: StaffOption;
+    site: SiteOption;
+    existingDeployment?: DeploymentRecord;
+    selectedRateCardId: string;
+  } | null>(null);
 
   // Sync filters to localStorage
   useEffect(() => {
@@ -98,8 +109,15 @@ export const DeploymentsHub: React.FC = () => {
         } else if (stData) {
           setStaffList(stData);
         }
+
+        const { data: rcData, error: rcErr } = await supabase.from('rate_cards').select('*');
+        if (rcErr) {
+          console.warn('Error fetching rate cards:', rcErr);
+        } else if (rcData) {
+          setRateCards(rcData);
+        }
       } catch (err) {
-        console.error('Failed to load master sites/staff:', err);
+        console.error('Failed to load master sites/staff/rate_cards:', err);
       }
     };
     fetchMasterData();
@@ -167,84 +185,109 @@ export const DeploymentsHub: React.FC = () => {
     return list;
   }, [staffList, selectedSiteId, searchQuery, deploymentMap]);
 
-  // Instant Toggle Assignment Handler
-  const handleToggleDeployment = async (staff: StaffOption, site: SiteOption) => {
+  // Open Assign / Edit Modal for Cell
+  const handleOpenAssignModal = (staff: StaffOption, site: SiteOption) => {
     const key = `${staff.id}_${site.id}`;
     const existing = deploymentMap.get(key);
+
+    const siteRateCards = rateCards.filter(
+      (rc) => rc.site_id === site.id || rc.site_name === site.site_name
+    );
+    const desig = (staff.designation || '').toLowerCase().trim();
+    const matchingCard = siteRateCards.find(
+      (rc) => (rc.post_name || rc.designation || '').toLowerCase().trim() === desig
+    );
+    const defaultRateCardId = existing?.rate_card_id || matchingCard?.id || siteRateCards[0]?.id || '';
+
+    setActiveModal({
+      staff,
+      site,
+      existingDeployment: existing,
+      selectedRateCardId: defaultRateCardId,
+    });
+  };
+
+  // Save / Update Deployment from Modal
+  const handleSaveDeployment = async () => {
+    if (!activeModal) return;
+    const { staff, site, existingDeployment, selectedRateCardId } = activeModal;
     const monthYearStr = `${selectedMonth} ${selectedYear}`;
     const empName = staff.employee_name || staff.name || 'Worker';
     const empId = staff.biometric_code || staff.biometricCode || staff.id.substring(0, 6);
 
     try {
-      if (existing) {
-        // Uncheck -> Remove Deployment
-        const { error } = await supabase
-          .from('site_deployments')
-          .delete()
-          .eq('month_year', monthYearStr)
-          .eq('staff_id', staff.id)
-          .eq('site_id', site.id);
+      const record: DeploymentRecord = {
+        ...(existingDeployment || {}),
+        month_year: monthYearStr,
+        site_id: site.id,
+        site_name: site.site_name,
+        staff_id: staff.id,
+        emp_id: empId,
+        employee_name: empName,
+        shift: existingDeployment?.shift || 'Day',
+        role: staff.designation || 'Staff',
+        rate_card_id: selectedRateCardId || undefined,
+      };
 
-        if (error) {
-          console.error('Failed to remove deployment:', error);
-          alert(`Error removing deployment: ${error.message}`);
-        } else {
-          setDeployments((prev) => prev.filter((d) => !(d.staff_id === staff.id && d.site_id === site.id)));
-          setStatusMessage({ type: 'success', text: `Removed ${empName} from ${site.code_name || site.site_name}` });
-        }
-      } else {
-        // Check -> Add Deployment
-        const newRecord: DeploymentRecord = {
-          month_year: monthYearStr,
-          site_id: site.id,
-          site_name: site.site_name,
-          staff_id: staff.id,
-          emp_id: empId,
-          employee_name: empName,
-          shift: 'Day',
-          role: staff.designation || 'Staff',
-        };
-
-        const { error } = await supabase.from('site_deployments').upsert([newRecord], {
-          onConflict: 'month_year,site_id,staff_id',
-        });
-
-        if (error) {
-          console.error('Failed to add deployment:', error);
-          alert(`Failed to deploy! ${error.message}`);
-        } else {
-          setDeployments((prev) => [...prev, newRecord]);
-          setStatusMessage({ type: 'success', text: `Deployed ${empName} to ${site.code_name || site.site_name}` });
-        }
-      }
-    } catch (err: any) {
-      console.error('Deployment toggle error:', err);
-      alert(`Error: ${err.message}`);
-    }
-  };
-
-  // Change Shift for deployed worker
-  const handleChangeShift = async (staffId: string, siteId: string, shift: string) => {
-    const key = `${staffId}_${siteId}`;
-    const existing = deploymentMap.get(key);
-    if (!existing) return;
-
-    try {
-      const updated = { ...existing, shift };
-      const { error } = await supabase.from('site_deployments').upsert([updated], {
+      const { error } = await supabase.from('site_deployments').upsert([record], {
         onConflict: 'month_year,site_id,staff_id',
       });
 
       if (error) {
-        console.error('Shift update error:', error);
+        console.error('Failed to assign deployment:', error);
+        alert(`Failed to deploy! ${error.message}`);
       } else {
-        setDeployments((prev) =>
-          prev.map((d) => (d.staff_id === staffId && d.site_id === siteId ? updated : d))
-        );
+        setDeployments((prev) => {
+          const filtered = prev.filter((d) => !(d.staff_id === staff.id && d.site_id === site.id));
+          return [...filtered, record];
+        });
+        setStatusMessage({
+          type: 'success',
+          text: `Deployed ${empName} to ${site.code_name || site.site_name}`,
+        });
+        setActiveModal(null);
       }
     } catch (err: any) {
-      console.error('Shift error:', err);
+      console.error('Deployment save error:', err);
+      alert(`Error: ${err.message}`);
     }
+  };
+
+  // Remove Deployment from Modal or List
+  const handleRemoveDeployment = async () => {
+    if (!activeModal) return;
+    const { staff, site } = activeModal;
+    const monthYearStr = `${selectedMonth} ${selectedYear}`;
+    const empName = staff.employee_name || staff.name || 'Worker';
+
+    try {
+      const { error } = await supabase
+        .from('site_deployments')
+        .delete()
+        .eq('month_year', monthYearStr)
+        .eq('staff_id', staff.id)
+        .eq('site_id', site.id);
+
+      if (error) {
+        console.error('Failed to remove deployment:', error);
+        alert(`Error removing deployment: ${error.message}`);
+      } else {
+        setDeployments((prev) => prev.filter((d) => !(d.staff_id === staff.id && d.site_id === site.id)));
+        setStatusMessage({
+          type: 'success',
+          text: `Removed ${empName} from ${site.code_name || site.site_name}`,
+        });
+        setActiveModal(null);
+      }
+    } catch (err: any) {
+      console.error('Deployment delete error:', err);
+      alert(`Error: ${err.message}`);
+    }
+  };
+
+  // Count active deployments for staff in current month
+  const deploymentCountForStaff = (staffId: string) => {
+    return deployments.filter((d) => d.staff_id === staffId).length;
   };
 
   // Active Site List for columns
@@ -429,20 +472,38 @@ export const DeploymentsHub: React.FC = () => {
                 {filteredStaff.map((staff) => {
                   const empName = staff.employee_name || staff.name || 'Worker';
                   const empId = staff.biometric_code || staff.biometricCode || staff.id.substring(0, 6);
+                  const splitCount = deploymentCountForStaff(staff.id);
 
                   return (
                     <tr key={staff.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="p-3 font-sans">
-                        <div className="font-bold text-gray-900">{empName}</div>
+                        <div className="font-bold text-gray-900 flex items-center flex-wrap gap-1">
+                          <span>{empName}</span>
+                          {splitCount >= 2 && (
+                            <span className="px-1.5 py-0.5 rounded text-[8.5px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                              Split — {splitCount} sites
+                            </span>
+                          )}
+                        </div>
                         <div className="text-[10px] text-gray-400 font-mono">
                           {empId} • <span className="text-gray-500 font-semibold">{staff.designation || 'Staff'}</span>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenAssignModal(staff, activeSites[0] || sites[0])}
+                          className="mt-1 px-2 py-0.5 text-[9.5px] font-bold text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-200 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1"
+                        >
+                          <Plus className="w-2.5 h-2.5" />
+                          Assign to Site
+                        </button>
                       </td>
 
                       {activeSites.map((site) => {
                         const key = `${staff.id}_${site.id}`;
                         const isDeployed = deploymentMap.has(key);
                         const rec = deploymentMap.get(key);
+                        const assignedRateCard = rec?.rate_card_id ? rateCards.find((rc) => rc.id === rec.rate_card_id) : null;
+                        const label = assignedRateCard?.post_name || assignedRateCard?.designation || rec?.role || 'Assigned';
 
                         return (
                           <td
@@ -451,30 +512,25 @@ export const DeploymentsHub: React.FC = () => {
                               isDeployed ? 'bg-teal-50/40' : ''
                             }`}
                           >
-                            <div className="flex flex-col items-center justify-center gap-1.5">
-                              <label className="inline-flex items-center gap-2 cursor-pointer select-none">
-                                <input
-                                  type="checkbox"
-                                  checked={isDeployed}
-                                  onChange={() => handleToggleDeployment(staff, site)}
-                                  className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500 cursor-pointer"
-                                />
-                                <span className={`text-[10px] font-bold ${isDeployed ? 'text-teal-900' : 'text-gray-400'}`}>
-                                  {isDeployed ? 'Deployed' : 'Off'}
-                                </span>
-                              </label>
-
-                              {/* Shift Selector dropdown if deployed */}
-                              {isDeployed && (
-                                <select
-                                  value={rec?.shift || 'Day'}
-                                  onChange={(e) => handleChangeShift(staff.id, site.id, e.target.value)}
-                                  className="text-[9.5px] font-semibold bg-white border border-teal-300 rounded px-1.5 py-0.5 text-teal-900 shadow-2xs outline-none cursor-pointer"
+                            <div className="flex flex-col items-center justify-center">
+                              {isDeployed ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenAssignModal(staff, site)}
+                                  className="px-2.5 py-1 text-[10px] font-bold bg-teal-600 hover:bg-teal-700 text-white rounded-lg transition-all shadow-xs flex items-center gap-1 justify-center max-w-[130px] truncate cursor-pointer"
+                                  title={`Assigned to ${site.site_name} - Click to edit or remove`}
                                 >
-                                  {SHIFTS.map((s) => (
-                                    <option key={s.id} value={s.id}>{s.id} Shift</option>
-                                  ))}
-                                </select>
+                                  <CheckCircle className="w-3 h-3 flex-shrink-0" />
+                                  <span className="truncate">{label}</span>
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenAssignModal(staff, site)}
+                                  className="px-2.5 py-1 text-[10px] font-semibold text-gray-500 hover:text-teal-700 bg-white hover:bg-teal-50 border border-gray-200 hover:border-teal-300 rounded-lg transition-all shadow-2xs cursor-pointer"
+                                >
+                                  Assign
+                                </button>
                               )}
                             </div>
                           </td>
@@ -523,10 +579,29 @@ export const DeploymentsHub: React.FC = () => {
                     <td className="p-3 text-center">
                       <button
                         type="button"
-                        onClick={() => {
-                          const staff = staffList.find((s) => s.id === d.staff_id) || { id: d.staff_id, name: d.employee_name };
-                          const site = sites.find((s) => s.id === d.site_id) || { id: d.site_id, site_name: d.site_name || 'Site' };
-                          handleToggleDeployment(staff, site);
+                        onClick={async () => {
+                          try {
+                            const { error } = await supabase
+                              .from('site_deployments')
+                              .delete()
+                              .eq('month_year', d.month_year)
+                              .eq('staff_id', d.staff_id)
+                              .eq('site_id', d.site_id);
+
+                            if (error) {
+                              alert(`Failed to remove: ${error.message}`);
+                            } else {
+                              setDeployments((prev) =>
+                                prev.filter((dep) => !(dep.staff_id === d.staff_id && dep.site_id === d.site_id))
+                              );
+                              setStatusMessage({
+                                type: 'success',
+                                text: `Removed ${d.employee_name} from ${d.site_name}`,
+                              });
+                            }
+                          } catch (err: any) {
+                            alert(`Error: ${err.message}`);
+                          }
                         }}
                         className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 transition-colors cursor-pointer"
                         title="Remove Deployment"
@@ -541,6 +616,135 @@ export const DeploymentsHub: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Assignment Modal */}
+      {activeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 border-b border-gray-100 bg-slate-50/80">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center font-bold flex-shrink-0">
+                  <Building2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-gray-900 leading-tight">
+                    {activeModal.staff.employee_name || activeModal.staff.name || 'Worker'}
+                  </h3>
+                  <p className="text-[10px] text-gray-500 font-medium mt-0.5">
+                    → {activeModal.site.code_name || activeModal.site.site_name} ({selectedMonth} {selectedYear})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveModal(null)}
+                className="p-1 text-gray-400 hover:text-gray-700 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4 space-y-3">
+              <div>
+                <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                  Site
+                </label>
+                <select
+                  value={activeModal.site.id}
+                  onChange={(e) => {
+                    const newSite = sites.find((s) => s.id === e.target.value);
+                    if (!newSite) return;
+                    const key = `${activeModal.staff.id}_${newSite.id}`;
+                    const existing = deploymentMap.get(key);
+                    const siteRateCards = rateCards.filter(
+                      (rc) => rc.site_id === newSite.id || rc.site_name === newSite.site_name
+                    );
+                    const desig = (activeModal.staff.designation || '').toLowerCase().trim();
+                    const matchingCard = siteRateCards.find(
+                      (rc) => (rc.post_name || rc.designation || '').toLowerCase().trim() === desig
+                    );
+                    setActiveModal({
+                      ...activeModal,
+                      site: newSite,
+                      existingDeployment: existing,
+                      selectedRateCardId: existing?.rate_card_id || matchingCard?.id || siteRateCards[0]?.id || '',
+                    });
+                  }}
+                  className="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-medium text-gray-800 shadow-2xs outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 cursor-pointer"
+                >
+                  {sites.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.code_name || s.site_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                  Rate Card
+                </label>
+                <select
+                  value={activeModal.selectedRateCardId}
+                  onChange={(e) =>
+                    setActiveModal((prev) =>
+                      prev ? { ...prev, selectedRateCardId: e.target.value } : null
+                    )
+                  }
+                  className="w-full bg-white border border-gray-300 rounded-xl px-3 py-2 text-xs font-medium text-gray-800 shadow-2xs outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 cursor-pointer"
+                >
+                  <option value="">Default Site Rate Card</option>
+                  {rateCards
+                    .filter(
+                      (rc) =>
+                        rc.site_id === activeModal.site.id ||
+                        rc.site_name === activeModal.site.site_name
+                    )
+                    .map((rc) => (
+                      <option key={rc.id} value={rc.id}>
+                        {rc.post_name || rc.designation || 'Rate'} (Gross: ₹{(rc.gross_salary || rc.basic_da || 0).toLocaleString('en-IN')})
+                      </option>
+                    ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-between p-4 bg-slate-50 border-t border-gray-100">
+              {activeModal.existingDeployment ? (
+                <button
+                  type="button"
+                  onClick={handleRemoveDeployment}
+                  className="text-red-600 hover:text-red-700 text-xs font-bold hover:underline transition-all cursor-pointer"
+                >
+                  Remove Deployment
+                </button>
+              ) : (
+                <div />
+              )}
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveModal(null)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold text-gray-600 hover:bg-gray-100 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveDeployment}
+                  className="px-4 py-1.5 rounded-xl text-xs font-bold bg-teal-600 hover:bg-teal-700 text-white shadow-xs transition-all cursor-pointer"
+                >
+                  {activeModal.existingDeployment ? 'Update' : 'Assign'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

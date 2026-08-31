@@ -50,6 +50,7 @@ export interface EmployeePayrollRow {
   calc: PayrollCalculationResult | null;
   isSaved?: boolean;
   isPaid: boolean;
+  isSplitDeployment?: boolean;
 }
 
 export interface SiteOption {
@@ -141,26 +142,47 @@ export const PayrollHub: React.FC = () => {
     setStatusMessage(null);
     setSelectedIds(new Set());
     try {
-      // 1. Fetch Staff assigned to site joined with rate_cards & monthly site_deployments
-      let deployedStaffIds: string[] = [];
-      if (selectedSiteId !== 'all') {
-        try {
-          const monthYearStr = `${selectedMonth} ${selectedYear}`;
-          const { data: depData } = await supabase
-            .from('site_deployments')
-            .select('staff_id')
-            .eq('month_year', monthYearStr)
-            .eq('site_id', selectedSiteId);
-          if (depData && depData.length > 0) {
-            deployedStaffIds = depData.map((d: any) => d.staff_id);
-          }
-        } catch (depErr) {
-          console.warn('site_deployments check skipped:', depErr);
-        }
+      const monthYearStr = `${selectedMonth} ${selectedYear}`;
+
+      // 1. Fetch all site deployments for this month_year across ALL sites
+      let allDeployments: any[] = [];
+      try {
+        const { data: depData } = await supabase
+          .from('site_deployments')
+          .select('*')
+          .eq('month_year', monthYearStr);
+        if (depData) allDeployments = depData;
+      } catch (depErr) {
+        console.warn('site_deployments check skipped:', depErr);
       }
 
+      // Map deployments by staff_id
+      const staffDeploymentsMap = new Map<string, any[]>();
+      allDeployments.forEach((d) => {
+        if (!staffDeploymentsMap.has(d.staff_id)) {
+          staffDeploymentsMap.set(d.staff_id, []);
+        }
+        staffDeploymentsMap.get(d.staff_id)!.push(d);
+      });
+
+      // 2. Fetch all rate cards to support split deployment rate cards
+      let allRateCards: any[] = [];
+      try {
+        const { data: rcData } = await supabase.from('rate_cards').select('*');
+        if (rcData) allRateCards = rcData;
+      } catch (rcErr) {
+        console.warn('rate_cards fetch error:', rcErr);
+      }
+      const rateCardsById = new Map<string, any>();
+      allRateCards.forEach((rc) => rateCardsById.set(rc.id, rc));
+
+      // 3. Fetch Staff query
       let staffQuery = supabase.from('staff').select('*, rate_cards(*), sites(site_name, code_name, company_id, companies(id, name))');
       if (selectedSiteId !== 'all') {
+        const deployedStaffIds = allDeployments
+          .filter((d) => d.site_id === selectedSiteId)
+          .map((d) => d.staff_id);
+
         if (deployedStaffIds.length > 0) {
           staffQuery = staffQuery.or(`site_id.eq.${selectedSiteId},id.in.(${deployedStaffIds.join(',')})`);
         } else {
@@ -175,10 +197,9 @@ export const PayrollHub: React.FC = () => {
 
       const staffList = staffData || [];
 
-      // 2. Fetch existing saved payroll records for month_year
+      // 4. Fetch existing saved payroll records for month_year
       let payrollRecordsMap = new Map<string, any>();
       try {
-        const monthYearStr = `${selectedMonth} ${selectedYear}`;
         const { data: savedRecs } = await supabase
           .from('payroll_records')
           .select('*')
@@ -186,20 +207,39 @@ export const PayrollHub: React.FC = () => {
 
         if (savedRecs) {
           savedRecs.forEach((r: any) => {
-            const key = r.staff_id || r.employee_id || r.emp_id;
-            if (key) payrollRecordsMap.set(key, r);
+            const staffKey = r.staff_id || r.employee_id || r.emp_id;
+            if (staffKey) {
+              if (r.site_id) {
+                payrollRecordsMap.set(`${staffKey}_${r.site_id}`, r);
+              }
+              if (!payrollRecordsMap.has(staffKey)) {
+                payrollRecordsMap.set(staffKey, r);
+              }
+            }
           });
         }
       } catch (e) {
         console.warn('payroll_records table query skipped or failed:', e);
       }
 
-      // 3. Map into UI state using real database rate cards & saved values
-      const initialRows: EmployeePayrollRow[] = staffList.map((emp: any, index: number) => {
-        const saved = payrollRecordsMap.get(emp.id) || payrollRecordsMap.get(emp.biometric_code) || payrollRecordsMap.get(emp.biometricCode);
-        const pd = saved?.pd ?? saved?.present_days ?? 26;
+      // Helper function to build EmployeePayrollRow from staff, site info, rateCard, and default/saved values
+      const buildPayrollRow = (
+        emp: any,
+        index: number,
+        targetSiteId: string,
+        targetSiteName: string,
+        targetRateCard: RateCard | null,
+        defaultPd: number,
+        isSplit: boolean
+      ): EmployeePayrollRow => {
+        const saved =
+          payrollRecordsMap.get(`${emp.id}_${targetSiteId}`) ||
+          payrollRecordsMap.get(`${emp.biometric_code}_${targetSiteId}`) ||
+          (!isSplit ? (payrollRecordsMap.get(emp.id) || payrollRecordsMap.get(emp.biometric_code) || payrollRecordsMap.get(emp.biometricCode)) : null);
+
+        const pd = saved?.pd ?? saved?.present_days ?? defaultPd;
         const wo = saved?.wo ?? saved?.weekly_offs ?? 4;
-        
+
         // Itemized Advance & Uniform Ledger Mapping
         const adv_amt = Number(saved?.adv_amt || 0);
         const shirt = Number(saved?.shirt || 0);
@@ -216,13 +256,13 @@ export const PayrollHub: React.FC = () => {
         const advances = in_this_mth;
 
         const isPaid = saved?.is_paid ?? false;
-        const rateCard: RateCard | null = emp.rate_cards
+        const rateCard: RateCard | null = targetRateCard
           ? {
-              ...emp.rate_cards,
+              ...targetRateCard,
               part_bonus_percent:
                 saved?.part_bonus_percent_snapshot !== undefined && saved?.part_bonus_percent_snapshot !== null
                   ? Number(saved.part_bonus_percent_snapshot)
-                  : Number(emp.rate_cards.part_bonus_percent || 0),
+                  : Number(targetRateCard.part_bonus_percent || 0),
             }
           : null;
         const calc = calculatePayroll(rateCard, emp, pd, wo, daysInMonth, advances);
@@ -232,8 +272,8 @@ export const PayrollHub: React.FC = () => {
           empId: emp.biometric_code || emp.biometricCode || emp.id?.substring(0, 6) || `EMP${index + 1}`,
           name: emp.employee_name || emp.name || 'Unnamed Employee',
           designation: emp.designation || emp.role || 'Staff',
-          siteId: emp.site_id || selectedSiteId,
-          siteName: emp.sites?.site_name || emp.site_name || 'General Site',
+          siteId: targetSiteId,
+          siteName: targetSiteName,
           rateCard,
           empRaw: emp,
           pd,
@@ -253,7 +293,96 @@ export const PayrollHub: React.FC = () => {
           calc,
           isSaved: !!saved,
           isPaid,
+          isSplitDeployment: isSplit,
         };
+      };
+
+      // 5. Generate UI state rows
+      const initialRows: EmployeePayrollRow[] = [];
+
+      staffList.forEach((emp: any, index: number) => {
+        const staffDeps = staffDeploymentsMap.get(emp.id) || [];
+
+        if (staffDeps.length >= 2) {
+          // Split deployment: 1 row per deployment
+          const filteredDeps =
+            selectedSiteId === 'all'
+              ? staffDeps
+              : staffDeps.filter((d) => d.site_id === selectedSiteId);
+
+          filteredDeps.forEach((dep) => {
+            // Determine rate card for deployment
+            let depRateCard: any = null;
+            if (dep.rate_card_id && rateCardsById.has(dep.rate_card_id)) {
+              depRateCard = rateCardsById.get(dep.rate_card_id);
+            } else {
+              // Find matching site rate card
+              const desig = (emp.designation || '').toLowerCase().trim();
+              const siteCards = allRateCards.filter(
+                (rc) => rc.site_id === dep.site_id || (dep.site_name && rc.site_name === dep.site_name)
+              );
+              depRateCard =
+                siteCards.find((rc) => (rc.post_name || rc.designation || '').toLowerCase().trim() === desig) ||
+                siteCards[0] ||
+                emp.rate_cards ||
+                null;
+            }
+
+            const siteName =
+              dep.site_name ||
+              sites.find((s) => s.id === dep.site_id)?.site_name ||
+              'Site';
+
+            const defaultPd = 26;
+
+            initialRows.push(
+              buildPayrollRow(
+                emp,
+                index,
+                dep.site_id,
+                siteName,
+                depRateCard,
+                defaultPd,
+                true
+              )
+            );
+          });
+        } else {
+          // 0 or 1 deployment: behaves as single-site staff
+          const dep = staffDeps[0];
+          const targetSiteId = dep ? dep.site_id : (emp.site_id || selectedSiteId);
+          
+          // If filtering by specific site, only include if matches targetSiteId
+          if (selectedSiteId !== 'all' && targetSiteId !== selectedSiteId) {
+            return;
+          }
+
+          const targetSiteName =
+            (dep && dep.site_name) ||
+            emp.sites?.site_name ||
+            emp.site_name ||
+            sites.find((s) => s.id === targetSiteId)?.site_name ||
+            'General Site';
+
+          let targetRateCard = emp.rate_cards;
+          if (dep?.rate_card_id && rateCardsById.has(dep.rate_card_id)) {
+            targetRateCard = rateCardsById.get(dep.rate_card_id);
+          }
+
+          const defaultPd = 26;
+
+          initialRows.push(
+            buildPayrollRow(
+              emp,
+              index,
+              targetSiteId,
+              targetSiteName,
+              targetRateCard,
+              defaultPd,
+              false
+            )
+          );
+        }
       });
 
       // Segregate / sort by post (designation) first, then by employee name
@@ -277,7 +406,7 @@ export const PayrollHub: React.FC = () => {
     loadPayrollData();
   }, [selectedMonth, selectedYear, selectedSiteId, daysInMonth]);
 
-  // Instant Auto-Save onBlur Handler matching DB unique constraint (month_year, staff_id)
+  // Instant Auto-Save onBlur Handler matching DB unique constraint (month_year, staff_id, site_id)
   const handleAutoSave = async (row: EmployeePayrollRow) => {
     if (!row.calc) return;
     try {
@@ -340,7 +469,7 @@ export const PayrollHub: React.FC = () => {
       console.log('SAVING total_net_salary:', row.name, row.calc.totalNetSalary, recordToSave.total_net_salary);
 
       const { error: fullError } = await supabase.from('payroll_records').upsert([recordToSave], {
-        onConflict: 'month_year,staff_id',
+        onConflict: 'month_year,staff_id,site_id',
       });
 
       if (fullError) {
@@ -366,17 +495,17 @@ export const PayrollHub: React.FC = () => {
         delete fallbackRecord.total_net_salary;
 
         const { error: fallbackError } = await supabase.from('payroll_records').upsert([fallbackRecord], {
-          onConflict: 'month_year,staff_id',
+          onConflict: 'month_year,staff_id,site_id',
         });
 
         if (fallbackError) {
           console.error('Supabase Upsert Error:', fallbackError);
           alert(`Failed to save! Supabase says: ${fallbackError.message}`);
         } else {
-          setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, isSaved: true } : r)));
+          setRows((prev) => prev.map((r) => (r.id === row.id && r.siteId === row.siteId ? { ...r, isSaved: true } : r)));
         }
       } else {
-        setRows((prev) => prev.map((r) => (r.id === row.id ? { ...r, isSaved: true } : r)));
+        setRows((prev) => prev.map((r) => (r.id === row.id && r.siteId === row.siteId ? { ...r, isSaved: true } : r)));
       }
     } catch (err: any) {
       console.error('Auto-save error:', err);
@@ -481,7 +610,7 @@ export const PayrollHub: React.FC = () => {
       isSaved: false,
     };
 
-    setRows((prev) => prev.map((r) => (r.id === activeAdvanceRow.id ? updatedRow : r)));
+    setRows((prev) => prev.map((r) => (r.id === activeAdvanceRow.id && r.siteId === activeAdvanceRow.siteId ? updatedRow : r)));
     await handleAutoSave(updatedRow);
     setActiveAdvanceRow(null);
   };
@@ -515,7 +644,7 @@ export const PayrollHub: React.FC = () => {
 
   // Bulk Mark Selected Employees as PAID
   const handleMarkSelectedAsPaid = async () => {
-    const selectedRows = rows.filter((r) => selectedIds.has(r.id) && r.calc !== null);
+    const selectedRows = rows.filter((r) => selectedIds.has(`${r.id}_${r.siteId}`) && r.calc !== null);
     if (!selectedRows.length) return;
 
     try {
@@ -566,7 +695,7 @@ export const PayrollHub: React.FC = () => {
       }));
 
       const { error } = await supabase.from('payroll_records').upsert(recordsToSave, {
-        onConflict: 'month_year,staff_id',
+        onConflict: 'month_year,staff_id,site_id',
       });
 
       if (error) {
@@ -574,7 +703,7 @@ export const PayrollHub: React.FC = () => {
         alert(`Failed to mark paid: ${error.message}`);
       } else {
         setRows((prev) =>
-            prev.map((r) => (selectedIds.has(r.id) ? { ...r, isPaid: true, isSaved: true } : r))
+            prev.map((r) => (selectedIds.has(`${r.id}_${r.siteId}`) ? { ...r, isPaid: true, isSaved: true } : r))
         );
         setSelectedIds(new Set());
         setStatusMessage({
@@ -590,7 +719,7 @@ export const PayrollHub: React.FC = () => {
 
   // Export Axis Payout Excel for selected employees
   const handleExportAxis = async () => {
-    const selectedRows = rows.filter((r) => selectedIds.has(r.id) && r.calc !== null);
+    const selectedRows = rows.filter((r) => selectedIds.has(`${r.id}_${r.siteId}`) && r.calc !== null);
     if (!selectedRows.length) return;
 
     const missingBank = selectedRows.filter(
@@ -646,33 +775,33 @@ export const PayrollHub: React.FC = () => {
   };
 
   // Live input handlers for PD, WO, Advances
-  const handlePdChange = (id: string, newPd: number) => {
+  const handlePdChange = (id: string, siteId: string, newPd: number) => {
     const pdVal = Math.max(0, Math.min(daysInMonth, newPd));
     setRows((prevRows) =>
       prevRows.map((row) => {
-        if (row.id !== id) return row;
+        if (row.id !== id || row.siteId !== siteId) return row;
         const updatedCalc = calculatePayroll(row.rateCard, row.empRaw, pdVal, row.wo, daysInMonth, row.advances);
         return { ...row, pd: pdVal, calc: updatedCalc, isSaved: false };
       })
     );
   };
 
-  const handleWoChange = (id: string, newWo: number) => {
+  const handleWoChange = (id: string, siteId: string, newWo: number) => {
     const woVal = Math.max(0, Math.min(daysInMonth, newWo));
     setRows((prevRows) =>
       prevRows.map((row) => {
-        if (row.id !== id) return row;
+        if (row.id !== id || row.siteId !== siteId) return row;
         const updatedCalc = calculatePayroll(row.rateCard, row.empRaw, row.pd, woVal, daysInMonth, row.advances);
         return { ...row, wo: woVal, calc: updatedCalc, isSaved: false };
       })
     );
   };
 
-  const handleAdvancesChange = (id: string, newAdv: number) => {
+  const handleAdvancesChange = (id: string, siteId: string, newAdv: number) => {
     const advVal = Math.max(0, newAdv);
     setRows((prevRows) =>
       prevRows.map((row) => {
-        if (row.id !== id) return row;
+        if (row.id !== id || row.siteId !== siteId) return row;
         const updatedCalc = calculatePayroll(row.rateCard, row.empRaw, row.pd, row.wo, daysInMonth, advVal);
         return {
           ...row,
@@ -1043,16 +1172,16 @@ export const PayrollHub: React.FC = () => {
                       type="checkbox"
                       checked={
                         displayedRows.filter((r) => r.calc !== null).length > 0 &&
-                        displayedRows.filter((r) => r.calc !== null).every((r) => selectedIds.has(r.id))
+                        displayedRows.filter((r) => r.calc !== null).every((r) => selectedIds.has(`${r.id}_${r.siteId}`))
                       }
                       onChange={(e) => {
                         if (e.target.checked) {
                           const newIds = new Set(selectedIds);
-                          displayedRows.filter((r) => r.calc !== null).forEach((r) => newIds.add(r.id));
+                          displayedRows.filter((r) => r.calc !== null).forEach((r) => newIds.add(`${r.id}_${r.siteId}`));
                           setSelectedIds(newIds);
                         } else {
                           const newIds = new Set(selectedIds);
-                          displayedRows.forEach((r) => newIds.delete(r.id));
+                          displayedRows.forEach((r) => newIds.delete(`${r.id}_${r.siteId}`));
                           setSelectedIds(newIds);
                         }
                       }}
@@ -1098,9 +1227,10 @@ export const PayrollHub: React.FC = () => {
                   const postStaffCount = displayedRows.filter(
                     (r) => (r.designation || 'Unassigned').trim().toUpperCase() === currentPost.toUpperCase()
                   ).length;
+                  const rowKey = `${row.id}_${row.siteId}`;
 
                   return (
-                    <React.Fragment key={row.id}>
+                    <React.Fragment key={rowKey}>
                       {isNewGroup && (
                         <tr className="bg-slate-100/90 border-y border-slate-200 text-slate-800 font-sans">
                           <td colSpan={22} className="py-2 px-3">
@@ -1119,7 +1249,7 @@ export const PayrollHub: React.FC = () => {
                         </tr>
                       )}
                       <tr
-                        key={row.id}
+                        key={rowKey}
                         className={`transition-colors ${
                           row.isPaid ? 'bg-emerald-50/30 hover:bg-emerald-50/60' : 'hover:bg-slate-50/80'
                         }`}
@@ -1127,14 +1257,14 @@ export const PayrollHub: React.FC = () => {
                     <td className="p-3 text-center">
                       <input
                         type="checkbox"
-                        checked={selectedIds.has(row.id)}
+                        checked={selectedIds.has(rowKey)}
                         disabled={!row.calc}
                         onChange={(e) => {
                           const newSet = new Set(selectedIds);
                           if (e.target.checked) {
-                            newSet.add(row.id);
+                            newSet.add(rowKey);
                           } else {
-                            newSet.delete(row.id);
+                            newSet.delete(rowKey);
                           }
                           setSelectedIds(newSet);
                         }}
@@ -1145,6 +1275,11 @@ export const PayrollHub: React.FC = () => {
                     <td className="p-3 font-sans">
                       <div className="font-bold text-gray-900 flex items-center gap-1.5 flex-wrap">
                         <span>{row.name}</span>
+                        {row.isSplitDeployment && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                            {row.siteName}
+                          </span>
+                        )}
                         {row.rateCard?.is_flat_wage && (
                           <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
                             Flat
@@ -1183,7 +1318,7 @@ export const PayrollHub: React.FC = () => {
                         min={0}
                         max={daysInMonth}
                         value={row.pd === 0 ? '' : row.pd}
-                        onChange={(e) => handlePdChange(row.id, e.target.value === '' ? 0 : Number(e.target.value))}
+                        onChange={(e) => handlePdChange(row.id, row.siteId, e.target.value === '' ? 0 : Number(e.target.value))}
                         onBlur={() => handleAutoSave(row)}
                         className="w-16 bg-white border border-blue-300 focus:ring-2 focus:ring-blue-500 rounded px-2 py-1 text-center font-bold text-blue-900 shadow-2xs outline-none"
                       />
@@ -1196,7 +1331,7 @@ export const PayrollHub: React.FC = () => {
                         min={0}
                         max={daysInMonth}
                         value={row.wo === 0 ? '' : row.wo}
-                        onChange={(e) => handleWoChange(row.id, e.target.value === '' ? 0 : Number(e.target.value))}
+                        onChange={(e) => handleWoChange(row.id, row.siteId, e.target.value === '' ? 0 : Number(e.target.value))}
                         onBlur={() => handleAutoSave(row)}
                         className="w-16 bg-white border border-blue-300 focus:ring-2 focus:ring-blue-500 rounded px-2 py-1 text-center font-bold text-blue-900 shadow-2xs outline-none"
                       />
@@ -1280,7 +1415,7 @@ export const PayrollHub: React.FC = () => {
                               min={0}
                               disabled={row.isPaid}
                               value={row.advances === 0 ? '' : row.advances}
-                              onChange={(e) => handleAdvancesChange(row.id, e.target.value === '' ? 0 : Number(e.target.value))}
+                              onChange={(e) => handleAdvancesChange(row.id, row.siteId, e.target.value === '' ? 0 : Number(e.target.value))}
                               onBlur={() => handleAutoSave(row)}
                               className="w-16 bg-white border border-amber-300 focus:ring-2 focus:ring-amber-500 rounded px-1.5 py-1 text-center font-bold text-amber-900 shadow-2xs outline-none disabled:opacity-50 disabled:bg-gray-100 cursor-not-allowed"
                             />
