@@ -597,7 +597,8 @@ export const StaffFormModal: React.FC<StaffFormModalProps> = ({
             : 'Staff record updated successfully'
         );
       } else {
-        // Add Mode -> insert
+        // Add Mode -> insert with explicit is_locked: false
+        payload.is_locked = false;
         const { error: insertErr } = await supabase.from('staff').insert([payload]);
         if (insertErr) throw insertErr;
 

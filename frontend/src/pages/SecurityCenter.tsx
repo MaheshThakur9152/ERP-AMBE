@@ -83,6 +83,10 @@ export const SecurityCenter: React.FC = () => {
 
   useEffect(() => {
     fetchLocksData();
+    const interval = setInterval(() => {
+      fetchLocksData();
+    }, 60 * 60 * 1000); // 1 hour auto-refresh
+    return () => clearInterval(interval);
   }, [isSuperAdmin]);
 
   const items = viewMode === 'pending' ? pendingItems : lockedItems;

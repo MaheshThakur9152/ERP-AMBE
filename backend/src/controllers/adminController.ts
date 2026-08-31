@@ -23,7 +23,7 @@ interface EntityLockConfig {
 
 async function fetchEntityPendingLocks(config: EntityLockConfig): Promise<PendingLockItem[]> {
   try {
-    const cutoffTime = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const cutoffTime = new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString();
     const timeCol = config.timeColumn || 'created_at';
     let query = supabaseAdmin
       .from(config.table)
