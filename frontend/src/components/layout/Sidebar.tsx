@@ -60,51 +60,57 @@ export const Sidebar: React.FC = () => {
       } bg-[#34495E] text-white flex flex-col h-screen sticky top-0 shadow-2xl z-40 select-none flex-shrink-0 transition-all duration-200 ease-in-out`}
     >
       {/* Sidebar Header */}
-      <div className="p-3.5 border-b border-gray-600 bg-[#2C3E50] flex flex-col gap-2.5 flex-shrink-0">
-        <div className="flex items-center justify-between min-h-[40px]">
-          <div className="flex items-center gap-3 min-w-0">
-            <div
-              className="bg-[#20B2AA] p-2 rounded-xl text-white shadow-md shrink-0 cursor-pointer hover:bg-[#1ca19a] transition-colors"
-              onClick={toggleCollapse}
-              title={collapsed ? 'Click to expand sidebar' : 'Ambe Admin'}
-            >
-              <LayoutDashboard size={20} />
-            </div>
-            {!collapsed && (
-              <div className="flex-1 min-w-0 animate-in fade-in duration-150">
-                <h1 className="font-bold text-sm text-white leading-tight truncate">Ambe Admin</h1>
-                <span className="text-[10px] text-teal-300 font-mono">Enterprise Portal</span>
-              </div>
-            )}
-          </div>
-
+      <div className={`border-b border-gray-600 bg-[#2C3E50] flex flex-col gap-2.5 flex-shrink-0 ${collapsed ? 'p-2.5 items-center' : 'p-3.5'}`}>
+        {collapsed ? (
           <button
             type="button"
             onClick={toggleCollapse}
-            className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors cursor-pointer shrink-0"
-            title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            className="w-10 h-10 rounded-xl bg-[#20B2AA] hover:bg-[#1ca19a] text-white shadow-md flex items-center justify-center transition-all cursor-pointer group shrink-0"
+            title="Expand sidebar"
+            aria-label="Expand sidebar"
           >
-            {collapsed ? <PanelLeftOpen className="w-4 h-4 text-teal-300" /> : <PanelLeftClose className="w-4 h-4" />}
+            <PanelLeftOpen className="w-5 h-5 group-hover:scale-110 transition-transform" />
           </button>
-        </div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between min-h-[40px]">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="bg-[#20B2AA] p-2 rounded-xl text-white shadow-md shrink-0">
+                  <LayoutDashboard size={20} />
+                </div>
+                <div className="flex-1 min-w-0 animate-in fade-in duration-150">
+                  <h1 className="font-bold text-sm text-white leading-tight truncate">Ambe Admin</h1>
+                  <span className="text-[10px] text-teal-300 font-mono">Enterprise Portal</span>
+                </div>
+              </div>
 
-        {/* Role Badge Indicator */}
-        {!collapsed && (
-          <div className="flex items-center justify-between bg-black/25 px-2.5 py-1 rounded-lg border border-white/10 animate-in fade-in duration-150">
-            <span className="text-[10px] font-mono text-gray-300 font-medium">Role:</span>
-            {isSuperAdmin ? (
-              <span className="text-[10px] font-extrabold font-mono tracking-wider px-2 py-0.5 rounded bg-indigo-600 text-white shadow-xs flex items-center gap-1 border border-indigo-400/30">
-                <ShieldAlert size={11} />
-                <span>SUPERADMIN</span>
-              </span>
-            ) : (
-              <span className="text-[10px] font-extrabold font-mono tracking-wider px-2 py-0.5 rounded bg-teal-600 text-white shadow-xs flex items-center gap-1 border border-teal-400/30">
-                <ShieldCheck size={11} />
-                <span>ADMIN</span>
-              </span>
-            )}
-          </div>
+              <button
+                type="button"
+                onClick={toggleCollapse}
+                className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors cursor-pointer shrink-0"
+                title="Collapse sidebar"
+                aria-label="Collapse sidebar"
+              >
+                <PanelLeftClose className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Role Badge Indicator */}
+            <div className="flex items-center justify-between bg-black/25 px-2.5 py-1 rounded-lg border border-white/10 animate-in fade-in duration-150">
+              <span className="text-[10px] font-mono text-gray-300 font-medium">Role:</span>
+              {isSuperAdmin ? (
+                <span className="text-[10px] font-extrabold font-mono tracking-wider px-2 py-0.5 rounded bg-indigo-600 text-white shadow-xs flex items-center gap-1 border border-indigo-400/30">
+                  <ShieldAlert size={11} />
+                  <span>SUPERADMIN</span>
+                </span>
+              ) : (
+                <span className="text-[10px] font-extrabold font-mono tracking-wider px-2 py-0.5 rounded bg-teal-600 text-white shadow-xs flex items-center gap-1 border border-teal-400/30">
+                  <ShieldCheck size={11} />
+                  <span>ADMIN</span>
+                </span>
+              )}
+            </div>
+          </>
         )}
       </div>
 
