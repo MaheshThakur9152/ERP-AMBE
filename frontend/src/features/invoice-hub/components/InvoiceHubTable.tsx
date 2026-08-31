@@ -280,7 +280,42 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
   const [legacyAmount, setLegacyAmount] = useState<string>('');
   const [legacyFile, setLegacyFile] = useState<File | null>(null);
   const [isSubmittingLegacy, setIsSubmittingLegacy] = useState(false);
+  const [isLegacyDragging, setIsLegacyDragging] = useState(false);
   const legacyFileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleLegacyDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsLegacyDragging(true);
+  };
+
+  const handleLegacyDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsLegacyDragging(false);
+  };
+
+  const handleLegacyDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsLegacyDragging(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      const validExts = /\.(pdf|png|jpe?g|webp)$/i;
+      const validTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+
+      if (validTypes.includes(file.type) || validExts.test(file.name)) {
+        if (file.size > 10 * 1024 * 1024) {
+          toast.error('File size exceeds 10MB limit');
+          return;
+        }
+        setLegacyFile(file);
+      } else {
+        toast.error('Please upload a PDF, PNG, or JPG document');
+      }
+    }
+  };
 
   const selectedCompany = dbCompanies.find((c) => c.id === legacyCompanyId) || dbCompanies[0];
   const currentPrefix = legacyInvoiceType === 'Proforma Invoice'
@@ -1494,17 +1529,25 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
 
               {/* Dashed Drag & Drop File Upload Zone */}
               <div>
-                <label className="block text-[11px] font-bold text-gray-700 mb-1">Upload Bill PDF Document *</label>
+                <label className="block text-[11px] font-bold text-gray-700 mb-1">Upload Bill Document *</label>
                 <div
                   onClick={() => legacyFileInputRef.current?.click()}
-                  className={`border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-colors ${
-                    legacyFile ? 'border-green-400 bg-green-50/40' : 'border-gray-300 bg-slate-50 hover:border-[#20B2AA]'
+                  onDragOver={handleLegacyDragOver}
+                  onDragEnter={handleLegacyDragOver}
+                  onDragLeave={handleLegacyDragLeave}
+                  onDrop={handleLegacyDrop}
+                  className={`border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-all ${
+                    isLegacyDragging
+                      ? 'border-[#20B2AA] bg-teal-50/80 scale-[1.01] shadow-inner ring-2 ring-[#20B2AA]/20'
+                      : legacyFile
+                      ? 'border-green-400 bg-green-50/40 hover:bg-green-50/60'
+                      : 'border-gray-300 bg-slate-50 hover:border-[#20B2AA] hover:bg-slate-100/60'
                   }`}
                 >
                   <input
                     ref={legacyFileInputRef}
                     type="file"
-                    accept=".pdf,.png,.jpg,.jpeg"
+                    accept=".pdf,.png,.jpg,.jpeg,.webp"
                     className="hidden"
                     onChange={(e) => e.target.files?.[0] && setLegacyFile(e.target.files[0])}
                   />
@@ -1513,13 +1556,15 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                       <FileCheck className="w-6 h-6 text-green-600" />
                       <span className="font-bold text-gray-800 text-xs">{legacyFile.name}</span>
                       <span className="text-[10px] text-gray-500 font-mono">
-                        {(legacyFile.size / 1024).toFixed(1)} KB • Click to change
+                        {(legacyFile.size / 1024).toFixed(1)} KB • Click or drop new file to change
                       </span>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center gap-1">
-                      <UploadCloud className="w-6 h-6 text-[#20B2AA]" />
-                      <span className="text-xs font-bold text-gray-700">Drag &amp; drop PDF or browse</span>
+                      <UploadCloud className={`w-6 h-6 ${isLegacyDragging ? 'text-[#20B2AA] animate-bounce' : 'text-[#20B2AA]'}`} />
+                      <span className="text-xs font-bold text-gray-700">
+                        {isLegacyDragging ? 'Drop file here' : 'Drag & drop PDF/image or browse'}
+                      </span>
                       <span className="text-[10px] text-gray-400">PDF, PNG, JPG (Max 10MB)</span>
                     </div>
                   )}
