@@ -251,4 +251,25 @@ export class InvoiceController {
       next(error);
     }
   }
+
+  /**
+   * Update Legacy Historical Bill record with optional document replacement
+   * PUT /api/invoices/legacy/:id
+   */
+  static async updateLegacy(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const { id } = req.params;
+      const result = await InvoiceService.updateLegacyInvoice(id, req.body, req.file, req.user);
+      const response: ApiResponse = {
+        success: true,
+        message: 'Legacy bill updated successfully',
+        data: result.invoice,
+        view_url: result.view_url,
+      };
+      res.status(200).json(response);
+    } catch (error: any) {
+      console.error('[InvoiceController.updateLegacy] Error:', error);
+      next(error);
+    }
+  }
 }

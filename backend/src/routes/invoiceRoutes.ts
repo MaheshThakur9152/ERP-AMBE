@@ -47,6 +47,14 @@ router.post(
   validateFileMagicBytes,
   InvoiceController.createLegacy
 );
+router.put(
+  '/legacy/:id',
+  requireAuth,
+  requireAdmin,
+  upload.single('file'),
+  validateFileMagicBytes,
+  InvoiceController.updateLegacy
+);
 
 // Protected RBAC route: only SuperAdmin can lock/unlock invoices
 router.patch('/:id/lock', requireAuth, requireSuperAdmin, InvoiceController.toggleLock);

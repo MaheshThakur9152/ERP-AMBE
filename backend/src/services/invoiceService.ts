@@ -54,4 +54,8 @@ export class InvoiceService {
   static createLegacyInvoice(body: any, file: Express.Multer.File, user?: AuthUser): Promise<{ invoice: InvoiceRecord; view_url: string }> {
     return InvoiceQueryService.createLegacyInvoice(body, file, user);
   }
+
+  static updateLegacyInvoice(id: string, body: any, file?: Express.Multer.File, user?: AuthUser): Promise<{ invoice: InvoiceRecord; view_url?: string }> {
+    return InvoiceQueryService.updateLegacyInvoice(id, body, file, user);
+  }
 }

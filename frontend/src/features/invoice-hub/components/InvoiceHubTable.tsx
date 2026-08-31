@@ -269,6 +269,8 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
 
   // Log Legacy Bill Modal State
   const [isLegacyModalOpen, setIsLegacyModalOpen] = useState(false);
+  const [editingLegacyId, setEditingLegacyId] = useState<string | null>(null);
+  const [legacyExistingDocUrl, setLegacyExistingDocUrl] = useState<string | null>(null);
   const [legacyInvoiceType, setLegacyInvoiceType] = useState<'Tax Invoice' | 'Proforma Invoice'>('Tax Invoice');
   const [legacyCompanyId, setLegacyCompanyId] = useState<string>('');
   const [legacyEntity, setLegacyEntity] = useState<'Ambe' | 'ASF'>('Ambe');
@@ -387,10 +389,59 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
     }
   };
 
+  const handleOpenLegacyCreate = () => {
+    setEditingLegacyId(null);
+    setLegacyExistingDocUrl(null);
+    setLegacyInvoiceType('Tax Invoice');
+    setLegacyCompanyId(dbCompanies[0]?.id || '');
+    setLegacyEntity(dbCompanies[0]?.entity_code === 'ASF' || dbCompanies[0]?.name?.includes('ASF') ? 'ASF' : 'Ambe');
+    setLegacySiteId('');
+    setLegacySiteName('');
+    setLegacyMonth('June');
+    setLegacyYear('2026');
+    setLegacyBillNumber('');
+    setLegacyAmount('');
+    setLegacyFile(null);
+    if (legacyFileInputRef.current) legacyFileInputRef.current.value = '';
+    setIsLegacyModalOpen(true);
+  };
+
+  const handleOpenLegacyEdit = (inv: InvoiceRecord) => {
+    setEditingLegacyId(inv.id);
+    setLegacyInvoiceType(inv.type === 'Proforma Invoice' ? 'Proforma Invoice' : 'Tax Invoice');
+    const compId = inv.company_id || inv.companyId || dbCompanies.find((c) => c.name === inv.companies?.name)?.id || dbCompanies[0]?.id || '';
+    setLegacyCompanyId(compId);
+    const comp = dbCompanies.find((c) => c.id === compId);
+    setLegacyEntity(comp?.entity_code === 'ASF' || comp?.name?.includes('ASF') || inv.companies?.name?.includes('ASF') ? 'ASF' : 'Ambe');
+    setLegacySiteId(inv.site_id || inv.siteId || '');
+    setLegacySiteName(inv.siteName || inv.sites?.site_name || '');
+
+    const rawPeriod = inv.billing_period || inv.monthYear || 'June 2026';
+    const parts = rawPeriod.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      setLegacyMonth(parts[0]);
+      setLegacyYear(parts[1]);
+    } else {
+      setLegacyMonth('June');
+      setLegacyYear('2026');
+    }
+
+    const pfx = inv.type === 'Proforma Invoice'
+      ? (comp?.proforma_prefix || (comp?.entity_code === 'ASF' || comp?.name?.includes('ASF') ? 'ASF/P/26-27/' : 'AS/P/26-27/'))
+      : (comp?.tax_prefix || (comp?.entity_code === 'ASF' || comp?.name?.includes('ASF') ? 'ASF/26-27/' : 'AS/26-27/'));
+    const rawNum = inv.invoiceNo.startsWith(pfx) ? inv.invoiceNo.slice(pfx.length) : inv.invoiceNo;
+    setLegacyBillNumber(rawNum);
+    setLegacyAmount(String(inv.grand_total || inv.amount || ''));
+    setLegacyFile(null);
+    setLegacyExistingDocUrl(inv.certified_doc_view_url || inv.certified_doc_url || inv.certifiedDocUrl || (inv as any).view_url || null);
+    if (legacyFileInputRef.current) legacyFileInputRef.current.value = '';
+    setIsLegacyModalOpen(true);
+  };
+
   const handleSaveLegacyBill = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!legacyFile) {
+    if (!editingLegacyId && !legacyFile) {
       toast.error('Please select a document file (PDF, PNG, JPG) to upload');
       return;
     }
@@ -415,7 +466,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
         : `${currentPrefix}${legacyBillNumber.trim()}`;
 
       const formData = new FormData();
-      formData.append('file', legacyFile);
+      if (legacyFile) formData.append('file', legacyFile);
       formData.append('invoiceType', legacyInvoiceType);
       if (legacyCompanyId) formData.append('entityId', legacyCompanyId);
       formData.append('entity', legacyEntity);
@@ -426,22 +477,27 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
       formData.append('amount', String(legacyAmount));
       formData.append('billNumber', fullInvoiceNo);
 
-      const res = await fetchWithRetry('/api/invoices/legacy', {
-        method: 'POST',
+      const endpoint = editingLegacyId ? `/api/invoices/legacy/${editingLegacyId}` : '/api/invoices/legacy';
+      const method = editingLegacyId ? 'PUT' : 'POST';
+
+      const res = await fetchWithRetry(endpoint, {
+        method,
         body: formData,
       });
 
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || `Upload failed (HTTP ${res.status})`);
+        throw new Error(errJson.error || `Save failed (HTTP ${res.status})`);
       }
 
       const resData = await res.json();
-      const createdNo = resData.data?.invoice_no || fullInvoiceNo || 'Record';
-      toast.success(`Legacy Bill #${createdNo} logged and uploaded successfully!`);
+      const updatedNo = resData.data?.invoice_no || fullInvoiceNo || 'Record';
+      toast.success(editingLegacyId ? `Legacy Bill #${updatedNo} updated successfully!` : `Legacy Bill #${updatedNo} logged and uploaded successfully!`);
 
       // UI Cleanup
       setIsLegacyModalOpen(false);
+      setEditingLegacyId(null);
+      setLegacyExistingDocUrl(null);
       setLegacyBillNumber('');
       setLegacyAmount('');
       setLegacyFile(null);
@@ -908,7 +964,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
             {/* + Log Legacy Bill Button */}
             <button
               type="button"
-              onClick={() => setIsLegacyModalOpen(true)}
+              onClick={handleOpenLegacyCreate}
               className="bg-slate-800 hover:bg-slate-900 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all transform hover:-translate-y-0.5"
             >
               <Plus size={15} /> <span>+ Log Legacy Bill</span>
@@ -1210,7 +1266,16 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                             </span>
                           ) : null}
 
-                          {!(inv.is_legacy || (inv as any).isLegacy) && (
+                          {(inv.is_legacy || (inv as any).isLegacy) ? (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenLegacyEdit(inv)}
+                              className="text-gray-400 hover:text-teal-800 transition-colors p-1"
+                              title="Edit Legacy Historical Bill"
+                            >
+                              <Edit2 size={17} />
+                            </button>
+                          ) : (
                             <button
                               type="button"
                               disabled={inv.is_locked && !isSuperAdmin}
@@ -1380,8 +1445,8 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
             {/* Modal Header */}
             <div className="bg-[#34495E] px-6 py-4 text-white flex justify-between items-center">
               <h3 className="font-bold text-base flex items-center gap-2">
-                <Plus className="w-5 h-5 text-[#20B2AA]" />
-                <span>Log Legacy Historical Bill</span>
+                {editingLegacyId ? <Edit2 className="w-5 h-5 text-[#20B2AA]" /> : <Plus className="w-5 h-5 text-[#20B2AA]" />}
+                <span>{editingLegacyId ? 'Edit Legacy Historical Bill' : 'Log Legacy Historical Bill'}</span>
               </h3>
               <button
                 type="button"
@@ -1542,7 +1607,9 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
 
               {/* Dashed Drag & Drop File Upload Zone */}
               <div>
-                <label className="block text-[11px] font-bold text-gray-700 mb-1">Upload Bill Document *</label>
+                <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                  {editingLegacyId ? 'Bill Document (Optional to replace)' : 'Upload Bill Document *'}
+                </label>
                 <div
                   onClick={() => legacyFileInputRef.current?.click()}
                   onDragOver={handleLegacyDragOver}
@@ -1554,6 +1621,8 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                       ? 'border-[#20B2AA] bg-teal-50/80 scale-[1.01] shadow-inner ring-2 ring-[#20B2AA]/20'
                       : legacyFile
                       ? 'border-green-400 bg-green-50/40 hover:bg-green-50/60'
+                      : editingLegacyId && legacyExistingDocUrl
+                      ? 'border-teal-300 bg-teal-50/30 hover:bg-teal-50/50'
                       : 'border-gray-300 bg-slate-50 hover:border-[#20B2AA] hover:bg-slate-100/60'
                   }`}
                 >
@@ -1570,6 +1639,16 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                       <span className="font-bold text-gray-800 text-xs">{legacyFile.name}</span>
                       <span className="text-[10px] text-gray-500 font-mono">
                         {(legacyFile.size / 1024).toFixed(1)} KB • Click or drop new file to change
+                      </span>
+                    </div>
+                  ) : editingLegacyId && legacyExistingDocUrl ? (
+                    <div className="flex flex-col items-center gap-1">
+                      <FileCheck className="w-6 h-6 text-teal-600" />
+                      <span className="text-xs font-bold text-teal-800">
+                        Existing document attached
+                      </span>
+                      <span className="text-[10px] text-gray-500">
+                        Click or drop new PDF/image to replace current file
                       </span>
                     </div>
                   ) : (
@@ -1594,16 +1673,16 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmittingLegacy || !legacyFile}
+                  disabled={isSubmittingLegacy || (!editingLegacyId && !legacyFile)}
                   className="px-5 py-2 rounded-lg bg-[#20B2AA] hover:bg-[#1ca19a] text-white font-bold transition-all shadow-sm disabled:opacity-50 flex items-center gap-2"
                 >
                   {isSubmittingLegacy ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      <span>Uploading &amp; Saving...</span>
+                      <span>{editingLegacyId ? 'Saving Changes...' : 'Uploading & Saving...'}</span>
                     </>
                   ) : (
-                    <span>Save &amp; Upload</span>
+                    <span>{editingLegacyId ? 'Update Legacy Bill' : 'Save & Upload'}</span>
                   )}
                 </button>
               </div>

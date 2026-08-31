@@ -1065,4 +1065,137 @@ export class InvoiceQueryService {
       view_url: signedViewUrl,
     };
   }
+
+  /**
+   * Update an existing legacy historical bill record with optional document replacement
+   */
+  static async updateLegacyInvoice(
+    id: string,
+    body: any,
+    file?: Express.Multer.File,
+    user?: AuthUser
+  ): Promise<{ invoice: InvoiceRecord; view_url?: string }> {
+    await this.verifyInvoiceOwnership(id, user);
+
+    const monthStr = (body.month || 'June').trim();
+    const yNum = parseInt(body.year, 10) || new Date().getFullYear();
+    const invoiceType = body.invoiceType === 'Proforma Invoice' ? 'Proforma Invoice' : 'Tax Invoice';
+
+    const monthMap: Record<string, number> = {
+      january: 0, february: 1, march: 2, april: 3, may: 4, june: 5,
+      july: 6, august: 7, september: 8, october: 9, november: 10, december: 11,
+    };
+    const mIndex = monthMap[monthStr.toLowerCase()] ?? 0;
+    const lastDay = new Date(Date.UTC(yNum, mIndex + 1, 0)).toISOString().split('T')[0];
+
+    // Resolve Company
+    let company: any = null;
+    if (body.entityId) {
+      const { data: comp } = await supabaseAdmin.from('companies').select('*').eq('id', body.entityId).maybeSingle();
+      company = comp;
+    }
+    if (!company && body.entity) {
+      const { data: comp } = await supabaseAdmin.from('companies').select('*').ilike('name', `%${body.entity.trim()}%`).maybeSingle();
+      company = comp;
+    }
+    if (!company) {
+      const { data: comp } = await supabaseAdmin.from('companies').select('*').limit(1).maybeSingle();
+      company = comp;
+    }
+
+    // Resolve Site
+    let site: any = null;
+    if (body.siteId) {
+      const { data: st } = await supabaseAdmin.from('sites').select('*').eq('id', body.siteId).maybeSingle();
+      site = st;
+    }
+    if (!site && body.siteName) {
+      const { data: st } = await supabaseAdmin.from('sites').select('*').ilike('site_name', `%${body.siteName.trim()}%`).maybeSingle();
+      site = st;
+    }
+
+    // Prefix enforcement
+    const isProforma = invoiceType === 'Proforma Invoice';
+    const expectedPrefix = isProforma
+      ? (company?.proforma_prefix || 'AS/P/26-27/')
+      : (company?.tax_prefix || 'AS/26-27/');
+
+    const rawBill = (body.billNumber || body.invoice_no || '').trim();
+    const finalInvoiceNo = rawBill.startsWith(expectedPrefix) ? rawBill : `${expectedPrefix}${rawBill}`;
+
+    const numericAmount = Number(body.amount) || 0;
+
+    const updateRow: any = {
+      company_id: company?.id || null,
+      site_id: site?.id || null,
+      invoice_no: finalInvoiceNo,
+      type: invoiceType,
+      invoice_date: lastDay,
+      billing_period: `${monthStr} ${yNum}`,
+      sub_total: numericAmount,
+      tax_total: 0,
+      grand_total: numericAmount,
+      line_items: [
+        {
+          id: 'item-1',
+          srNo: 1,
+          description: 'Legacy Bill (Historical Record)',
+          rate: numericAmount,
+          amount: numericAmount,
+        },
+      ],
+      updated_at: new Date().toISOString(),
+    };
+
+    if (body.notes !== undefined) {
+      updateRow.legacy_notes = body.notes;
+    }
+
+    let storageKey: string | null = null;
+    let signedViewUrl: string | undefined = undefined;
+
+    if (file) {
+      let uploadBuffer = file.buffer;
+      let uploadMimeType = file.mimetype;
+
+      if (file.mimetype.startsWith('image/')) {
+        const compressed = await CompressionService.compressFile(file.buffer, file.mimetype);
+        uploadBuffer = compressed.buffer;
+        uploadMimeType = compressed.mimeType;
+      }
+
+      storageKey = buildInvoiceStorageKey({
+        entity: company?.name || 'Ambe',
+        year: String(yNum),
+        month: monthStr,
+        documentType: `Legacy-${invoiceType === 'Proforma Invoice' ? 'Proforma' : 'Tax-Invoice'}`,
+        originalName: file.originalname,
+      });
+
+      const storageResult = await OracleStorageService.uploadFile(uploadBuffer, storageKey, uploadMimeType);
+      updateRow.certified_doc_storage_key = storageResult.storageKey;
+      updateRow.certified_doc_confirmed_at = new Date().toISOString();
+      updateRow.invoice_storage_provider = 'minio';
+
+      signedViewUrl = await OracleStorageService.getSignedReadUrl(storageResult.storageKey, 3600);
+    }
+
+    const { data: updatedInvoice, error: dbError } = await supabaseAdmin
+      .from('invoices')
+      .update(updateRow)
+      .eq('id', id)
+      .select('*, sites(*), companies(*)')
+      .single();
+
+    if (dbError) {
+      console.error('❌ DB update failed for legacy invoice:', dbError);
+      throw new Error(`Database update failed: ${dbError.message}`);
+    }
+
+    const enriched = await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(updatedInvoice));
+    return {
+      invoice: enriched,
+      view_url: signedViewUrl || enriched.certified_doc_view_url || enriched.view_url || undefined,
+    };
+  }
 }
