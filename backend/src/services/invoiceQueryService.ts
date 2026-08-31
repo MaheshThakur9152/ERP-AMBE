@@ -942,13 +942,6 @@ export class InvoiceQueryService {
       throw new Error('Valid Company Entity is required');
     }
 
-    // Invariant: Company locked check
-    if (company.is_locked && user?.role !== 'superadmin') {
-      const err: any = new Error('FORBIDDEN_LOCKED_ENTITY: The selected company entity is locked by SuperAdmin');
-      err.statusCode = 403;
-      throw err;
-    }
-
     // 2. Resolve Site
     let site: any = null;
     if (body.siteId) {
@@ -958,13 +951,6 @@ export class InvoiceQueryService {
     if (!site && body.siteName) {
       const { data: st } = await supabaseAdmin.from('sites').select('*').ilike('site_name', `%${body.siteName.trim()}%`).maybeSingle();
       site = st;
-    }
-
-    // Invariant: Site locked check
-    if (site && site.is_locked && user?.role !== 'superadmin') {
-      const err: any = new Error('FORBIDDEN_LOCKED_SITE: The selected site is locked by SuperAdmin');
-      err.statusCode = 403;
-      throw err;
     }
 
     // 3. Invoice Number Validation & Prefix Enforcement

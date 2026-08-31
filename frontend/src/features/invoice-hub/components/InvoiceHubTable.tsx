@@ -265,7 +265,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
 
   // Master database reference state for Real Sites and Companies
   const [dbSites, setDbSites] = useState<Array<{ id: string; site_name: string; client_name?: string; code_name?: string }>>([]);
-  const [dbCompanies, setDbCompanies] = useState<Array<{ id: string; name: string; entity_code?: string; legal_name?: string; tax_prefix?: string; proforma_prefix?: string }>>([]);
+  const [dbCompanies, setDbCompanies] = useState<Array<{ id: string; name: string; entity_code?: string; tax_prefix?: string; proforma_prefix?: string }>>([]);
 
   // Log Legacy Bill Modal State
   const [isLegacyModalOpen, setIsLegacyModalOpen] = useState(false);
@@ -464,7 +464,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
     try {
       const [sitesRes, compRes] = await Promise.all([
         supabase.from('sites').select('id, site_name, client_name, code_name').order('site_name'),
-        supabase.from('companies').select('id, name, entity_code, legal_name, tax_prefix, proforma_prefix').order('name'),
+        supabase.from('companies').select('id, name, entity_code, tax_prefix, proforma_prefix').order('name'),
       ]);
       if (sitesRes.data && sitesRes.data.length > 0) {
         setDbSites(sitesRes.data);
