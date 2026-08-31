@@ -263,10 +263,16 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
   const [uploadingAttachmentId, setUploadingAttachmentId] = useState<string | null>(null);
   const attachmentInputRef = React.useRef<HTMLInputElement>(null);
 
+  // Master database reference state for Real Sites and Companies
+  const [dbSites, setDbSites] = useState<Array<{ id: string; site_name: string; client_name?: string; code_name?: string }>>([]);
+  const [dbCompanies, setDbCompanies] = useState<Array<{ id: string; name: string; entity_code?: string; legal_name?: string; tax_prefix?: string; proforma_prefix?: string }>>([]);
+
   // Log Legacy Bill Modal State
   const [isLegacyModalOpen, setIsLegacyModalOpen] = useState(false);
   const [legacyInvoiceType, setLegacyInvoiceType] = useState<'Tax Invoice' | 'Proforma Invoice'>('Tax Invoice');
+  const [legacyCompanyId, setLegacyCompanyId] = useState<string>('');
   const [legacyEntity, setLegacyEntity] = useState<'Ambe' | 'ASF'>('Ambe');
+  const [legacySiteId, setLegacySiteId] = useState<string>('');
   const [legacySiteName, setLegacySiteName] = useState<string>('');
   const [legacyMonth, setLegacyMonth] = useState<string>('June');
   const [legacyYear, setLegacyYear] = useState<string>('2026');
@@ -275,6 +281,11 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
   const [legacyFile, setLegacyFile] = useState<File | null>(null);
   const [isSubmittingLegacy, setIsSubmittingLegacy] = useState(false);
   const legacyFileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const selectedCompany = dbCompanies.find((c) => c.id === legacyCompanyId) || dbCompanies[0];
+  const currentPrefix = legacyInvoiceType === 'Proforma Invoice'
+    ? (selectedCompany?.proforma_prefix || (selectedCompany?.entity_code === 'ASF' || selectedCompany?.name?.includes('ASF') ? 'ASF/P/26-27/' : 'AS/P/26-27/'))
+    : (selectedCompany?.tax_prefix || (selectedCompany?.entity_code === 'ASF' || selectedCompany?.name?.includes('ASF') ? 'ASF/26-27/' : 'AS/26-27/'));
 
   const handleAttachmentClick = (inv: InvoiceRecord) => {
     setSelectedInvoiceForAttachment(inv);
@@ -345,94 +356,56 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
     e.preventDefault();
 
     if (!legacyFile) {
-      toast.error('Please select a PDF document file to upload');
+      toast.error('Please select a document file (PDF, PNG, JPG) to upload');
       return;
     }
-    if (!legacySiteName) {
-      toast.error('Please select or enter a site name');
+    if (!legacySiteName && !legacySiteId) {
+      toast.error('Please select a site');
       return;
     }
-    if (!legacyBillNumber) {
-      toast.error('Please enter a bill number');
+    if (!legacyBillNumber.trim()) {
+      toast.error('Please enter the bill sequence number');
+      return;
+    }
+    if (!legacyAmount || isNaN(Number(legacyAmount)) || Number(legacyAmount) <= 0) {
+      toast.error('Please enter a valid bill amount');
       return;
     }
 
     setIsSubmittingLegacy(true);
 
     try {
-      const legacyMonthYear = `${legacyMonth} ${legacyYear}`;
-      const cleanSite = legacySiteName.replace(/[^a-zA-Z0-9]/g, '');
-      const cleanMonthYear = legacyMonthYear.replace(/\s+/g, '');
-      const typeLabel = legacyInvoiceType === 'Proforma Invoice' ? 'ProformaInvoice' : 'TaxInvoice';
-      const ext = legacyFile.name.split('.').pop() || 'pdf';
-      const generatedName = `${legacyEntity}_${typeLabel}_${cleanSite}_${cleanMonthYear}_Bill-${legacyBillNumber}.${ext}`;
+      const fullInvoiceNo = legacyBillNumber.trim().startsWith(currentPrefix)
+        ? legacyBillNumber.trim()
+        : `${currentPrefix}${legacyBillNumber.trim()}`;
 
-      // 1. Upload file to Google Drive using /api/invoices/upload
       const formData = new FormData();
       formData.append('file', legacyFile);
-      formData.append('fileName', generatedName);
+      formData.append('invoiceType', legacyInvoiceType);
+      if (legacyCompanyId) formData.append('entityId', legacyCompanyId);
+      formData.append('entity', legacyEntity);
+      if (legacySiteId) formData.append('siteId', legacySiteId);
+      formData.append('siteName', legacySiteName);
+      formData.append('month', legacyMonth);
+      formData.append('year', legacyYear);
+      formData.append('amount', String(legacyAmount));
+      formData.append('billNumber', fullInvoiceNo);
 
-      const uploadRes = await fetchWithRetry('/api/invoices/upload', {
+      const res = await fetchWithRetry('/api/invoices/legacy', {
         method: 'POST',
         body: formData,
       });
 
-      if (!uploadRes.ok) {
-        const errJson = await uploadRes.json().catch(() => ({ error: 'Upload failed' }));
-        throw new Error(errJson.error || 'Failed to upload document to Google Drive');
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || `Upload failed (HTTP ${res.status})`);
       }
 
-      const uploadResult = await uploadRes.json();
-      const driveUrl = uploadResult.view_url || uploadResult.webViewLink || uploadResult.gcp_file_url || uploadResult.certified_doc_url;
+      const resData = await res.json();
+      const createdNo = resData.data?.invoice_no || fullInvoiceNo || 'Record';
+      toast.success(`Legacy Bill #${createdNo} logged and uploaded successfully!`);
 
-      // 2. Insert into Supabase (invoices table)
-      const numericAmount = Number(legacyAmount) || 0;
-      const payloadData = {
-        entity: legacyEntity,
-        meta: {
-          invoiceNo: legacyBillNumber,
-          invoiceDate: new Date().toISOString().split('T')[0],
-          billingPeriod: legacyMonthYear,
-          invoiceType: legacyInvoiceType,
-        },
-        party: {
-          name: legacySiteName,
-          siteName: legacySiteName,
-        },
-        items: [
-          {
-            id: 'item-1',
-            srNo: 1,
-            description: `Historical Legacy ${legacyInvoiceType}`,
-            rate: numericAmount,
-            amount: numericAmount,
-          },
-        ],
-      };
-
-      const { error: dbError } = await supabase.from('invoices').insert([
-        {
-          invoiceNo: legacyBillNumber,
-          type: legacyInvoiceType,
-          siteName: legacySiteName,
-          clientName: legacySiteName,
-          monthYear: legacyMonthYear,
-          amount: numericAmount,
-          grand_total: numericAmount,
-          status: 'Unpaid',
-          certified_doc_url: driveUrl,
-          payload: payloadData,
-        },
-      ]);
-
-      if (dbError) {
-        console.error('Supabase insert error for legacy bill:', dbError);
-        toast.error(`Database record error: ${dbError.message}`);
-      } else {
-        toast.success(`Legacy Bill #${legacyBillNumber} logged successfully!`);
-      }
-
-      // 3. UI Cleanup
+      // UI Cleanup
       setIsLegacyModalOpen(false);
       setLegacyBillNumber('');
       setLegacyAmount('');
@@ -440,12 +413,33 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
       if (legacyFileInputRef.current) {
         legacyFileInputRef.current.value = '';
       }
+
+      // Reload Invoices Table
       await loadInvoicesFromApi();
     } catch (err: any) {
       console.error('Save legacy bill error:', err);
       toast.error(err.message || 'Failed to save legacy bill');
     } finally {
       setIsSubmittingLegacy(false);
+    }
+  };
+
+  // Load master sites and companies from real database
+  const loadMasterData = async () => {
+    try {
+      const [sitesRes, compRes] = await Promise.all([
+        supabase.from('sites').select('id, site_name, client_name, code_name').order('site_name'),
+        supabase.from('companies').select('id, name, entity_code, legal_name, tax_prefix, proforma_prefix').order('name'),
+      ]);
+      if (sitesRes.data && sitesRes.data.length > 0) {
+        setDbSites(sitesRes.data);
+      }
+      if (compRes.data && compRes.data.length > 0) {
+        setDbCompanies(compRes.data);
+        setLegacyCompanyId((prev) => prev || compRes.data[0].id);
+      }
+    } catch (err) {
+      console.warn('Failed to load master sites/companies:', err);
     }
   };
 
@@ -468,14 +462,16 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
 
   useEffect(() => {
     loadInvoicesFromApi();
+    loadMasterData();
   }, []);
 
   const siteList = Array.from(
-    new Set(
-      invoices
+    new Set([
+      ...dbSites.map((s) => s.site_name).filter(Boolean),
+      ...invoices
         .map((inv) => inv.sites?.site_name || inv.siteName || (inv as any).site_name || inv.payload?.party?.siteName || '')
-        .filter(Boolean)
-    )
+        .filter(Boolean),
+    ])
   );
 
   const filteredInvoices = invoices.filter((inv) => {
@@ -1366,12 +1362,27 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                 <div>
                   <label className="block text-[11px] font-bold text-gray-700 mb-1">Entity *</label>
                   <select
-                    value={legacyEntity}
-                    onChange={(e) => setLegacyEntity(e.target.value as any)}
+                    value={legacyCompanyId}
+                    onChange={(e) => {
+                      setLegacyCompanyId(e.target.value);
+                      const comp = dbCompanies.find((c) => c.id === e.target.value);
+                      if (comp) {
+                        setLegacyEntity(comp.entity_code === 'ASF' || comp.name.includes('ASF') ? 'ASF' : 'Ambe');
+                      }
+                    }}
                     className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-semibold"
                   >
-                    <option value="Ambe">Ambe</option>
-                    <option value="ASF">ASF</option>
+                    {dbCompanies.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} {c.entity_code ? `(${c.entity_code})` : ''}
+                      </option>
+                    ))}
+                    {dbCompanies.length === 0 && (
+                      <>
+                        <option value="Ambe">Ambe</option>
+                        <option value="ASF">ASF</option>
+                      </>
+                    )}
                   </select>
                 </div>
               </div>
@@ -1379,30 +1390,31 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] font-bold text-gray-700 mb-1">Site Name *</label>
-                  {siteList.length > 0 ? (
-                    <select
-                      value={legacySiteName}
-                      onChange={(e) => setLegacySiteName(e.target.value)}
-                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-semibold"
-                      required
-                    >
-                      <option value="">Select a Site</option>
-                      {siteList.map((s) => (
+                  <select
+                    value={legacySiteId}
+                    onChange={(e) => {
+                      setLegacySiteId(e.target.value);
+                      const st = dbSites.find((s) => s.id === e.target.value);
+                      if (st) {
+                        setLegacySiteName(st.site_name);
+                      }
+                    }}
+                    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-semibold"
+                    required
+                  >
+                    <option value="">Select a Site</option>
+                    {dbSites.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.code_name || s.site_name}
+                      </option>
+                    ))}
+                    {dbSites.length === 0 &&
+                      siteList.map((s) => (
                         <option key={s} value={s}>
                           {s}
                         </option>
                       ))}
-                    </select>
-                  ) : (
-                    <input
-                      type="text"
-                      placeholder="e.g. Phoenix Mall"
-                      value={legacySiteName}
-                      onChange={(e) => setLegacySiteName(e.target.value)}
-                      className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-semibold"
-                      required
-                    />
-                  )}
+                  </select>
                 </div>
 
                 <div>
@@ -1452,14 +1464,19 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[11px] font-bold text-gray-700 mb-1">Bill Number *</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 1052"
-                    value={legacyBillNumber}
-                    onChange={(e) => setLegacyBillNumber(e.target.value)}
-                    className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono text-gray-800"
-                    required
-                  />
+                  <div className="flex rounded-lg border border-gray-200 overflow-hidden focus-within:ring-2 focus-within:ring-[#20B2AA]/30 focus-within:border-[#20B2AA]">
+                    <span className="bg-slate-100 px-2.5 py-2 text-xs font-mono font-bold text-slate-700 border-r border-gray-200 select-none flex items-center shrink-0">
+                      {currentPrefix}
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="052"
+                      value={legacyBillNumber}
+                      onChange={(e) => setLegacyBillNumber(e.target.value.replace(/[^0-9a-zA-Z-]/g, ''))}
+                      className="w-full bg-white px-3 py-2 text-xs font-mono text-gray-800 outline-none"
+                      required
+                    />
+                  </div>
                 </div>
 
                 <div>

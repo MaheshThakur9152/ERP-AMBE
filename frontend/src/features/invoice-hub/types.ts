@@ -50,6 +50,9 @@ export interface InvoiceRecord {
   certifiedAttendanceConfirmedAt?: string;
   previous_version_id?: string;
   is_locked?: boolean;
+  is_legacy?: boolean;
+  legacy_uploaded_by?: string;
+  legacy_notes?: string;
   created_at?: string;
   createdAt?: string;
   challan_no?: string;

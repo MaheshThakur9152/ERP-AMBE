@@ -118,10 +118,10 @@ export const InvoiceTracker: React.FC = () => {
 
     const result: GroupedLineage[] = Object.keys(groups).map((key) => {
       const [sKey, billingPeriod] = key.split('___');
-      // Sort invoices in chronological / lineage order (created_at asc)
+      // Sort invoices in chronological order (invoice_date / date asc, falling back to created_at)
       const sortedInvoices = [...groups[key]].sort((a, b) => {
-        const timeA = new Date(a.created_at || (a as any).created_at || 0).getTime();
-        const timeB = new Date(b.created_at || (b as any).created_at || 0).getTime();
+        const timeA = new Date(a.invoice_date || a.date || a.created_at || (a as any).created_at || 0).getTime();
+        const timeB = new Date(b.invoice_date || b.date || b.created_at || (b as any).created_at || 0).getTime();
         return timeA - timeB;
       });
 
@@ -796,6 +796,16 @@ export const InvoiceTracker: React.FC = () => {
                             >
                               {inv.type}
                             </span>
+
+                            {/* Legacy Badge */}
+                            {inv.is_legacy && (
+                              <span
+                                className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 flex items-center gap-0.5"
+                                title="Legacy Historical Bill Record"
+                              >
+                                <span>Legacy</span>
+                              </span>
+                            )}
 
                             {/* Locked Badge */}
                             {isLocked && (

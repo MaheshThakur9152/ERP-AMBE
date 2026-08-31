@@ -226,4 +226,29 @@ export class InvoiceController {
       next(error);
     }
   }
+
+  /**
+   * Log Legacy Historical Bill record with document upload
+   * POST /api/invoices/legacy
+   */
+  static async createLegacy(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      if (!req.file) {
+        res.status(400).json({ success: false, error: 'Upload file (PDF/PNG/JPG) is required' });
+        return;
+      }
+
+      const result = await InvoiceService.createLegacyInvoice(req.body, req.file, req.user);
+      const response: ApiResponse = {
+        success: true,
+        message: 'Legacy bill logged successfully',
+        data: result.invoice,
+        view_url: result.view_url,
+      };
+      res.status(201).json(response);
+    } catch (error: any) {
+      console.error('[InvoiceController.createLegacy] Error:', error);
+      next(error);
+    }
+  }
 }

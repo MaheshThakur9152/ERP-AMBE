@@ -9,6 +9,8 @@ import { DEFAULT_MGMT_FEE_PERCENT } from '../config/constants';
 import { AuthUser } from '../types/express';
 import { enrichInvoicesWithViewUrls, enrichInvoiceWithViewUrls } from '../utils/documentViewHelper';
 import { OracleStorageService } from './oracleStorageService';
+import { CompressionService } from './compressionService';
+import { buildInvoiceStorageKey } from '../utils/storageKeys';
 
 const InvoiceRowSchema = z.object({
   id: z.string().optional().nullable(),
@@ -869,6 +871,227 @@ export class InvoiceQueryService {
       storageKey: storageKey || undefined,
       viewUrl,
       fileName,
+    };
+  }
+
+  /**
+   * Create Legacy Historical Bill record with Oracle/MinIO storage upload and atomic rollback
+   * POST /api/invoices/legacy
+   */
+  static async createLegacyInvoice(
+    body: {
+      invoiceType?: string;
+      entityId?: string;
+      entity?: string;
+      siteId?: string;
+      siteName?: string;
+      month?: string;
+      year?: string | number;
+      amount?: number | string;
+      billNumber?: string;
+      invoice_no?: string;
+      notes?: string;
+    },
+    file: Express.Multer.File,
+    user?: AuthUser
+  ): Promise<{ invoice: InvoiceRecord; view_url: string }> {
+    if (!file) {
+      throw new Error('Upload file (PDF/PNG/JPG) is required');
+    }
+
+    const monthStr = (body.month || 'January').trim();
+    const yearStr = String(body.year || new Date().getFullYear()).trim();
+    const yNum = Number(yearStr) || new Date().getFullYear();
+    const invoiceType = body.invoiceType === 'Proforma Invoice' ? 'Proforma Invoice' : 'Tax Invoice';
+
+    const monthMap: Record<string, number> = {
+      january: 0, jan: 0,
+      february: 1, feb: 1,
+      march: 2, mar: 2,
+      april: 3, apr: 3,
+      may: 4,
+      june: 5, jun: 5,
+      july: 6, jul: 6,
+      august: 7, aug: 7,
+      september: 8, sep: 8, sept: 8,
+      october: 9, oct: 9,
+      november: 10, nov: 10,
+      december: 11, dec: 11,
+    };
+
+    const mIndex = monthMap[monthStr.toLowerCase()] ?? 0;
+    // Calculate last calendar day of the given month/year
+    const lastDay = new Date(Date.UTC(yNum, mIndex + 1, 0)).toISOString().split('T')[0];
+
+    // 1. Resolve Company Entity
+    let company: any = null;
+    if (body.entityId) {
+      const { data: comp } = await supabaseAdmin.from('companies').select('*').eq('id', body.entityId).maybeSingle();
+      company = comp;
+    }
+    if (!company && body.entity) {
+      const { data: comp } = await supabaseAdmin.from('companies').select('*').ilike('name', `%${body.entity.trim()}%`).maybeSingle();
+      company = comp;
+    }
+    if (!company) {
+      const { data: comp } = await supabaseAdmin.from('companies').select('*').limit(1).maybeSingle();
+      company = comp;
+    }
+
+    if (!company) {
+      throw new Error('Valid Company Entity is required');
+    }
+
+    // Invariant: Company locked check
+    if (company.is_locked && user?.role !== 'superadmin') {
+      const err: any = new Error('FORBIDDEN_LOCKED_ENTITY: The selected company entity is locked by SuperAdmin');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    // 2. Resolve Site
+    let site: any = null;
+    if (body.siteId) {
+      const { data: st } = await supabaseAdmin.from('sites').select('*').eq('id', body.siteId).maybeSingle();
+      site = st;
+    }
+    if (!site && body.siteName) {
+      const { data: st } = await supabaseAdmin.from('sites').select('*').ilike('site_name', `%${body.siteName.trim()}%`).maybeSingle();
+      site = st;
+    }
+
+    // Invariant: Site locked check
+    if (site && site.is_locked && user?.role !== 'superadmin') {
+      const err: any = new Error('FORBIDDEN_LOCKED_SITE: The selected site is locked by SuperAdmin');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    // 3. Invoice Number Validation & Prefix Enforcement
+    const isProforma = invoiceType === 'Proforma Invoice';
+    const expectedPrefix = isProforma
+      ? (company.proforma_prefix || 'AS/P/26-27/')
+      : (company.tax_prefix || 'AS/26-27/');
+
+    const rawBill = (body.billNumber || body.invoice_no || '').trim();
+    if (!rawBill) {
+      throw new Error('Bill Number is required');
+    }
+
+    const finalInvoiceNo = rawBill.startsWith(expectedPrefix)
+      ? rawBill
+      : `${expectedPrefix}${rawBill}`;
+
+    // Duplicate Check: Return 409 Conflict if already exists
+    const { data: existingInv } = await supabaseAdmin
+      .from('invoices')
+      .select('id, invoice_no')
+      .eq('invoice_no', finalInvoiceNo)
+      .maybeSingle();
+
+    if (existingInv) {
+      const err: any = new Error(`Invoice #${finalInvoiceNo} already exists in the database.`);
+      err.statusCode = 409;
+      throw err;
+    }
+
+    // 4. File Compression & Key Generation
+    let uploadBuffer = file.buffer;
+    let uploadMimeType = file.mimetype;
+
+    if (file.mimetype.startsWith('image/')) {
+      const compressed = await CompressionService.compressFile(file.buffer, file.mimetype);
+      uploadBuffer = compressed.buffer;
+      uploadMimeType = compressed.mimeType;
+    }
+
+    const storageKey = buildInvoiceStorageKey({
+      entity: company.name || 'Ambe',
+      year: String(yNum),
+      month: monthStr,
+      documentType: `Legacy-${invoiceType === 'Proforma Invoice' ? 'Proforma' : 'Tax-Invoice'}`,
+      originalName: file.originalname,
+    });
+
+    // 5. Upload to MinIO / Oracle Object Storage
+    const storageResult = await OracleStorageService.uploadFile(uploadBuffer, storageKey, uploadMimeType);
+
+    // 6. Insert record into invoices table with atomic rollback on failure
+    const numericAmount = Number(body.amount) || 0;
+    const nowIso = new Date().toISOString();
+
+    const insertRow: any = {
+      company_id: company.id,
+      site_id: site?.id || null,
+      invoice_no: finalInvoiceNo,
+      type: invoiceType,
+      status: 'Unpaid',
+      is_legacy: true,
+      legacy_uploaded_by: user?.id || null,
+      legacy_notes: body.notes || '',
+      invoice_date: lastDay,
+      billing_period: `${monthStr} ${yNum}`,
+      line_items: [
+        {
+          id: 'item-1',
+          srNo: 1,
+          description: 'Legacy Bill (Historical Record)',
+          rate: numericAmount,
+          amount: numericAmount,
+        },
+      ],
+      sub_total: numericAmount,
+      tax_total: 0,
+      grand_total: numericAmount,
+      certified_doc_url: null,
+      certified_doc_storage_key: storageResult.storageKey,
+      certified_doc_confirmed_at: nowIso,
+      invoice_storage_provider: 'minio',
+      is_locked: false,
+      payload: {
+        entity: company.name,
+        meta: {
+          invoiceNo: finalInvoiceNo,
+          invoiceDate: lastDay,
+          billingPeriod: `${monthStr} ${yNum}`,
+          invoiceType,
+          isLegacy: true,
+        },
+        party: {
+          name: site?.client_name || site?.site_name || body.siteName || 'Legacy Client',
+          siteName: site?.site_name || body.siteName || 'Legacy Site',
+        },
+        items: [
+          {
+            id: 'item-1',
+            srNo: 1,
+            description: 'Legacy Bill (Historical Record)',
+            rate: numericAmount,
+            amount: numericAmount,
+          },
+        ],
+      },
+      created_at: nowIso,
+    };
+
+    const { data: insertedInvoice, error: dbError } = await supabaseAdmin
+      .from('invoices')
+      .insert([insertRow])
+      .select('*, sites(*), companies(*)')
+      .single();
+
+    if (dbError) {
+      console.error('❌ DB insert failed for legacy invoice, rolling back MinIO upload:', dbError);
+      await OracleStorageService.deleteFile(storageResult.storageKey).catch(() => {});
+      throw new Error(`Database insert failed: ${dbError.message}`);
+    }
+
+    const enriched = await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(insertedInvoice));
+    const signedViewUrl = await OracleStorageService.getSignedReadUrl(storageResult.storageKey, 3600);
+
+    return {
+      invoice: enriched,
+      view_url: signedViewUrl,
     };
   }
 }

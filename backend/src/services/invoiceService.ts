@@ -50,4 +50,8 @@ export class InvoiceService {
   static getInvoiceDocumentLocation(id: string, docType: string): Promise<{ storageKey?: string; viewUrl?: string; fileName: string }> {
     return InvoiceQueryService.getInvoiceDocumentLocation(id, docType);
   }
+
+  static createLegacyInvoice(body: any, file: Express.Multer.File, user?: AuthUser): Promise<{ invoice: InvoiceRecord; view_url: string }> {
+    return InvoiceQueryService.createLegacyInvoice(body, file, user);
+  }
 }
