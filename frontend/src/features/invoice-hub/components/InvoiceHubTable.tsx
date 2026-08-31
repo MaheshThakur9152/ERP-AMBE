@@ -264,7 +264,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
   const attachmentInputRef = React.useRef<HTMLInputElement>(null);
 
   // Master database reference state for Real Sites and Companies
-  const [dbSites, setDbSites] = useState<Array<{ id: string; site_name: string; client_name?: string; code_name?: string }>>([]);
+  const [dbSites, setDbSites] = useState<Array<{ id: string; site_name: string; client_name?: string; code_name?: string; company_id?: string }>>([]);
   const [dbCompanies, setDbCompanies] = useState<Array<{ id: string; name: string; entity_code?: string; tax_prefix?: string; proforma_prefix?: string }>>([]);
 
   // Log Legacy Bill Modal State
@@ -519,7 +519,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
   const loadMasterData = async () => {
     try {
       const [sitesRes, compRes] = await Promise.all([
-        supabase.from('sites').select('id, site_name, client_name, code_name').order('site_name'),
+        supabase.from('sites').select('id, site_name, client_name, code_name, company_id').order('site_name'),
         supabase.from('companies').select('id, name, entity_code, tax_prefix, proforma_prefix').order('name'),
       ]);
       if (sitesRes.data && sitesRes.data.length > 0) {
@@ -1506,10 +1506,18 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                   <select
                     value={legacySiteId}
                     onChange={(e) => {
-                      setLegacySiteId(e.target.value);
-                      const st = dbSites.find((s) => s.id === e.target.value);
+                      const siteId = e.target.value;
+                      setLegacySiteId(siteId);
+                      const st = dbSites.find((s) => s.id === siteId);
                       if (st) {
                         setLegacySiteName(st.site_name);
+                        if (st.company_id) {
+                          setLegacyCompanyId(st.company_id);
+                          const comp = dbCompanies.find((c) => c.id === st.company_id);
+                          if (comp) {
+                            setLegacyEntity(comp.entity_code === 'ASF' || comp.name.includes('ASF') ? 'ASF' : 'Ambe');
+                          }
+                        }
                       }
                     }}
                     className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-semibold"
