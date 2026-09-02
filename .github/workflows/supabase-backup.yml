@@ -1,0 +1,110 @@
+name: Supabase Database Backup
+
+on:
+  schedule:
+    # Daily at 18:30 UTC = 00:00 (Midnight) IST
+    - cron: '30 18 * * *'
+  workflow_dispatch:
+
+jobs:
+  backup:
+    name: Run DB Backup & Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Dump, archive, and encrypt database
+        shell: bash
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: |
+          set -eo pipefail
+
+          if [ -z "$SUPABASE_DB_URL" ]; then
+            echo "::error::SUPABASE_DB_URL secret is not set!"
+            exit 1
+          fi
+
+          if [ -z "$BACKUP_ENCRYPTION_KEY" ]; then
+            echo "::error::BACKUP_ENCRYPTION_KEY secret is not set!"
+            exit 1
+          fi
+
+          BACKUP_DATE=$(date -u +'%Y-%m-%d')
+          TEMP_DIR=$(mktemp -d)
+          BACKUP_DIR="${TEMP_DIR}/backup-${BACKUP_DATE}"
+          mkdir -p "$BACKUP_DIR"
+
+          echo "Dumping roles..."
+          supabase db dump --db-url "$SUPABASE_DB_URL" --role-only -f "${BACKUP_DIR}/roles.sql"
+
+          echo "Dumping schema..."
+          supabase db dump --db-url "$SUPABASE_DB_URL" -f "${BACKUP_DIR}/schema.sql"
+
+          echo "Dumping data..."
+          supabase db dump --db-url "$SUPABASE_DB_URL" --data-only --use-copy -f "${BACKUP_DIR}/data.sql"
+
+          echo "Creating tarball archive..."
+          TARBALL="backup-${BACKUP_DATE}.tar.gz"
+          tar -czf "$TEMP_DIR/$TARBALL" -C "$TEMP_DIR" "backup-${BACKUP_DATE}"
+
+          echo "Encrypting archive with GPG..."
+          ENCRYPTED_FILE="backup-${BACKUP_DATE}.tar.gz.gpg"
+          gpg --batch --yes --symmetric --cipher-algo AES256 \
+            --passphrase "$BACKUP_ENCRYPTION_KEY" \
+            -o "$GITHUB_WORKSPACE/$ENCRYPTED_FILE" \
+            "$TEMP_DIR/$TARBALL"
+
+          echo "Wiping temporary unencrypted files..."
+          rm -rf "$TEMP_DIR"
+
+          echo "BACKUP_TAG=backup-${BACKUP_DATE}" >> $GITHUB_ENV
+          echo "ENCRYPTED_FILE=${ENCRYPTED_FILE}" >> $GITHUB_ENV
+
+      - name: Publish encrypted backup to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.BACKUP_TAG }}
+          name: Supabase DB Backup ${{ env.BACKUP_TAG }}
+          body: |
+            Automated encrypted nightly backup for Supabase Postgres.
+            Archive: `${{ env.ENCRYPTED_FILE }}`
+            Restore instructions: See [RESTORE.md](RESTORE.md)
+          draft: false
+          prerelease: true
+          files: ${{ env.ENCRYPTED_FILE }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup backups older than 30 days
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eo pipefail
+          CUTOFF_TIMESTAMP=$(date -u -d "30 days ago" +%s 2>/dev/null || date -u -v-30d +%s)
+
+          echo "Fetching releases..."
+          gh release list --limit 100 --json tagName,createdAt | jq -c '.[]' | while read -r item; do
+            TAG=$(echo "$item" | jq -r '.tagName')
+            CREATED_AT=$(echo "$item" | jq -r '.createdAt')
+            
+            # Target only backup-* tags
+            if [[ "$TAG" == backup-* ]]; then
+              CREATED_TIMESTAMP=$(date -u -d "$CREATED_AT" +%s 2>/dev/null || date -u -j -f "%Y-%m-%dT%H:%M:%SZ" "$CREATED_AT" +%s)
+              if [ "$CREATED_TIMESTAMP" -lt "$CUTOFF_TIMESTAMP" ]; then
+                echo "Deleting old backup release & tag: $TAG (created at $CREATED_AT)"
+                gh release delete "$TAG" --yes --cleanup-tag || true
+              fi
+            fi
+          done
