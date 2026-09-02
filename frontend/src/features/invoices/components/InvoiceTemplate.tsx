@@ -28,6 +28,33 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
   const fontStyle = { fontFamily: 'Arial, Helvetica, sans-serif' };
   const isBw = colorMode === 'bw';
 
+  const hasLocationColumn = (data.items || []).some(
+    (item) => Boolean(item.location && item.location.trim())
+  );
+
+  const locationSpans: number[] = [];
+  if (hasLocationColumn && data.items) {
+    let i = 0;
+    while (i < data.items.length) {
+      const loc = (data.items[i]?.location || '').trim();
+      if (!loc) {
+        locationSpans[i] = 1;
+        i++;
+        continue;
+      }
+      let j = i + 1;
+      while (j < data.items.length && (data.items[j]?.location || '').trim() === loc) {
+        j++;
+      }
+      const span = j - i;
+      locationSpans[i] = span;
+      for (let k = i + 1; k < j; k++) {
+        locationSpans[k] = 0;
+      }
+      i = j;
+    }
+  }
+
   return (
     <div
       id="printable-invoice"
@@ -154,13 +181,28 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
             <table className="w-full border-collapse text-[11px] text-left" style={fontStyle}>
               <thead>
                 <tr className="border-b border-black text-black bg-white print:bg-transparent">
-                  <th className="border-r border-black py-1 px-1.5 text-center font-normal w-[6%]">Sr No</th>
-                  <th className="border-r border-black py-1 px-1.5 text-center font-normal w-[34%]">Description of Services</th>
-                  <th className="border-r border-black py-1 px-1.5 text-center font-normal w-[10%]">HSN Code</th>
-                  <th className="border-r border-black py-1 px-1.5 text-center font-normal w-[12%]">Rate</th>
-                  <th className="border-r border-black py-1 px-1.5 text-center font-normal w-[10%]">Working Days</th>
-                  <th className="border-r border-black py-1 px-1.5 text-center font-normal w-[8%]">Persons</th>
-                  <th className="py-1 px-1.5 text-center font-normal w-[20%]">Amount (RS)</th>
+                  {hasLocationColumn ? (
+                    <>
+                      <th className="border-r border-black py-1 px-1.5 text-center font-normal w-[5%]">Sr No</th>
+                      <th className="border-r border-black py-1 px-1.5 text-center font-normal w-[27%]">Description of Services</th>
+                      <th className="border-r border-black py-1 px-1.5 text-center font-normal w-[17%]">Location</th>
+                      <th className="border-r border-black py-1 px-1.5 text-center font-normal w-[9%]">HSN Code</th>
+                      <th className="border-r border-black py-1 px-1.5 text-center font-normal w-[10%]">Rate</th>
+                      <th className="border-r border-black py-1 px-1.5 text-center font-normal w-[8%]">Working Days</th>
+                      <th className="border-r border-black py-1 px-1.5 text-center font-normal w-[8%]">Persons</th>
+                      <th className="py-1 px-1.5 text-center font-normal w-[16%]">Amount (RS)</th>
+                    </>
+                  ) : (
+                    <>
+                      <th className="border-r border-black py-1 px-1.5 text-center font-normal w-[6%]">Sr No</th>
+                      <th className="border-r border-black py-1 px-1.5 text-center font-normal w-[34%]">Description of Services</th>
+                      <th className="border-r border-black py-1 px-1.5 text-center font-normal w-[10%]">HSN Code</th>
+                      <th className="border-r border-black py-1 px-1.5 text-center font-normal w-[12%]">Rate</th>
+                      <th className="border-r border-black py-1 px-1.5 text-center font-normal w-[10%]">Working Days</th>
+                      <th className="border-r border-black py-1 px-1.5 text-center font-normal w-[8%]">Persons</th>
+                      <th className="py-1 px-1.5 text-center font-normal w-[20%]">Amount (RS)</th>
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -174,6 +216,15 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
                     <tr key={item.id || index} className="border-b border-black">
                       <td className="border-r border-black py-0.5 px-1 text-center font-normal">{index + 1}</td>
                       <td className="border-r border-black py-0.5 px-1.5 font-normal">{item.description}</td>
+
+                      {hasLocationColumn && locationSpans[index] > 0 && (
+                        <td
+                          rowSpan={locationSpans[index]}
+                          className="border-r border-black py-0.5 px-1.5 text-center font-normal align-middle"
+                        >
+                          {item.location || ''}
+                        </td>
+                      )}
 
                       {/* Condition A: Main Row with Overtime next -> rowSpan={2} */}
                       {!isOvertime && nextIsOvertime ? (
@@ -213,6 +264,7 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
                   <tr key={`blank-${idx}`} className="h-7">
                     <td className="border-r border-black p-0"></td>
                     <td className="border-r border-black p-0"></td>
+                    {hasLocationColumn && <td className="border-r border-black p-0"></td>}
                     <td className="border-r border-black p-0"></td>
                     <td className="border-r border-black p-0"></td>
                     <td className="border-r border-black p-0"></td>

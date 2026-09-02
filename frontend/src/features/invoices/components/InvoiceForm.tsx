@@ -214,7 +214,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               key={item.id || idx}
               className="grid grid-cols-12 gap-2 bg-slate-50 p-3 rounded-xl border border-gray-200 items-center text-xs"
             >
-              <div className="col-span-4">
+              <div className={data.items.some((i) => i.location !== undefined) ? 'col-span-3' : 'col-span-4'}>
                 <label className="block text-[10px] text-gray-600 mb-0.5 font-medium">Description</label>
                 <input
                   type="text"
@@ -223,7 +223,19 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
                   className="w-full bg-white border border-gray-200 rounded-md px-2 py-1 text-gray-900 text-xs font-semibold"
                 />
               </div>
-              <div className="col-span-2">
+              {data.items.some((i) => i.location !== undefined) && (
+                <div className="col-span-2">
+                  <label className="block text-[10px] text-gray-600 mb-0.5 font-medium">Location</label>
+                  <input
+                    type="text"
+                    value={item.location || ''}
+                    placeholder="e.g. A & A1 Wing"
+                    onChange={(e) => handleItemChange(idx, 'location', e.target.value)}
+                    className="w-full bg-white border border-gray-200 rounded-md px-2 py-1 text-gray-900 text-xs"
+                  />
+                </div>
+              )}
+              <div className={data.items.some((i) => i.location !== undefined) ? 'col-span-1.5' : 'col-span-2'}>
                 <label className="block text-[10px] text-gray-600 mb-0.5 font-medium">Rate (₹)</label>
                 <input
                   type="number"

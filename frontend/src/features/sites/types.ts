@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const rateCardSchema = z.object({
   id: z.string().optional(),
   roleName: z.string().min(1, 'Role name is required'),
+  location: z.string().optional().or(z.literal('')),
   monthlyRate: z.number().min(0, 'Rate must be 0 or positive'),
   workingDays: z.number().optional().default(31),
   hsnCode: z.string().optional().default('9985'),

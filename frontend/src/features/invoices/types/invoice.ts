@@ -2,6 +2,7 @@ export interface InvoiceLineItem {
   id: string;
   srNo: number;
   description: string;
+  location?: string;
   hsnCode: string;
   rate: number;
   workingDays?: number;

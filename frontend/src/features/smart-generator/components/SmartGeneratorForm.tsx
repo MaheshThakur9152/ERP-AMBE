@@ -328,6 +328,7 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
         id: `sg-main-${sr}`,
         srNo: sr++,
         description: rc.roleName,
+        location: rc.location || '',
         hsnCode: rc.hsnCode || '9985',
         rate: rc.monthlyRate,
         workingDays: defaultDays,
@@ -339,6 +340,7 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
         id: `sg-ot-${sr}`,
         srNo: sr++,
         description: `Overtime in hours (${rc.roleName})`,
+        location: rc.location || '',
         hsnCode: rc.hsnCode || '9985',
         rate: 0,
         workingDays: 0,
@@ -726,73 +728,92 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
         </div>
 
         <div className="overflow-x-auto rounded-xl border border-gray-200">
-          <table className="w-full text-left text-sm text-gray-700">
-            <thead className="bg-gray-50 text-gray-700 uppercase font-bold text-xs tracking-wider border-b border-gray-200">
-              <tr>
-                <th className="py-3 px-3 w-12 text-center">Sr</th>
-                <th className="py-3 px-3">Description of Services</th>
-                <th className="py-3 px-3 text-center w-24">HSN Code</th>
-                <th className="py-3 px-3 text-right w-28">Rate (₹)</th>
-                <th className="py-3 px-3 text-right w-24">Working Days</th>
-                <th className="py-3 px-3 text-right w-20">Persons</th>
-                <th className="py-3 px-3 text-right w-32">Amount (₹)</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 font-mono text-xs">
-              {lineItems.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-8 text-center text-gray-500 text-xs font-medium">
-                    No rate cards configured for this site.
-                  </td>
-                </tr>
-              ) : (
-                lineItems.map((item, idx) => (
-                  <tr key={item.id} className="hover:bg-slate-50">
-                    <td className="py-2.5 px-3 text-center text-gray-500">{item.srNo}</td>
-                    <td className="py-2.5 px-3 font-sans text-gray-900 font-semibold">
-                      <input
-                        type="text"
-                        value={item.description}
-                        onChange={(e) => handleItemChange(idx, 'description', e.target.value)}
-                        className="w-full bg-transparent border-b border-gray-200 text-gray-900 py-0.5 transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 rounded px-1.5"
-                      />
-                    </td>
-                    <td className="py-2.5 px-3 text-center text-gray-500">{item.hsnCode}</td>
-                    <td className="py-2.5 px-3 text-right">
-                      <input
-                        type="number"
-                        value={item.rate === 0 ? '' : item.rate}
-                        onChange={(e) => handleItemChange(idx, 'rate', e.target.value === '' ? 0 : e.target.value)}
-                        placeholder="0"
-                        className="w-24 bg-white border border-gray-200 rounded px-2.5 py-1 text-right text-gray-800 transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 font-mono"
-                      />
-                    </td>
-                    <td className="py-2.5 px-3 text-right">
-                      <input
-                        type="number"
-                        value={item.workingDays === 0 ? '' : item.workingDays}
-                        onChange={(e) => handleItemChange(idx, 'workingDays', e.target.value === '' ? 0 : e.target.value)}
-                        placeholder="0"
-                        className="w-20 bg-white border border-gray-200 rounded px-2.5 py-1 text-right text-gray-800 transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 font-mono"
-                      />
-                    </td>
-                    <td className="py-2.5 px-3 text-right">
-                      <input
-                        type="number"
-                        value={item.persons === 0 ? '' : item.persons}
-                        onChange={(e) => handleItemChange(idx, 'persons', e.target.value === '' ? 0 : e.target.value)}
-                        placeholder="0"
-                        className="w-16 bg-white border border-gray-200 rounded px-2.5 py-1 text-right text-gray-800 transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 font-mono"
-                      />
-                    </td>
-                    <td className="py-2.5 px-3 text-right font-bold text-teal-700 font-mono">
-                      ₹{formatCurrency(item.amount)}
-                    </td>
+          {(() => {
+            const hasLocationColumn = lineItems.some((item) => Boolean(item.location && item.location.trim()));
+            return (
+              <table className="w-full text-left text-sm text-gray-700">
+                <thead className="bg-gray-50 text-gray-700 uppercase font-bold text-xs tracking-wider border-b border-gray-200">
+                  <tr>
+                    <th className="py-3 px-3 w-12 text-center">Sr</th>
+                    <th className="py-3 px-3">Description of Services</th>
+                    {hasLocationColumn && (
+                      <th className="py-3 px-3 text-center w-36">Location</th>
+                    )}
+                    <th className="py-3 px-3 text-center w-24">HSN Code</th>
+                    <th className="py-3 px-3 text-right w-28">Rate (₹)</th>
+                    <th className="py-3 px-3 text-right w-24">Working Days</th>
+                    <th className="py-3 px-3 text-right w-20">Persons</th>
+                    <th className="py-3 px-3 text-right w-32">Amount (₹)</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                </thead>
+                <tbody className="divide-y divide-gray-100 font-mono text-xs">
+                  {lineItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={hasLocationColumn ? 8 : 7} className="py-8 text-center text-gray-500 text-xs font-medium">
+                        No rate cards configured for this site.
+                      </td>
+                    </tr>
+                  ) : (
+                    lineItems.map((item, idx) => (
+                      <tr key={item.id} className="hover:bg-slate-50">
+                        <td className="py-2.5 px-3 text-center text-gray-500">{item.srNo}</td>
+                        <td className="py-2.5 px-3 font-sans text-gray-900 font-semibold">
+                          <input
+                            type="text"
+                            value={item.description}
+                            onChange={(e) => handleItemChange(idx, 'description', e.target.value)}
+                            className="w-full bg-transparent border-b border-gray-200 text-gray-900 py-0.5 transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 rounded px-1.5"
+                          />
+                        </td>
+                        {hasLocationColumn && (
+                          <td className="py-2.5 px-3 text-center font-sans">
+                            <input
+                              type="text"
+                              value={item.location || ''}
+                              onChange={(e) => handleItemChange(idx, 'location', e.target.value)}
+                              placeholder="Location"
+                              className="w-full bg-transparent border-b border-gray-200 text-gray-700 py-0.5 text-xs text-center transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 rounded px-1.5"
+                            />
+                          </td>
+                        )}
+                        <td className="py-2.5 px-3 text-center text-gray-500">{item.hsnCode}</td>
+                        <td className="py-2.5 px-3 text-right">
+                          <input
+                            type="number"
+                            value={item.rate === 0 ? '' : item.rate}
+                            onChange={(e) => handleItemChange(idx, 'rate', e.target.value === '' ? 0 : e.target.value)}
+                            placeholder="0"
+                            className="w-24 bg-white border border-gray-200 rounded px-2.5 py-1 text-right text-gray-800 transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 font-mono"
+                          />
+                        </td>
+                        <td className="py-2.5 px-3 text-right">
+                          <input
+                            type="number"
+                            value={item.workingDays === 0 ? '' : item.workingDays}
+                            onChange={(e) => handleItemChange(idx, 'workingDays', e.target.value === '' ? 0 : e.target.value)}
+                            placeholder="0"
+                            className="w-20 bg-white border border-gray-200 rounded px-2.5 py-1 text-right text-gray-800 transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 font-mono"
+                          />
+                        </td>
+                        <td className="py-2.5 px-3 text-right">
+                          <input
+                            type="number"
+                            value={item.persons === 0 ? '' : item.persons}
+                            onChange={(e) => handleItemChange(idx, 'persons', e.target.value === '' ? 0 : e.target.value)}
+                            placeholder="0"
+                            className="w-16 bg-white border border-gray-200 rounded px-2.5 py-1 text-right text-gray-800 transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 font-mono"
+                          />
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-bold text-teal-700 font-mono">
+                          ₹{formatCurrency(item.amount)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            );
+          })()}
         </div>
 
         {/* Calculation Summary Footer */}

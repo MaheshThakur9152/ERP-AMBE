@@ -41,13 +41,23 @@ export const excelService = {
     csv += `Billing Period,${data.meta?.billingPeriod || ''}\n`;
     csv += `Party Name,${data.party?.name || ''}\n`;
     csv += `Site Name,${data.party?.siteName || ''}\n\n`;
-    csv += `Sr,Description of Services,HSN Code,Rate (INR),Working Days,Persons,Amount (INR)\n`;
 
-    if (Array.isArray(data.items)) {
+    const hasLocation = Array.isArray(data.items) && data.items.some(i => Boolean(i.location && i.location.trim()));
+    if (hasLocation) {
+      csv += `Sr,Description of Services,Location,HSN Code,Rate (INR),Working Days,Persons,Amount (INR)\n`;
       data.items.forEach((item) => {
         const safeDesc = (item.description || '').replace(/"/g, '""');
-        csv += `"${item.srNo}","${safeDesc}","${item.hsnCode || ''}",${item.rate || 0},${item.workingDays || 0},${item.persons || 0},${item.amount || 0}\n`;
+        const safeLoc = (item.location || '').replace(/"/g, '""');
+        csv += `"${item.srNo}","${safeDesc}","${safeLoc}","${item.hsnCode || ''}",${item.rate || 0},${item.workingDays || 0},${item.persons || 0},${item.amount || 0}\n`;
       });
+    } else {
+      csv += `Sr,Description of Services,HSN Code,Rate (INR),Working Days,Persons,Amount (INR)\n`;
+      if (Array.isArray(data.items)) {
+        data.items.forEach((item) => {
+          const safeDesc = (item.description || '').replace(/"/g, '""');
+          csv += `"${item.srNo}","${safeDesc}","${item.hsnCode || ''}",${item.rate || 0},${item.workingDays || 0},${item.persons || 0},${item.amount || 0}\n`;
+        });
+      }
     }
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -72,13 +82,23 @@ export const excelService = {
       csv += `Billing Period,${data.meta?.billingPeriod || ''}\n`;
       csv += `Party Name,${data.party?.name || ''}\n`;
       csv += `Site Name,${data.party?.siteName || ''}\n\n`;
-      csv += `Sr,Description of Services,HSN Code,Rate (INR),Working Days,Persons,Amount (INR)\n`;
 
-      if (Array.isArray(data.items)) {
+      const hasLocation = Array.isArray(data.items) && data.items.some(i => Boolean(i.location && i.location.trim()));
+      if (hasLocation) {
+        csv += `Sr,Description of Services,Location,HSN Code,Rate (INR),Working Days,Persons,Amount (INR)\n`;
         data.items.forEach((item) => {
           const safeDesc = (item.description || '').replace(/"/g, '""');
-          csv += `"${item.srNo}","${safeDesc}","${item.hsnCode || ''}",${item.rate || 0},${item.workingDays || 0},${item.persons || 0},${item.amount || 0}\n`;
+          const safeLoc = (item.location || '').replace(/"/g, '""');
+          csv += `"${item.srNo}","${safeDesc}","${safeLoc}","${item.hsnCode || ''}",${item.rate || 0},${item.workingDays || 0},${item.persons || 0},${item.amount || 0}\n`;
         });
+      } else {
+        csv += `Sr,Description of Services,HSN Code,Rate (INR),Working Days,Persons,Amount (INR)\n`;
+        if (Array.isArray(data.items)) {
+          data.items.forEach((item) => {
+            const safeDesc = (item.description || '').replace(/"/g, '""');
+            csv += `"${item.srNo}","${safeDesc}","${item.hsnCode || ''}",${item.rate || 0},${item.workingDays || 0},${item.persons || 0},${item.amount || 0}\n`;
+          });
+        }
       }
 
       const filename = `Invoice_${(data.meta?.invoiceNo || 'export').replace(/[\/\\]/g, '_')}.csv`;

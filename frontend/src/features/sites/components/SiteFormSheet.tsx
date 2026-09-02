@@ -98,7 +98,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
       ],
       status: 'Active',
       rateCards: [
-        { roleName: '', monthlyRate: 0, workingDays: 31, hsnCode: '9985', persons: 1 },
+        { roleName: '', location: '', monthlyRate: 0, workingDays: 31, hsnCode: '9985', persons: 1 },
       ],
     },
   });
@@ -183,7 +183,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
         ],
         status: 'Active',
         rateCards: [
-          { roleName: '', monthlyRate: 0, workingDays: 31, hsnCode: '9985', persons: 1 },
+          { roleName: '', location: '', monthlyRate: 0, workingDays: 31, hsnCode: '9985', persons: 1 },
         ],
       });
     }
@@ -719,7 +719,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
               <button
                 type="button"
                 onClick={() =>
-                  append({ roleName: '', monthlyRate: 0, workingDays: 31, hsnCode: '9985', persons: 1 })
+                  append({ roleName: '', location: '', monthlyRate: 0, workingDays: 31, hsnCode: '9985', persons: 1 })
                 }
                 className="text-xs px-3 py-1.5 rounded-lg bg-[#20B2AA]/10 text-[#20B2AA] hover:bg-[#20B2AA]/20 border border-[#20B2AA]/30 flex items-center gap-1 font-semibold transition-colors cursor-pointer"
               >
@@ -738,7 +738,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
                   key={field.id}
                   className="grid grid-cols-12 gap-2 bg-slate-50 p-3.5 rounded-xl border border-gray-200 items-end"
                 >
-                  <div className="col-span-4">
+                  <div className="col-span-3">
                     <label className="block text-[11px] font-medium text-gray-600 mb-1">Role / Designation *</label>
                     <input
                       type="text"
@@ -749,6 +749,16 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
                   </div>
 
                   <div className="col-span-3">
+                    <label className="block text-[11px] font-medium text-gray-600 mb-1">Location (Optional)</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. A & A1 Wing"
+                      {...register(`rateCards.${idx}.location`)}
+                      className="w-full bg-white border border-gray-200 rounded-lg px-2.5 py-1.5 text-xs text-gray-800 focus:outline-none focus:border-[#20B2AA]"
+                    />
+                  </div>
+
+                  <div className="col-span-2">
                     <label className="block text-[11px] font-medium text-gray-600 mb-1">Monthly Rate (₹) *</label>
                     <input
                       type="number"
@@ -767,7 +777,7 @@ export const SiteFormSheet: React.FC<SiteFormSheetProps> = ({
                     />
                   </div>
 
-                  <div className="col-span-2">
+                  <div className="col-span-1">
                     <label className="block text-[11px] font-medium text-gray-600 mb-1">Persons</label>
                     <input
                       type="number"

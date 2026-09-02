@@ -1,6 +1,7 @@
 export interface RateCardItem {
   id?: string;
   roleName: string;
+  location?: string;
   monthlyRate: number;
   workingDays?: number;
   hsnCode?: string;

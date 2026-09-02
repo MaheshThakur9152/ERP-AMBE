@@ -26,6 +26,7 @@ export interface RateCardRecord {
   site_id?: string;
   site_name?: string;
   post_name: string;
+  location?: string;
   gross_salary: number;
   committed_salary?: number | null;
   basic_da: number;
@@ -95,6 +96,7 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
 
   // New / Edit Rate Card Form State (Starts Empty, NOT 0)
   const [postName, setPostName] = useState('');
+  const [location, setLocation] = useState<string>('');
   const [grossSalary, setGrossSalary] = useState<number | ''>('');
   const [committedSalary, setCommittedSalary] = useState<number | ''>('');
   const [remark, setRemark] = useState<string>('');
@@ -129,6 +131,7 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
   const resetForm = () => {
     setEditingRateCardId(null);
     setPostName('');
+    setLocation('');
     setIsCustomPost(false);
     setCustomPostName('');
     setGrossSalary('');
@@ -162,6 +165,7 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
       setCustomPostName(rc.post_name);
     }
 
+    setLocation(rc.location || '');
     setGrossSalary(rc.gross_salary && Number(rc.gross_salary) > 0 ? Number(rc.gross_salary) : '');
     setCommittedSalary(rc.committed_salary && Number(rc.committed_salary) > 0 ? Number(rc.committed_salary) : '');
     setRemark(rc.remark || '');
@@ -270,6 +274,7 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
             site_id: siteId,
             site_name: siteName,
             post_name: rc.roleName || rc.post_name || rc.designation || 'Staff',
+            location: rc.location || '',
             gross_salary: Number(rc.monthlyRate || rc.gross_salary || rc.grossSalary || 0),
             committed_salary: rc.committed_salary ? Number(rc.committed_salary) : null,
             basic_da: Number(rc.basic_da || 0),
@@ -379,6 +384,7 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
       site_id: siteId || null,
       site_name: siteName,
       post_name: effectivePostName,
+      location: location.trim(),
       gross_salary: Number(grossSalary) || 0,
       committed_salary: committedSalary === '' ? null : Number(committedSalary),
       remark: remark.trim(),
@@ -420,6 +426,7 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
                 id: editingRateCardId,
                 roleName: effectivePostName,
                 post_name: effectivePostName,
+                location: location.trim(),
                 monthlyRate: Number(grossSalary) || 0,
                 gross_salary: Number(grossSalary) || 0,
                 committed_salary: committedSalary === '' ? null : Number(committedSalary),
@@ -791,8 +798,8 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
               )}
             </div>
 
-            {/* Row 1: Post Name, Gross Salary, Committed Salary, Remark */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+            {/* Row 1: Post Name, Location, Gross Salary, Committed Salary, Remark */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
               <div>
                 <label className="block text-[11px] font-bold text-gray-700 mb-1">Post Name *</label>
                 <select
@@ -839,6 +846,20 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
                     className="mt-1.5 w-full bg-white border border-teal-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 focus:ring-2 focus:ring-teal-500"
                   />
                 )}
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-gray-700 mb-1">Location (Optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. A & A1 Wing"
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  className="w-full bg-white border border-gray-300 rounded-lg px-2.5 py-1.5 text-xs text-gray-900 focus:ring-2 focus:ring-teal-500 placeholder:text-gray-400"
+                />
+                <p className="text-[9.5px] text-gray-400 mt-0.5">
+                  e.g. A Wing, Parking
+                </p>
               </div>
 
               <div>
@@ -1113,6 +1134,11 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
                         <div className="space-y-1">
                           <div className="font-bold text-gray-900 text-sm flex items-center gap-2 flex-wrap">
                             <span>{rc.post_name}</span>
+                            {rc.location ? (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 font-semibold border border-teal-200 flex items-center gap-1">
+                                📍 {rc.location}
+                              </span>
+                            ) : null}
                             {rc.remark ? (
                               <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-semibold border border-slate-200">
                                 {rc.remark}

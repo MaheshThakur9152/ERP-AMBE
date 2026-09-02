@@ -24,19 +24,35 @@ export class ExcelService {
     csv += `Invoice Date,${sanitizeCsvCell(data.meta?.invoiceDate)}\n`;
     csv += `Billing Period,${sanitizeCsvCell(data.meta?.billingPeriod)}\n`;
     csv += `Party Name,${sanitizeCsvCell(data.party?.name)}\n\n`;
-    csv += `Sr,Description of Services,HSN Code,Rate,Working Days,Persons,Amount\n`;
 
-    if (Array.isArray(data.items)) {
+    const hasLocation = Array.isArray(data.items) && data.items.some((i: any) => Boolean(i.location && String(i.location).trim()));
+    if (hasLocation) {
+      csv += `Sr,Description of Services,Location,HSN Code,Rate,Working Days,Persons,Amount\n`;
       data.items.forEach((item: any) => {
         const srNo = sanitizeCsvCell(item.srNo);
         const safeDesc = sanitizeCsvCell(item.description);
+        const safeLoc = sanitizeCsvCell(item.location);
         const hsnCode = sanitizeCsvCell(item.hsnCode);
         const rate = sanitizeNumber(item.rate);
         const workingDays = sanitizeNumber(item.workingDays);
         const persons = sanitizeNumber(item.persons);
         const amount = sanitizeNumber(item.amount);
-        csv += `${srNo},${safeDesc},${hsnCode},${rate},${workingDays},${persons},${amount}\n`;
+        csv += `${srNo},${safeDesc},${safeLoc},${hsnCode},${rate},${workingDays},${persons},${amount}\n`;
       });
+    } else {
+      csv += `Sr,Description of Services,HSN Code,Rate,Working Days,Persons,Amount\n`;
+      if (Array.isArray(data.items)) {
+        data.items.forEach((item: any) => {
+          const srNo = sanitizeCsvCell(item.srNo);
+          const safeDesc = sanitizeCsvCell(item.description);
+          const hsnCode = sanitizeCsvCell(item.hsnCode);
+          const rate = sanitizeNumber(item.rate);
+          const workingDays = sanitizeNumber(item.workingDays);
+          const persons = sanitizeNumber(item.persons);
+          const amount = sanitizeNumber(item.amount);
+          csv += `${srNo},${safeDesc},${hsnCode},${rate},${workingDays},${persons},${amount}\n`;
+        });
+      }
     }
 
     const rawInvoiceNo = String(data.meta?.invoiceNo || 'export').replace(/[\/\\]/g, '_');

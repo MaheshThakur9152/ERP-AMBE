@@ -115,6 +115,33 @@ export const pdfService = {
     const items = invoiceData.items || [];
     const emptyRowsCount = Math.max(MIN_EMPTY_ROWS, MIN_ROWS - items.length);
 
+    const hasLocationColumn = items.some(
+      (item) => Boolean(item.location && item.location.trim())
+    );
+
+    const locationSpans: number[] = [];
+    if (hasLocationColumn) {
+      let i = 0;
+      while (i < items.length) {
+        const loc = (items[i]?.location || '').trim();
+        if (!loc) {
+          locationSpans[i] = 1;
+          i++;
+          continue;
+        }
+        let j = i + 1;
+        while (j < items.length && (items[j]?.location || '').trim() === loc) {
+          j++;
+        }
+        const span = j - i;
+        locationSpans[i] = span;
+        for (let k = i + 1; k < j; k++) {
+          locationSpans[k] = 0;
+        }
+        i = j;
+      }
+    }
+
     let rowsHtml = '';
     items.forEach((item, index) => {
       const isOvertime = item.description.toLowerCase().includes('overtime');
@@ -125,6 +152,14 @@ export const pdfService = {
       rowsHtml += `<tr style="border-bottom: 1px solid #000;">
         <td style="border-right: 1px solid #000; padding: 4px 6px; text-align: center;">${index + 1}</td>
         <td style="border-right: 1px solid #000; padding: 4px 6px;">${item.description}</td>`;
+
+      if (hasLocationColumn && locationSpans[index] > 0) {
+        const locSpanAttr = locationSpans[index] > 1 ? ` rowspan="${locationSpans[index]}"` : '';
+        rowsHtml += `
+          <td${locSpanAttr} style="border-right: 1px solid #000; padding: 4px 6px; text-align: center; vertical-align: middle;">
+            ${item.location || ''}
+          </td>`;
+      }
 
       if (!isOvertime && nextIsOvertime) {
         rowsHtml += `
@@ -153,6 +188,7 @@ export const pdfService = {
       rowsHtml += `<tr style="height: 28px;">
         <td style="border-right: 1px solid #000; padding: 0;"></td>
         <td style="border-right: 1px solid #000; padding: 0;"></td>
+        ${hasLocationColumn ? '<td style="border-right: 1px solid #000; padding: 0;"></td>' : ''}
         <td style="border-right: 1px solid #000; padding: 0;"></td>
         <td style="border-right: 1px solid #000; padding: 0;"></td>
         <td style="border-right: 1px solid #000; padding: 0;"></td>
@@ -222,6 +258,19 @@ export const pdfService = {
             <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 11px;">
               <thead>
                 <tr style="border-bottom: 1px solid #000;">
+                  ${
+                    hasLocationColumn
+                      ? `
+                  <th style="border-right: 1px solid #000; padding: 4px 6px; text-align: center; font-weight: normal; width: 5%;">Sr No</th>
+                  <th style="border-right: 1px solid #000; padding: 4px 6px; text-align: center; font-weight: normal; width: 27%;">Description of Services</th>
+                  <th style="border-right: 1px solid #000; padding: 4px 6px; text-align: center; font-weight: normal; width: 17%;">Location</th>
+                  <th style="border-right: 1px solid #000; padding: 4px 6px; text-align: center; font-weight: normal; width: 9%;">HSN Code</th>
+                  <th style="border-right: 1px solid #000; padding: 4px 6px; text-align: center; font-weight: normal; width: 10%;">Rate</th>
+                  <th style="border-right: 1px solid #000; padding: 4px 6px; text-align: center; font-weight: normal; width: 8%;">Working Days</th>
+                  <th style="border-right: 1px solid #000; padding: 4px 6px; text-align: center; font-weight: normal; width: 8%;">Persons</th>
+                  <th style="padding: 4px 6px; text-align: center; font-weight: normal; width: 16%;">Amount (RS)</th>
+                  `
+                      : `
                   <th style="border-right: 1px solid #000; padding: 4px 6px; text-align: center; font-weight: normal; width: 6%;">Sr No</th>
                   <th style="border-right: 1px solid #000; padding: 4px 6px; text-align: center; font-weight: normal; width: 34%;">Description of Services</th>
                   <th style="border-right: 1px solid #000; padding: 4px 6px; text-align: center; font-weight: normal; width: 10%;">HSN Code</th>
@@ -229,6 +278,8 @@ export const pdfService = {
                   <th style="border-right: 1px solid #000; padding: 4px 6px; text-align: center; font-weight: normal; width: 10%;">Working Days</th>
                   <th style="border-right: 1px solid #000; padding: 4px 6px; text-align: center; font-weight: normal; width: 8%;">Persons</th>
                   <th style="padding: 4px 6px; text-align: center; font-weight: normal; width: 20%;">Amount (RS)</th>
+                  `
+                  }
                 </tr>
               </thead>
               <tbody>
