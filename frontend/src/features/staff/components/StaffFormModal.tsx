@@ -135,7 +135,7 @@ export const StaffFormModal: React.FC<StaffFormModalProps> = ({
   const isUanLocked = isPartiallyLocked && isFieldFilled(existingStaff?.uan_no);
   const isEsicLocked = isPartiallyLocked && isFieldFilled(existingStaff?.esic_no);
 
-  // Fetch Rate Cards for selected Site
+  // Fetch Payroll Rate Cards strictly from public.rate_cards table for selected Site
   const fetchRateCardsForSite = async (sId?: string, sName?: string) => {
     if (!sId && !sName) {
       setRateCardsOptions([]);
@@ -151,32 +151,20 @@ export const StaffFormModal: React.FC<StaffFormModalProps> = ({
       } else if (sName) {
         query = query.eq('site_name', sName);
       }
-      const { data, error } = await query;
+      const { data, error } = await query.order('created_at', { ascending: false });
       if (!error && data) {
-        list = [...data];
-      }
-
-      if (list.length === 0 && sId) {
-        const { data: siteData } = await supabase
-          .from('sites')
-          .select('id, site_name, rate_cards')
-          .eq('id', sId)
-          .maybeSingle();
-
-        if (siteData?.rate_cards && Array.isArray(siteData.rate_cards) && siteData.rate_cards.length > 0) {
-          const siteJsonCards = siteData.rate_cards.map((rc: any, idx: number) => ({
-            id: rc.id || `site-rc-${idx}`,
-            post_name: rc.roleName || rc.post_name || rc.designation || 'Staff',
-            gross_salary: Number(rc.monthlyRate || rc.gross_salary || rc.grossSalary || 0),
-            is_flat_wage: Boolean(rc.is_flat_wage || rc.isFlatWage),
-          }));
-          list = siteJsonCards;
-        }
+        // Filter out zero-salary billing artifacts if any exist
+        list = data.filter(
+          (rc: any) =>
+            Boolean(rc.is_flat_wage) ||
+            Number(rc.gross_salary || 0) > 0 ||
+            Number(rc.basic_da || 0) > 0
+        );
       }
 
       setRateCardsOptions(list);
     } catch (e) {
-      console.warn('Error fetching rate cards for modal:', e);
+      console.warn('Error fetching payroll rate cards for modal:', e);
       setRateCardsOptions([]);
     }
   };
