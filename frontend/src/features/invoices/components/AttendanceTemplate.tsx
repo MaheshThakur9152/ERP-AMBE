@@ -110,15 +110,15 @@ export const AttendanceTemplate: React.FC<AttendanceTemplateProps> = ({ data }) 
         <colgroup>
           <col style={{ width: '2.5%' }} />
           <col style={{ width: '3%' }} />
-          <col style={{ width: '16.5%' }} />
-          <col style={{ width: '3%' }} />
+          <col style={{ width: '15.5%' }} />
+          <col style={{ width: '4.5%' }} />
           {dayIndices.map((d) => (
-            <col key={d} style={{ width: '2%' }} />
+            <col key={d} style={{ width: '1.95%' }} />
           ))}
           <col style={{ width: '3.5%' }} />
           <col style={{ width: '3%' }} />
-          <col style={{ width: '2.5%' }} />
-          <col style={{ width: '4%' }} />
+          <col style={{ width: '3%' }} />
+          <col style={{ width: '4.55%' }} />
         </colgroup>
         <thead>
           {/* Top Titles */}
@@ -261,10 +261,10 @@ export const AttendanceTemplate: React.FC<AttendanceTemplateProps> = ({ data }) 
                   <td rowSpan={2} className="border border-black text-center font-bold text-[9px]">
                     {emp.biometricCode}
                   </td>
-                  <td rowSpan={2} className="border border-black font-extrabold text-[11px] uppercase text-center align-middle whitespace-nowrap">
+                  <td rowSpan={2} className="border border-black font-semibold text-[9px] uppercase text-center align-middle whitespace-nowrap">
                     {emp.employeeName}
                   </td>
-                  <td rowSpan={2} className="border border-black text-center font-bold text-[9px] uppercase">
+                  <td rowSpan={2} className="border border-black text-center font-bold text-[8px] uppercase">
                     {emp.weeklyOff}
                   </td>
 
@@ -321,7 +321,7 @@ export const AttendanceTemplate: React.FC<AttendanceTemplateProps> = ({ data }) 
 
           {/* Bottom Summary Row 1: WEEKLY OFF */}
           <tr className="font-bold">
-            <td colSpan={4} className="border border-black text-right font-extrabold text-[9px] pr-1">
+            <td colSpan={4} className="border border-black text-right font-extrabold text-[7.5px] uppercase whitespace-nowrap pr-0.5">
               WEEKLY OFF
             </td>
             {dayIndices.map((dIdx) => (
@@ -338,14 +338,25 @@ export const AttendanceTemplate: React.FC<AttendanceTemplateProps> = ({ data }) 
 
           {/* Bottom Summary Row 2: PRESENT STRENGTH */}
           <tr className="font-bold">
-            <td colSpan={4} className="border border-black text-right font-extrabold text-[9px] pr-1">
+            <td colSpan={4} className="border border-black text-right font-extrabold text-[7.5px] uppercase whitespace-nowrap pr-0.5">
               PRESENT STRENGTH
             </td>
-            {dayIndices.map((dIdx) => (
-              <td key={dIdx} className="border border-black text-center font-bold text-red-600">
-                {dailyPresentCount[dIdx] || 0}
-              </td>
-            ))}
+            {dayIndices.map((dIdx) => {
+              const count = dailyPresentCount[dIdx] || 0;
+              const approved = data.summary?.approvedManpower || 5;
+              const isTargetHit = count === approved;
+
+              return (
+                <td
+                  key={dIdx}
+                  className={`border border-black text-center font-bold ${
+                    isTargetHit ? 'bg-green-200 text-green-800' : 'text-red-600'
+                  }`}
+                >
+                  {count}
+                </td>
+              );
+            })}
             {/* Total Present Strength, then GOOD DAY merged cell */}
             <td className="border border-black text-center font-bold text-red-600">{sumPresentTotal.toFixed(2)}</td>
             <td colSpan={3} rowSpan={2} className="border border-black text-center font-bold align-middle uppercase tracking-wide">
@@ -355,7 +366,7 @@ export const AttendanceTemplate: React.FC<AttendanceTemplateProps> = ({ data }) 
 
           {/* Bottom Summary Row 3: TOTAL STRENGTH */}
           <tr className="font-bold">
-            <td colSpan={4} className="border border-black text-right font-extrabold text-[9px] pr-1">
+            <td colSpan={4} className="border border-black text-right font-extrabold text-[7.5px] uppercase whitespace-nowrap pr-0.5">
               TOTAL STRENGTH
             </td>
             {dayIndices.map((dIdx) => (

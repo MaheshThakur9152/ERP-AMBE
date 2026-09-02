@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   CalendarDays,
   Filter,
@@ -14,6 +15,7 @@ import {
   X,
   Check,
   Trash2,
+  Calculator,
 } from 'lucide-react';
 import {
   AttendanceRecord,
@@ -40,6 +42,7 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
   onAddStaff,
   onEditDeductions,
 }) => {
+  const navigate = useNavigate();
   const [employees, setEmployees] = useState<EmployeeAttendanceData[]>(initialEmployees);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(initialRecords);
   const [siteList, setSiteList] = useState<{ id: string; name: string; attendanceGridName?: string; approvedManpower?: number }[]>(sites);
@@ -335,6 +338,16 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
             >
               <Plus size={16} />
               <span>Add Staff</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => navigate('/attendance-calculator')}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-lg flex items-center gap-1.5 shadow-xs text-xs font-bold transition-all cursor-pointer"
+              title="Upload Biometric Excel and Calculate Attendance"
+            >
+              <Calculator size={15} />
+              <span>Attendance Calculator</span>
             </button>
 
             {/* Date selector */}

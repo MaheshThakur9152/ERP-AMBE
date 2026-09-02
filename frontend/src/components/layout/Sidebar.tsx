@@ -16,6 +16,7 @@ import {
   FolderArchive,
   Gift,
   CalendarCheck,
+  Calculator,
   CreditCard,
   FileSpreadsheet,
   Briefcase,
@@ -256,6 +257,19 @@ export const Sidebar: React.FC = () => {
               <CalendarCheck size={18} />
             </NavLink>
             <NavLink
+              to="/attendance-calculator"
+              title="Attendance Calculator"
+              className={({ isActive }) =>
+                `w-full flex justify-center p-2.5 rounded-lg transition-colors duration-150 ${
+                  isActive
+                    ? 'bg-[#20B2AA] text-white shadow-md'
+                    : 'hover:bg-white/10 text-gray-300 hover:text-white'
+                }`
+              }
+            >
+              <Calculator size={18} />
+            </NavLink>
+            <NavLink
               to="/payroll"
               title="Payroll"
               className={({ isActive }) =>
@@ -363,6 +377,18 @@ export const Sidebar: React.FC = () => {
                   }
                 >
                   <CalendarCheck size={14} className="shrink-0" /> <span>Attendance</span>
+                </NavLink>
+                <NavLink
+                  to="/attendance-calculator"
+                  className={({ isActive }) =>
+                    `w-full flex gap-3 px-3 py-2 rounded-lg text-xs font-semibold transition-colors duration-150 items-center ${
+                      isActive
+                        ? 'bg-[#20B2AA] text-white shadow-md'
+                        : 'hover:bg-white/5 text-gray-300 hover:text-white'
+                    }`
+                  }
+                >
+                  <Calculator size={14} className="shrink-0" /> <span>Attendance Calculator</span>
                 </NavLink>
                 <NavLink
                   to="/payroll"
