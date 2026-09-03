@@ -17,6 +17,10 @@ export interface AttendanceRecord {
   overtimeStatus?: 'P' | '' | string;
   checkInTime?: string;
   checkOutTime?: string;
+  inTime?: string | null;
+  outTime?: string | null;
+  durationHours?: number | null;
+  duration?: string | null;
   timestamp?: string;
   updatedAt?: string;
   photoUrl?: string;

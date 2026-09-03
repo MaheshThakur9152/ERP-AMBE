@@ -26,6 +26,8 @@ export interface EmployeeAttendancePreviewItem {
   name: string;
   dailyHours: number[];
   dailyStatus: ('P' | 'A')[];
+  dailyInTime?: (string | null)[];
+  dailyOutTime?: (string | null)[];
   presentDays: number;
   absentDays: number;
   staffId?: string | null;

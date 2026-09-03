@@ -159,6 +159,10 @@ export class AttendanceCalculatorController {
         for (let d = 1; d <= daysInMonth; d++) {
           const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
           const status = emp.dailyStatus?.[d - 1] || 'A';
+          const inTime = emp.dailyInTime?.[d - 1] || null;
+          const outTime = emp.dailyOutTime?.[d - 1] || null;
+          const durationHours = emp.dailyHours?.[d - 1] !== undefined ? Number(emp.dailyHours[d - 1]) : 0;
+          const duration = emp.dailyDuration?.[d - 1] || (durationHours > 0 ? `${durationHours}h` : null);
 
           attendanceRecordRows.push({
             staff_id: emp.staffId,
@@ -166,6 +170,10 @@ export class AttendanceCalculatorController {
             record_date: dateStr,
             shift_type: 'regular',
             status: status === 'P' ? 'P' : 'A',
+            in_time: inTime,
+            out_time: outTime,
+            duration_hours: durationHours,
+            duration: duration,
           });
         }
       }

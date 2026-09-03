@@ -30,7 +30,7 @@ import { AddStaffModal } from './AddStaffModal';
 interface AttendanceTabProps {
   initialEmployees?: EmployeeAttendanceData[];
   initialRecords?: AttendanceRecord[];
-  sites?: { id: string; name: string; attendanceGridName?: string; approvedManpower?: number }[];
+  sites?: { id: string; name: string; codeName?: string; attendanceGridName?: string; approvedManpower?: number }[];
   onAddStaff?: () => void;
   onEditDeductions?: (emp: EmployeeAttendanceData) => void;
 }
@@ -45,7 +45,7 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
   const navigate = useNavigate();
   const [employees, setEmployees] = useState<EmployeeAttendanceData[]>(initialEmployees);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(initialRecords);
-  const [siteList, setSiteList] = useState<{ id: string; name: string; attendanceGridName?: string; approvedManpower?: number }[]>(sites);
+  const [siteList, setSiteList] = useState<{ id: string; name: string; codeName?: string; attendanceGridName?: string; approvedManpower?: number }[]>(sites);
   const [selectedMonth, setSelectedMonth] = useState<number>(8); // Aug
   const [selectedYear, setSelectedYear] = useState<number>(2026);
   const [selectedSiteFilter, setSelectedSiteFilter] = useState<string>('all');
@@ -142,18 +142,24 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
       overtimeVal = 'P';
     }
 
+    const existingRec = editingCell.currentRecord;
+
     setAttendanceRecords((prev) => {
       const filtered = prev.filter((r) => !(r.employeeId === empId && r.date === date));
       if (targetStatus !== null) {
         filtered.push({
-          id: Date.now().toString(),
+          id: existingRec?.id || Date.now().toString(),
           employeeId: empId,
           date,
           status: targetStatus,
           overtimeStatus: overtimeVal,
-          checkInTime: 'Manual',
+          checkInTime: existingRec?.checkInTime || 'Manual',
           timestamp: new Date().toISOString(),
           remarks: targetStatus === 'WOP' ? 'Present on Weekly Off' : 'Added by Admin',
+          inTime: existingRec?.inTime || null,
+          outTime: existingRec?.outTime || null,
+          durationHours: existingRec?.durationHours || null,
+          duration: existingRec?.duration || null,
         });
       }
       return filtered;
@@ -167,15 +173,33 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
         record_date: date,
         shift_type: overtimeVal ? 'overtime' : 'regular',
         status: targetStatus,
+        in_time: existingRec?.inTime || null,
+        out_time: existingRec?.outTime || null,
+        duration_hours: existingRec?.durationHours || 0,
+        duration: existingRec?.duration || null,
       };
-      supabase
-        .from('attendance_records')
-        .upsert([recordPayload], { onConflict: 'staff_id,record_date' })
-        .then(({ error }) => {
-          if (error) console.warn('⚠️ Error upserting attendance_record to Supabase:', error.message);
-        });
+
+      if (existingRec?.id) {
+        supabase
+          .from('attendance_records')
+          .update({
+            status: targetStatus,
+            shift_type: overtimeVal ? 'overtime' : 'regular',
+          })
+          .eq('id', existingRec.id)
+          .then(({ error }) => {
+            if (error) console.warn('⚠️ Error updating attendance_record:', error.message);
+          });
+      } else {
+        supabase
+          .from('attendance_records')
+          .insert([recordPayload])
+          .then(({ error }) => {
+            if (error) console.warn('⚠️ Error inserting attendance_record:', error.message);
+          });
+      }
     } catch (e) {
-      console.warn('⚠️ Could not upsert attendance_record:', e);
+      console.warn('⚠️ Could not save attendance_record:', e);
     }
 
     setEditingCell(null);
@@ -197,6 +221,7 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
           const mappedSites = dbSites.map((s: any) => ({
             id: s.id,
             name: s.site_name || s.siteName || s.name || '',
+            codeName: s.code_name || s.codeName || '',
             attendanceGridName: s.site_name || s.siteName || s.name || '',
             approvedManpower: Number(s.approved_manpower || s.approvedManpower || s.contracted_manpower || 5),
           }));
@@ -260,6 +285,10 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
             status: r.status,
             overtimeStatus: r.shift_type === 'overtime' ? 'P' : (r.overtime_status || ''),
             remarks: r.remarks || '',
+            inTime: r.in_time || null,
+            outTime: r.out_time || null,
+            durationHours: r.duration_hours !== null && r.duration_hours !== undefined ? Number(r.duration_hours) : null,
+            duration: r.duration || null,
           }));
 
           if (isMounted) {
@@ -386,11 +415,15 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
                 className="bg-transparent outline-none cursor-pointer font-semibold max-w-[180px] truncate"
               >
                 <option value="all">All Sites</option>
-                {siteList.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.attendanceGridName || s.name}
-                  </option>
-                ))}
+                {siteList.map((s) => {
+                  const baseName = s.attendanceGridName || s.name;
+                  const label = s.codeName ? `${baseName} (${s.codeName})` : baseName;
+                  return (
+                    <option key={s.id} value={s.id}>
+                      {label}
+                    </option>
+                  );
+                })}
               </select>
             </div>
 
@@ -453,7 +486,7 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
         ref={tableContainerRef}
         className="bg-white rounded-xl border border-gray-200 attendance-grid-scroll max-h-[580px] shadow-2xs"
       >
-        <table className="w-full text-center text-xs border-collapse min-w-[1550px]">
+        <table className="w-full text-center text-xs border-collapse min-w-[1900px]">
           <thead>
             <tr className="bg-white border-b border-gray-200">
               <th className="p-3 sticky left-0 top-0 bg-white z-30 border-r border-gray-200 text-left min-w-[220px] font-bold text-gray-500 uppercase tracking-wider text-[10px]">
@@ -468,7 +501,7 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
                 return (
                   <th
                     key={d}
-                    className="p-1.5 sticky top-0 z-20 border-r border-gray-100 min-w-[38px] font-medium bg-white text-gray-500"
+                    className="p-1.5 sticky top-0 z-20 border-r border-gray-100 w-[54px] min-w-[54px] max-w-[54px] font-medium bg-white text-gray-500"
                   >
                     <div className="flex flex-col items-center">
                       <span className="font-bold text-xs text-gray-700">{d}</span>
@@ -609,9 +642,23 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
                         }
                       }
 
+                      const durationStr =
+                        record?.duration ||
+                        (record?.durationHours && record.durationHours > 0
+                          ? `${record.durationHours}h`
+                          : null);
+
+                      const hasPunchInfo = Boolean(
+                        record?.inTime || record?.outTime || durationStr
+                      );
+                      const punchTooltip = hasPunchInfo
+                        ? `In: ${record?.inTime || '--'} | Out: ${record?.outTime || '--'} | Duration: ${durationStr || '--'}`
+                        : undefined;
+
                       return (
                         <td
                           key={`reg-${d}`}
+                          title={punchTooltip}
                           onClick={() =>
                             setEditingCell({
                               empId: emp.id,
@@ -620,7 +667,7 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
                               currentRecord: record,
                             })
                           }
-                          className={`border-r border-b border-slate-300 p-1 text-center align-middle cursor-pointer transition-colors ${cellBg}`}
+                          className={`border-r border-b border-slate-300 p-1 text-center align-middle cursor-pointer transition-colors w-[54px] min-w-[54px] max-w-[54px] h-9 ${cellBg}`}
                         >
                           {statusBadge}
                         </td>
@@ -628,8 +675,8 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
                     })}
                   </tr>
 
-                  {/* Row 2: Overtime / Extra Shift (Amber-tinted with thick bottom border) */}
-                  <tr className="border-b-2 border-slate-400 hover:bg-amber-100/40 transition-colors h-7 bg-amber-50/40">
+                  {/* Row 2: In-Time, Out-Time & Duration (Amber-tinted with thick bottom border) */}
+                  <tr className="border-b-2 border-slate-400 hover:bg-amber-100/40 transition-colors bg-amber-50/40 h-[52px]">
                     {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((d) => {
                       const dateStr = `${selectedYear}-${selectedMonth
                         .toString()
@@ -637,10 +684,22 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
                       const record = empMap.get(dateStr);
 
                       const isOt = record?.status === 'WOP' || record?.overtimeStatus === 'P';
+                      const durationDisplay =
+                        record?.duration ||
+                        (record?.durationHours && record.durationHours > 0
+                          ? `${record.durationHours}h`
+                          : null);
+                      const hasSubPunchInfo = Boolean(
+                        record?.inTime || record?.outTime || durationDisplay
+                      );
+                      const subTooltip = hasSubPunchInfo
+                        ? `In: ${record?.inTime || '--'} | Out: ${record?.outTime || '--'} | Duration: ${durationDisplay || '--'}`
+                        : undefined;
 
                       return (
                         <td
                           key={`ot-${d}`}
+                          title={subTooltip}
                           onClick={() =>
                             setEditingCell({
                               empId: emp.id,
@@ -649,16 +708,30 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
                               currentRecord: record,
                             })
                           }
-                          className={`border-r border-b-2 border-slate-400 p-1 text-center align-middle cursor-pointer transition-colors ${
+                          className={`border-r border-b-2 border-slate-400 p-0.5 text-center align-middle cursor-pointer transition-colors w-[54px] min-w-[54px] max-w-[54px] h-[52px] ${
                             isOt
                               ? 'bg-emerald-200/90 hover:bg-emerald-300/90'
                               : 'hover:bg-amber-100/60'
                           }`}
                         >
                           {isOt ? (
-                            <span className="font-black text-emerald-900 text-xs bg-emerald-300/90 border border-emerald-400 px-1.5 py-0.2 rounded shadow-2xs">
+                            <span className="font-black text-emerald-900 text-xs bg-emerald-300/90 border border-emerald-400 px-1.5 py-0.5 rounded shadow-2xs">
                               P
                             </span>
+                          ) : hasSubPunchInfo ? (
+                            <div className="flex flex-col items-center justify-center py-0.5 leading-[11px] font-mono select-none">
+                              <span className="text-[9px] font-bold text-emerald-700 tracking-tighter">
+                                {record?.inTime || '--'}
+                              </span>
+                              <span className="text-[9px] font-bold text-blue-700 tracking-tighter">
+                                {record?.outTime || '--'}
+                              </span>
+                              {durationDisplay && (
+                                <span className="text-[9px] font-black text-slate-800 bg-white/95 border border-slate-300 px-1 rounded shadow-2xs mt-0.5 tracking-tighter">
+                                  {durationDisplay}
+                                </span>
+                              )}
+                            </div>
                           ) : (
                             <span className="text-slate-300 font-bold text-xs">-</span>
                           )}
