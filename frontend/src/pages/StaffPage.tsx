@@ -790,6 +790,7 @@ export const StaffPage: React.FC = () => {
                 <th className="py-3.5 px-4">Employee</th>
                 <th className="py-3.5 px-4 text-center">Bio Code</th>
                 <th className="py-3.5 px-4">Role / Site</th>
+                <th className="py-3.5 px-4 text-center">Weekly Off</th>
                 <th className="py-3.5 px-4">Phone</th>
                 <th className="py-3.5 px-4 text-center">KYC Documents</th>
                 <th className="py-3.5 px-4 text-center">Status</th>
@@ -799,7 +800,7 @@ export const StaffPage: React.FC = () => {
             <tbody className="divide-y divide-gray-100">
               {filteredStaff.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-gray-500">
+                  <td colSpan={8} className="py-12 text-center text-gray-500">
                     No staff found matching query "{searchTerm}".
                   </td>
                 </tr>
@@ -854,6 +855,13 @@ export const StaffPage: React.FC = () => {
                       <td className="py-4 px-4">
                         <div className="font-semibold text-gray-800 text-xs">{roleName}</div>
                         <div className="text-xs text-gray-500 font-medium">{siteDisplay}</div>
+                      </td>
+
+                      {/* Weekly Off */}
+                      <td className="py-4 px-4 text-center">
+                        <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 uppercase tracking-wide">
+                          {staff.weekly_off || staff.weeklyOff || 'Sunday'}
+                        </span>
                       </td>
 
                       {/* Phone */}

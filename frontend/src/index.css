@@ -88,6 +88,8 @@ input[type=number] {
     left: 0 !important;
     top: 0 !important;
     width: 100% !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 }
 

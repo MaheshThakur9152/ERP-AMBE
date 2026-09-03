@@ -16,6 +16,7 @@ import {
   Check,
   Trash2,
   Calculator,
+  Loader2,
 } from 'lucide-react';
 import {
   AttendanceRecord,
@@ -23,14 +24,26 @@ import {
   EmployeeAttendanceData,
 } from '../types/attendance';
 import { AttendanceTemplate } from '@/features/invoices/components/AttendanceTemplate';
+import { MinervaSheetTemplate } from './MinervaSheetTemplate';
 import { mapDbToAttendanceTemplate, getWeeklyOffDayNum } from '../utils/attendanceMapper';
 import { supabase } from '@/lib/supabase';
+import { pdfService } from '@/services/pdfService';
 import { AddStaffModal } from './AddStaffModal';
+
+interface SiteItem {
+  id: string;
+  name: string;
+  codeName?: string;
+  attendanceGridName?: string;
+  approvedManpower?: number;
+  workOrderRef?: string;
+  clientName?: string;
+}
 
 interface AttendanceTabProps {
   initialEmployees?: EmployeeAttendanceData[];
   initialRecords?: AttendanceRecord[];
-  sites?: { id: string; name: string; codeName?: string; attendanceGridName?: string; approvedManpower?: number }[];
+  sites?: SiteItem[];
   onAddStaff?: () => void;
   onEditDeductions?: (emp: EmployeeAttendanceData) => void;
 }
@@ -45,7 +58,7 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
   const navigate = useNavigate();
   const [employees, setEmployees] = useState<EmployeeAttendanceData[]>(initialEmployees);
   const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(initialRecords);
-  const [siteList, setSiteList] = useState<{ id: string; name: string; codeName?: string; attendanceGridName?: string; approvedManpower?: number }[]>(sites);
+  const [siteList, setSiteList] = useState<SiteItem[]>(sites);
   const [selectedMonth, setSelectedMonth] = useState<number>(8); // Aug
   const [selectedYear, setSelectedYear] = useState<number>(2026);
   const [selectedSiteFilter, setSelectedSiteFilter] = useState<string>('all');
@@ -53,6 +66,8 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
 
   const [showAddStaffModal, setShowAddStaffModal] = useState<boolean>(false);
   const [refreshKey, setRefreshKey] = useState<number>(0);
+  const [isGeneratingMinervaPdf, setIsGeneratingMinervaPdf] = useState<boolean>(false);
+  const [printMode, setPrintMode] = useState<'standard' | 'minerva'>('standard');
 
   // Modals & Controls
   const [showAutoInvoiceDropdown, setShowAutoInvoiceDropdown] = useState<boolean>(false);
@@ -94,35 +109,66 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
       });
   }, [employees, searchTerm, selectedSiteFilter]);
 
+  const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
+
   const attendanceStats = useMemo(() => {
-    let presentToday = 0;
-    let absentToday = 0;
+    let totalPresent = 0;
+    let totalAbsent = 0;
+    let totalWeeklyOff = 0;
+    let totalWorkedOnWo = 0;
     let totalWorkingScore = 0;
-    const todayStr = `${selectedYear}-${selectedMonth.toString().padStart(2, '0')}-12`;
+
+    const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
     for (const emp of filteredEmployees) {
       const empAttendance = attendanceByEmployee.get(emp.id);
-      if (empAttendance) {
-        for (const [dateStr, record] of empAttendance.entries()) {
-          const [rYear, rMonth] = dateStr.split('-').map(Number);
-          if (rMonth === selectedMonth && rYear === selectedYear) {
-            if (record.status === 'P') totalWorkingScore += 1;
-            else if (record.status === 'W/O') totalWorkingScore += 1;
-            else if (record.status === 'WOP') totalWorkingScore += 2;
-            else if (record.status === 'HD') totalWorkingScore += 0.5;
+      const empWeeklyOff = emp.weeklyOff?.trim();
+
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dateStr = `${selectedYear}-${selectedMonth.toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}`;
+        const dayDate = new Date(selectedYear, selectedMonth - 1, d);
+        const dayName = DAY_NAMES[dayDate.getDay()];
+        const offDays = (empWeeklyOff || '').toLowerCase().split(/[,/&]+/).map((s: string) => s.trim());
+        const isWeeklyOff = Boolean(
+          empWeeklyOff &&
+          empWeeklyOff !== 'None' &&
+          offDays.includes(dayName.toLowerCase())
+        );
+
+        const record = empAttendance?.get(dateStr);
+        const status = record?.status;
+
+        if (status === 'P') {
+          if (isWeeklyOff) {
+            totalWorkedOnWo += 1;
+            totalWorkingScore += 2;
+          } else {
+            totalPresent += 1;
+            totalWorkingScore += 1;
           }
-        }
-        const todayRecord = empAttendance.get(todayStr);
-        if (todayRecord) {
-          if (todayRecord.status === 'P') presentToday++;
-          else if (todayRecord.status === 'A') absentToday++;
+        } else if (status === 'WOP') {
+          totalWorkedOnWo += 1;
+          totalWorkingScore += 2;
+        } else if (status === 'W/O' || (isWeeklyOff && (!status || status === 'A'))) {
+          totalWeeklyOff += 1;
+          totalWorkingScore += 1;
+        } else if (status === 'HD') {
+          totalPresent += 0.5;
+          totalWorkingScore += 0.5;
+        } else if (status === 'A') {
+          totalAbsent += 1;
         }
       }
     }
-    return { presentToday, absentToday, totalWorkingScore };
-  }, [filteredEmployees, attendanceByEmployee, selectedMonth, selectedYear]);
 
-  const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
+    return {
+      totalPresent,
+      totalAbsent,
+      totalWeeklyOff,
+      totalWorkedOnWo,
+      totalWorkingScore,
+    };
+  }, [filteredEmployees, attendanceByEmployee, selectedMonth, selectedYear, daysInMonth]);
 
   const handleSaveStatus = (status: AttendanceStatus | null) => {
     if (!editingCell) return;
@@ -131,8 +177,10 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
 
     const [rYear, rMonth, rDay] = date.split('-').map(Number);
     const dateObj = new Date(rYear, rMonth - 1, rDay);
-    const dayOfWeekNum = dateObj.getDay();
-    const isWeeklyOffDay = emp && getWeeklyOffDayNum(emp.weeklyOff) === dayOfWeekNum;
+    const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dayName = DAY_NAMES[dateObj.getDay()];
+    const offDays = (emp?.weeklyOff || '').toLowerCase().split(/[,/&]+/).map((s: string) => s.trim());
+    const isWeeklyOffDay = Boolean(emp?.weeklyOff && emp.weeklyOff !== 'None' && offDays.includes(dayName.toLowerCase()));
 
     let targetStatus = status;
     let overtimeVal: string | undefined = undefined;
@@ -224,6 +272,8 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
             codeName: s.code_name || s.codeName || '',
             attendanceGridName: s.site_name || s.siteName || s.name || '',
             approvedManpower: Number(s.approved_manpower || s.approvedManpower || s.contracted_manpower || 5),
+            workOrderRef: s.work_order_ref || '',
+            clientName: s.client_name || '',
           }));
           if (isMounted) {
             setSiteList(mappedSites);
@@ -323,6 +373,20 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
     );
   }, [filteredEmployees, attendanceRecords, siteList, selectedSiteFilter, selectedMonth, selectedYear]);
 
+  const handlePrintMinervaSheet = () => {
+    setPrintMode('minerva');
+    setTimeout(() => {
+      window.print();
+    }, 150);
+  };
+
+  const handlePrintStandardSheet = () => {
+    setPrintMode('standard');
+    setTimeout(() => {
+      window.print();
+    }, 150);
+  };
+
   return (
     <div className="space-y-6 font-sans text-gray-800 bg-white p-6 rounded-2xl shadow-xs border border-gray-100">
       {/* Add Staff Modal */}
@@ -340,7 +404,19 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
 
       {/* Printable Template (hidden on screen, visible during window.print()) */}
       <div className="attendance-print-area">
-        <AttendanceTemplate data={templateData} />
+        {printMode === 'minerva' ? (
+          <MinervaSheetTemplate
+            month={selectedMonth}
+            year={selectedYear}
+            siteName={siteList.find((s) => s.id === selectedSiteFilter)?.attendanceGridName || siteList.find((s) => s.id === selectedSiteFilter)?.name || 'Minerva'}
+            clientName={siteList.find((s) => s.id === selectedSiteFilter)?.clientName}
+            workOrderRef={siteList.find((s) => s.id === selectedSiteFilter)?.workOrderRef}
+            employees={filteredEmployees}
+            attendanceByEmployee={attendanceByEmployee}
+          />
+        ) : (
+          <AttendanceTemplate data={templateData} />
+        )}
       </div>
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
         {/* Left Title & Live Badges */}
@@ -453,24 +529,47 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
 
             <button
               type="button"
-              onClick={() => window.print()}
+              onClick={handlePrintStandardSheet}
               className="bg-[#10B981] hover:bg-emerald-600 text-white px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs text-xs font-bold transition-all cursor-pointer"
+              title="Print / Preview Standard Attendance Sheet"
             >
               <FileSpreadsheet size={15} />
               <span>PDF Download</span>
             </button>
 
-            {/* Stats pills matching Screenshot 2 */}
+            <button
+              type="button"
+              onClick={handlePrintMinervaSheet}
+              className="bg-[#0284c7] hover:bg-sky-600 text-white px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs text-xs font-bold transition-all cursor-pointer"
+              title="Print / Preview Minerva Format Attendance Sheet"
+            >
+              <FileSpreadsheet size={15} />
+              <span>Minerva Sheet</span>
+            </button>
+
+            {/* Stats pills matching Screenshot 2 with Weekly Off awareness */}
             <div className="flex items-center gap-2 border-l border-gray-200 pl-2">
               <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 px-3 py-1 rounded-lg flex items-center gap-1.5 text-xs font-bold shadow-2xs">
                 <CheckCircle size={14} />
-                <span>{attendanceStats.presentToday} PRESENT</span>
+                <span>{attendanceStats.totalPresent} PRESENT</span>
               </div>
 
               <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-1 rounded-lg flex items-center gap-1.5 text-xs font-bold shadow-2xs">
                 <XCircle size={14} />
-                <span>{attendanceStats.absentToday} ABSENT</span>
+                <span>{attendanceStats.totalAbsent} ABSENT</span>
               </div>
+
+              <div className="bg-blue-50 border border-blue-200 text-blue-700 px-3 py-1 rounded-lg flex items-center gap-1.5 text-xs font-bold shadow-2xs">
+                <CalendarDays size={14} />
+                <span>{attendanceStats.totalWeeklyOff} WEEKLY OFF</span>
+              </div>
+
+              {attendanceStats.totalWorkedOnWo > 0 && (
+                <div className="bg-purple-50 border border-purple-300 text-purple-800 px-3 py-1 rounded-lg flex items-center gap-1.5 text-xs font-black shadow-2xs ring-1 ring-purple-300">
+                  <span className="w-2 h-2 rounded-full bg-purple-600 animate-pulse" />
+                  <span>{attendanceStats.totalWorkedOnWo} WORKED ON WO</span>
+                </div>
+              )}
 
               <div className="bg-indigo-50 border border-indigo-200 text-indigo-700 px-3 py-1 rounded-lg flex items-center gap-1.5 text-xs font-bold shadow-2xs">
                 <CalendarDays size={14} />
@@ -512,6 +611,37 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
                   </th>
                 );
               })}
+              {/* Per-Employee Month Summary Headers */}
+              <th
+                className="p-2 sticky top-0 z-20 border-r border-gray-200 w-[48px] min-w-[48px] font-extrabold bg-emerald-50 text-emerald-800 text-[10px] text-center uppercase tracking-wider"
+                title="Total Present Days"
+              >
+                PRES
+              </th>
+              <th
+                className="p-2 sticky top-0 z-20 border-r border-gray-200 w-[48px] min-w-[48px] font-extrabold bg-blue-50 text-blue-800 text-[10px] text-center uppercase tracking-wider"
+                title="Total Weekly Off Days"
+              >
+                W/O
+              </th>
+              <th
+                className="p-2 sticky top-0 z-20 border-r border-gray-200 w-[48px] min-w-[48px] font-extrabold bg-purple-50 text-purple-800 text-[10px] text-center uppercase tracking-wider"
+                title="Worked on Weekly Off (Extra)"
+              >
+                WOP
+              </th>
+              <th
+                className="p-2 sticky top-0 z-20 border-r border-gray-200 w-[48px] min-w-[48px] font-extrabold bg-red-50 text-red-800 text-[10px] text-center uppercase tracking-wider"
+                title="Total Absent Days"
+              >
+                ABS
+              </th>
+              <th
+                className="p-2 sticky top-0 z-20 border-r border-gray-200 w-[56px] min-w-[56px] font-extrabold bg-indigo-100 text-indigo-950 text-[10px] text-center uppercase tracking-wider"
+                title="Total Working / Payable Days (Present + W/O + WOP)"
+              >
+                TOTAL
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -522,6 +652,41 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
               const currentGroup = emp.shift || emp.role || 'KEYMAN';
               const prevGroup = prevEmp ? prevEmp.shift || prevEmp.role || 'KEYMAN' : null;
               const showHeader = !prevEmp || currentGroup !== prevGroup;
+
+              // Per-Employee Monthly Attendance Accumulator
+              let empPresent = 0;
+              let empWeeklyOff = 0;
+              let empWorkedOnWo = 0;
+              let empAbsent = 0;
+
+              const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+              for (let d = 1; d <= daysInMonth; d++) {
+                const dateStr = `${selectedYear}-${selectedMonth.toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}`;
+                const dayDate = new Date(selectedYear, selectedMonth - 1, d);
+                const dayName = DAY_NAMES[dayDate.getDay()];
+                const offDays = (emp.weeklyOff || '').toLowerCase().split(/[,/&]+/).map(s => s.trim());
+                const isWeeklyOff = Boolean(emp.weeklyOff && emp.weeklyOff !== 'None' && offDays.includes(dayName.toLowerCase()));
+
+                const rec = empMap.get(dateStr);
+                const st = rec?.status;
+
+                if (st === 'P') {
+                  if (isWeeklyOff) {
+                    empWorkedOnWo += 1;
+                  } else {
+                    empPresent += 1;
+                  }
+                } else if (st === 'WOP') {
+                  empWorkedOnWo += 1;
+                } else if (st === 'W/O' || (isWeeklyOff && (!st || st === 'A'))) {
+                  empWeeklyOff += 1;
+                } else if (st === 'HD') {
+                  empPresent += 0.5;
+                } else if (st === 'A') {
+                  empAbsent += 1;
+                }
+              }
+              const empTotalDays = empPresent + empWeeklyOff + empWorkedOnWo;
 
               return (
                 <React.Fragment key={emp.id}>
@@ -544,7 +709,7 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
                           </span>
                         </div>
                       </td>
-                      <td colSpan={daysInMonth} className="bg-slate-50/60" />
+                      <td colSpan={daysInMonth + 5} className="bg-slate-50/60" />
                     </tr>
                   )}
 
@@ -601,45 +766,67 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
                         .padStart(2, '0')}-${d.toString().padStart(2, '0')}`;
                       const record = empMap.get(dateStr);
 
-                      let regStatus = record?.status;
-                      if (regStatus === 'WOP') regStatus = 'W/O';
+                      const dayDate = new Date(selectedYear, selectedMonth - 1, d);
+                      const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                      const dayName = DAY_NAMES[dayDate.getDay()];
+                      const offDays = (emp.weeklyOff || '').toLowerCase().split(/[,/&]+/).map((s: string) => s.trim());
+                      const isWeeklyOff = Boolean(
+                        emp.weeklyOff &&
+                        emp.weeklyOff !== 'None' &&
+                        offDays.includes(dayName.toLowerCase())
+                      );
+
+                      const rawStatus = record?.status;
+                      let displayStatus = rawStatus;
+
+                      if (isWeeklyOff) {
+                        if (!rawStatus || rawStatus === 'A') {
+                          displayStatus = 'W/O';
+                        } else if (rawStatus === 'P' || rawStatus === 'WOP') {
+                          displayStatus = 'WOP';
+                        }
+                      }
 
                       let statusBadge = <span className="text-slate-300 font-bold text-xs">-</span>;
                       let cellBg = 'bg-white hover:bg-slate-100/70';
 
-                      if (regStatus) {
-                        switch (regStatus) {
-                          case 'P':
-                            cellBg = 'bg-emerald-100/70 hover:bg-emerald-200/70';
-                            statusBadge = (
-                              <span className="font-extrabold text-emerald-800 text-xs">P</span>
-                            );
-                            break;
-                          case 'A':
-                            cellBg = 'bg-red-100/70 hover:bg-red-200/70';
-                            statusBadge = (
-                              <span className="font-extrabold text-red-700 text-xs">A</span>
-                            );
-                            break;
-                          case 'HD':
-                            cellBg = 'bg-amber-100/80 hover:bg-amber-200/80';
-                            statusBadge = (
-                              <span className="font-extrabold text-amber-800 text-[11px]">HD</span>
-                            );
-                            break;
-                          case 'W/O':
-                            cellBg = 'bg-blue-100/80 hover:bg-blue-200/80';
-                            statusBadge = (
-                              <span className="font-extrabold text-blue-800 text-[11px]">W/O</span>
-                            );
-                            break;
-                          default:
-                            statusBadge = (
-                              <span className="font-bold text-gray-700 text-xs">
-                                {regStatus}
-                              </span>
-                            );
-                        }
+                      if (displayStatus === 'WOP') {
+                        cellBg = 'bg-purple-100/80 hover:bg-purple-200/80';
+                        statusBadge = (
+                          <div className="relative inline-flex items-center justify-center">
+                            <span className="font-black text-purple-900 text-xs">P</span>
+                            <span
+                              className="absolute -top-1 -right-1.5 w-1.5 h-1.5 bg-amber-500 rounded-full ring-1 ring-white"
+                              title="Worked on Weekly Off"
+                            />
+                          </div>
+                        );
+                      } else if (displayStatus === 'W/O') {
+                        cellBg = 'bg-blue-50/80 hover:bg-blue-100/80';
+                        statusBadge = (
+                          <span className="font-extrabold text-blue-700 text-[11px]">W/O</span>
+                        );
+                      } else if (displayStatus === 'P') {
+                        cellBg = 'bg-emerald-100/70 hover:bg-emerald-200/70';
+                        statusBadge = (
+                          <span className="font-extrabold text-emerald-800 text-xs">P</span>
+                        );
+                      } else if (displayStatus === 'A') {
+                        cellBg = 'bg-red-100/70 hover:bg-red-200/70';
+                        statusBadge = (
+                          <span className="font-extrabold text-red-700 text-xs">A</span>
+                        );
+                      } else if (displayStatus === 'HD') {
+                        cellBg = 'bg-amber-100/80 hover:bg-amber-200/80';
+                        statusBadge = (
+                          <span className="font-extrabold text-amber-800 text-[11px]">HD</span>
+                        );
+                      } else if (displayStatus) {
+                        statusBadge = (
+                          <span className="font-bold text-gray-700 text-xs">
+                            {displayStatus}
+                          </span>
+                        );
                       }
 
                       const durationStr =
@@ -673,6 +860,43 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
                         </td>
                       );
                     })}
+
+                    {/* Per-Employee Month Summary Totals (Spans 2 rows) */}
+                    <td
+                      rowSpan={2}
+                      className="border-r border-b-2 border-slate-400 p-1 text-center align-middle bg-emerald-50/80 font-black text-emerald-800 text-xs w-[48px] min-w-[48px]"
+                      title={`${emp.name}: ${empPresent} Present Days`}
+                    >
+                      {empPresent}
+                    </td>
+                    <td
+                      rowSpan={2}
+                      className="border-r border-b-2 border-slate-400 p-1 text-center align-middle bg-blue-50/80 font-black text-blue-800 text-xs w-[48px] min-w-[48px]"
+                      title={`${emp.name}: ${empWeeklyOff} Weekly Off Days`}
+                    >
+                      {empWeeklyOff}
+                    </td>
+                    <td
+                      rowSpan={2}
+                      className="border-r border-b-2 border-slate-400 p-1 text-center align-middle bg-purple-50/80 font-black text-purple-800 text-xs w-[48px] min-w-[48px]"
+                      title={`${emp.name}: ${empWorkedOnWo} Worked on Weekly Off`}
+                    >
+                      {empWorkedOnWo > 0 ? empWorkedOnWo : '-'}
+                    </td>
+                    <td
+                      rowSpan={2}
+                      className="border-r border-b-2 border-slate-400 p-1 text-center align-middle bg-red-50/80 font-black text-red-700 text-xs w-[48px] min-w-[48px]"
+                      title={`${emp.name}: ${empAbsent} Absent Days`}
+                    >
+                      {empAbsent}
+                    </td>
+                    <td
+                      rowSpan={2}
+                      className="border-r border-b-2 border-slate-400 p-1 text-center align-middle bg-indigo-100/90 font-black text-indigo-950 text-xs w-[56px] min-w-[56px]"
+                      title={`${emp.name}: ${empTotalDays} Total Days (Present + W/O + WOP)`}
+                    >
+                      {empTotalDays}
+                    </td>
                   </tr>
 
                   {/* Row 2: In-Time, Out-Time & Duration (Amber-tinted with thick bottom border) */}

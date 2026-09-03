@@ -144,10 +144,21 @@ export class AttendanceCalculatorController {
       const attendanceRecordRows: any[] = [];
       const recordsBySite = new Map<string, any[]>();
 
+      // Fetch fresh weekly_off from staff table for exact day comparison
+      const rawStaffIds = records.map((r: any) => r.staffId).filter(Boolean);
+      const { data: staffData } = await supabaseAdmin
+        .from('staff')
+        .select('id, weekly_off')
+        .in('id', rawStaffIds);
+      const staffWeeklyOffMap = new Map((staffData || []).map((s: any) => [s.id, s.weekly_off || 'Sunday']));
+
+      const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
       for (const emp of records) {
         if (!emp.staffId || !emp.siteId) continue;
 
         staffIds.push(emp.staffId);
+        const wOff = staffWeeklyOffMap.get(emp.staffId) || emp.weeklyOff || emp.weekly_off || 'Sunday';
 
         // Group by site
         if (!recordsBySite.has(emp.siteId)) {
@@ -158,18 +169,37 @@ export class AttendanceCalculatorController {
         // Build individual daily attendance records
         for (let d = 1; d <= daysInMonth; d++) {
           const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-          const status = emp.dailyStatus?.[d - 1] || 'A';
+          const dayDate = new Date(Number(year), Number(month) - 1, d);
+          const dayName = DAY_NAMES[dayDate.getDay()];
+          const offDays = (wOff || '').toLowerCase().split(/[,/&]+/).map((s: string) => s.trim());
+          const isWeeklyOff = Boolean(wOff && wOff !== 'None' && offDays.includes(dayName.toLowerCase()));
+
+          const rawStatus = emp.dailyStatus?.[d - 1] || 'A';
           const inTime = emp.dailyInTime?.[d - 1] || null;
           const outTime = emp.dailyOutTime?.[d - 1] || null;
           const durationHours = emp.dailyHours?.[d - 1] !== undefined ? Number(emp.dailyHours[d - 1]) : 0;
           const duration = emp.dailyDuration?.[d - 1] || (durationHours > 0 ? `${durationHours}h` : null);
 
+          let finalStatus = rawStatus;
+          let shiftType = 'regular';
+
+          if (isWeeklyOff) {
+            if (rawStatus === 'P') {
+              finalStatus = 'WOP';
+              shiftType = 'overtime';
+            } else {
+              finalStatus = 'W/O';
+            }
+          } else {
+            finalStatus = rawStatus === 'P' ? 'P' : 'A';
+          }
+
           attendanceRecordRows.push({
             staff_id: emp.staffId,
             site_id: emp.siteId,
             record_date: dateStr,
-            shift_type: 'regular',
-            status: status === 'P' ? 'P' : 'A',
+            shift_type: shiftType,
+            status: finalStatus,
             in_time: inTime,
             out_time: outTime,
             duration_hours: durationHours,

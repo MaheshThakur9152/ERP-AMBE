@@ -73,6 +73,9 @@ export const StaffController = {
         updateData.designation = (body.designation || body.role || 'Janitor').trim();
       }
       if (body.status !== undefined) updateData.status = body.status || 'Active';
+      if (body.weekly_off !== undefined || body.weeklyOff !== undefined) {
+        updateData.weekly_off = body.weekly_off || body.weeklyOff || 'Sunday';
+      }
       if (body.site_id !== undefined || body.siteId !== undefined) {
         updateData.site_id = body.site_id || body.siteId || null;
       }

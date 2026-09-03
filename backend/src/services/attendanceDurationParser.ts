@@ -151,6 +151,7 @@ export async function parseAttendanceDurationExcel(
     const dayDurationMap = new Map<number, string | null>();
     const dayInTimeMap = new Map<number, string | null>();
     const dayOutTimeMap = new Map<number, string | null>();
+    const dayStatusMap = new Map<number, string>();
     let hasDurationRow = false;
 
     // Pass 1: Extract header info and identify "Days" row column mappings
@@ -187,7 +188,7 @@ export async function parseAttendanceDurationExcel(
       }
     }
 
-    // Pass 2: Extract Duration, In Time, Out Time and map values via colToDayMap
+    // Pass 2: Extract Duration, In Time, Out Time, Status and map values via colToDayMap
     worksheet.eachRow((row) => {
       const firstCellText = getSafeCellText(row.getCell(1)).trim();
 
@@ -196,26 +197,41 @@ export async function parseAttendanceDurationExcel(
         for (const [colIdx, dayNum] of colToDayMap.entries()) {
           const raw = getSafeCellText(row.getCell(colIdx)).trim();
           const decimal = parseDurationCell(raw);
-          dayHoursMap.set(dayNum, decimal);
+          if (!dayHoursMap.has(dayNum) || (decimal > 0 && (dayHoursMap.get(dayNum) ?? 0) === 0)) {
+            dayHoursMap.set(dayNum, decimal);
+          }
 
           // Retain exact duration as given in the Excel without decimal calculation
           let exactDuration: string | null = null;
           if (raw && raw !== '-' && raw !== '0' && raw !== '00:00') {
             exactDuration = raw;
           }
-          dayDurationMap.set(dayNum, exactDuration);
+          if (!dayDurationMap.has(dayNum) || (exactDuration && !dayDurationMap.get(dayNum))) {
+            dayDurationMap.set(dayNum, exactDuration);
+          }
+        }
+      } else if (/^status$/i.test(firstCellText)) {
+        for (const [colIdx, dayNum] of colToDayMap.entries()) {
+          const raw = getSafeCellText(row.getCell(colIdx)).trim().toUpperCase();
+          if (raw && (!dayStatusMap.has(dayNum) || dayStatusMap.get(dayNum) === 'A')) {
+            dayStatusMap.set(dayNum, raw);
+          }
         }
       } else if (/^(in\s*time|intime|in|punch\s*in|first\s*in)$/i.test(firstCellText)) {
         for (const [colIdx, dayNum] of colToDayMap.entries()) {
           const raw = getSafeCellText(row.getCell(colIdx));
           const timeStr = parseTimeCell(raw);
-          dayInTimeMap.set(dayNum, timeStr);
+          if (!dayInTimeMap.has(dayNum) || (timeStr && !dayInTimeMap.get(dayNum))) {
+            dayInTimeMap.set(dayNum, timeStr);
+          }
         }
       } else if (/^(out\s*time|outtime|out|punch\s*out|last\s*out)$/i.test(firstCellText)) {
         for (const [colIdx, dayNum] of colToDayMap.entries()) {
           const raw = getSafeCellText(row.getCell(colIdx));
           const timeStr = parseTimeCell(raw);
-          dayOutTimeMap.set(dayNum, timeStr);
+          if (!dayOutTimeMap.has(dayNum) || (timeStr && !dayOutTimeMap.get(dayNum))) {
+            dayOutTimeMap.set(dayNum, timeStr);
+          }
         }
       }
     });
@@ -235,14 +251,27 @@ export async function parseAttendanceDurationExcel(
       const dailyDuration: (string | null)[] = [];
       const dailyInTime: (string | null)[] = [];
       const dailyOutTime: (string | null)[] = [];
+      const dailyStatus: ('P' | 'A')[] = [];
+
       for (let day = 1; day <= 31; day++) {
         dailyHours.push(dayHoursMap.get(day) ?? 0);
         dailyDuration.push(dayDurationMap.get(day) ?? null);
         dailyInTime.push(dayInTimeMap.get(day) ?? null);
         dailyOutTime.push(dayOutTimeMap.get(day) ?? null);
+
+        // Prioritize explicit Status from Excel sheet if available
+        const explicitStatus = dayStatusMap.get(day);
+        if (explicitStatus === 'P') {
+          dailyStatus.push('P');
+        } else if (explicitStatus === 'A') {
+          dailyStatus.push('A');
+        } else {
+          // Fallback to hours comparison only if no explicit Status row existed
+          const hrs = dayHoursMap.get(day) ?? 0;
+          dailyStatus.push(hrs >= thresholdHours ? 'P' : 'A');
+        }
       }
 
-      const dailyStatus: ('P' | 'A')[] = dailyHours.map((h) => (h >= thresholdHours ? 'P' : 'A'));
       const presentDays = dailyStatus.filter((s) => s === 'P').length;
       const absentDays = dailyStatus.filter((s) => s === 'A').length;
 

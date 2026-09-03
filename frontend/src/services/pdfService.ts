@@ -796,4 +796,215 @@ export const pdfService = {
       document.body.removeChild(container);
     }
   },
+
+  // Minerva Executive Format Attendance Sheet PDF Download
+  exportMinervaSheetPdf: async (data: {
+    month: number | string;
+    year: number;
+    siteName?: string;
+    clientName?: string;
+    workOrderRef?: string;
+    employees: any[];
+    attendanceByEmployee?: Map<string, Map<string, any>>;
+  }): Promise<void> => {
+    const monthNum = Number(data.month);
+    const daysInMonth = new Date(Number(data.year), monthNum, 0).getDate();
+    const monthName =
+      typeof data.month === 'string' && isNaN(Number(data.month))
+        ? data.month
+        : new Date(2000, monthNum - 1, 1).toLocaleString('default', { month: 'long' });
+    const siteSanitized = (data.siteName || 'MINERVA').replace(/[^a-zA-Z0-9_\-]/g, '_');
+    const fileName = `Minerva_Attendance_Sheet_${monthName}_${data.year}_${siteSanitized}.pdf`;
+
+    const siteHeader = (data.clientName || data.siteName || 'LOKHANDWALA MINERVA CHS LTD (REGD)').toUpperCase();
+    const woHeader = data.workOrderRef ? ` &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; WO NO : ${data.workOrderRef}` : '';
+
+    // Group employees by designation / role
+    const groupsMap = new Map<string, any[]>();
+    for (const emp of data.employees || []) {
+      const groupKey = (emp.designation || emp.role || 'GENERAL').trim();
+      if (!groupsMap.has(groupKey)) {
+        groupsMap.set(groupKey, []);
+      }
+      groupsMap.get(groupKey)!.push(emp);
+    }
+
+    const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    let groupsHtml = '';
+    let grandPresent = 0;
+    let grandWO = 0;
+    let grandWoExtra = 0;
+    let grandTotal = 0;
+
+    for (const [groupName, emps] of groupsMap.entries()) {
+      let groupPresent = 0;
+      let groupWO = 0;
+      let groupWoExtra = 0;
+      let groupTotal = 0;
+
+      let empRowsHtml = '';
+      emps.forEach((emp, idx) => {
+        let empPresent = 0;
+        let empWO = 0;
+        let empWoExtra = 0;
+
+        const offDays = (emp.weeklyOff || '').toLowerCase().split(/[,/&]+/).map((s: string) => s.trim());
+
+        for (let d = 1; d <= daysInMonth; d++) {
+          const dateStr = `${data.year}-${monthNum.toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}`;
+          const dayDate = new Date(Number(data.year), monthNum - 1, d);
+          const dayName = DAY_NAMES[dayDate.getDay()];
+          const isWeeklyOff = Boolean(emp.weeklyOff && emp.weeklyOff !== 'None' && offDays.includes(dayName.toLowerCase()));
+
+          const rec = data.attendanceByEmployee?.get(emp.id)?.get(dateStr);
+          const st = (rec?.status || '').toUpperCase().trim();
+
+          if (st === 'P') {
+            if (isWeeklyOff) {
+              empWoExtra += 1;
+            } else {
+              empPresent += 1;
+            }
+          } else if (st === 'WOP') {
+            empWoExtra += 1;
+          } else if (st === 'W/O' || (isWeeklyOff && (!st || st === 'A'))) {
+            empWO += 1;
+          } else if (st === 'HD') {
+            empPresent += 0.5;
+          }
+        }
+
+        const empTotal = empPresent + empWO + empWoExtra;
+
+        groupPresent += empPresent;
+        groupWO += empWO;
+        groupWoExtra += empWoExtra;
+        groupTotal += empTotal;
+
+        empRowsHtml += `
+          <tr style="height: 22px;">
+            <td style="border: 1px solid #000; text-align: center; padding: 2px 4px; font-size: 9.5px;">${idx + 1}</td>
+            <td style="border: 1px solid #000; text-align: left; padding: 2px 6px; font-size: 9.5px; font-weight: 500;">${groupName}</td>
+            <td style="border: 1px solid #000; text-align: left; padding: 2px 6px; font-size: 9.5px; font-weight: 600;">${emp.name || emp.employeeName || ''}</td>
+            <td style="border: 1px solid #000; text-align: left; padding: 2px 6px; font-size: 9.5px;">${emp.weeklyOff || 'Sunday'}</td>
+            <td style="border: 1px solid #000; text-align: center; padding: 2px 4px; font-size: 9.5px;">${empPresent}</td>
+            <td style="border: 1px solid #000; text-align: center; padding: 2px 4px; font-size: 9.5px;">${empWO}</td>
+            <td style="border: 1px solid #000; text-align: center; padding: 2px 4px; font-size: 9.5px;">${empWoExtra > 0 ? empWoExtra : ''}</td>
+            <td style="border: 1px solid #000; text-align: center; padding: 2px 4px; font-size: 9.5px;"></td>
+            <td style="border: 1px solid #000; text-align: center; padding: 2px 4px; font-size: 9.5px;"></td>
+            <td style="border: 1px solid #000; text-align: center; padding: 2px 4px; font-size: 9.5px;"></td>
+            <td style="border: 1px solid #000; text-align: center; padding: 2px 4px; font-size: 9.5px; font-weight: 600;">${empTotal}</td>
+            <td style="border: 1px solid #000; text-align: center; padding: 2px 4px; font-size: 9.5px;"></td>
+          </tr>
+        `;
+      });
+
+      grandPresent += groupPresent;
+      grandWO += groupWO;
+      grandWoExtra += groupWoExtra;
+      grandTotal += groupTotal;
+
+      groupsHtml += `
+        ${empRowsHtml}
+        <tr style="height: 22px; font-weight: bold;">
+          <td colspan="4" style="border: 1px solid #000; background: #c6efce; text-align: right; padding-right: 8px;"></td>
+          <td style="border: 1px solid #000; background: #c6efce; text-align: center; font-size: 10px;">${groupPresent}</td>
+          <td style="border: 1px solid #000; background: #c6efce; text-align: center; font-size: 10px;">${groupWO}</td>
+          <td style="border: 1px solid #000; background: #c6efce; text-align: center; font-size: 10px;">${groupWoExtra}</td>
+          <td style="border: 1px solid #000; background: #c6efce; text-align: center; font-size: 10px;">0</td>
+          <td style="border: 1px solid #000; background: #c6efce; text-align: center; font-size: 10px;">0</td>
+          <td style="border: 1px solid #000; background: #c6efce; text-align: center; font-size: 10px;">0</td>
+          <td style="border: 1px solid #000; background: #375623; color: #ffffff; text-align: center; font-size: 10px;">${groupTotal}</td>
+          <td style="border: 1px solid #000; background: #c6efce; text-align: center; font-size: 10px;">0</td>
+        </tr>
+        <tr style="height: 14px;"><td colspan="12" style="border: none; background: transparent;"></td></tr>
+      `;
+    }
+
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.left = '-9999px';
+    container.style.top = '0';
+    container.style.width = '1000px';
+    container.style.background = '#ffffff';
+    container.style.padding = '15px';
+    container.style.fontFamily = 'Arial, sans-serif';
+
+    container.innerHTML = `
+      <div style="width: 100%; font-family: Arial, sans-serif; font-size: 9.5px; color: #000;">
+        <table style="width: 100%; border-collapse: collapse;">
+          <thead>
+            <tr>
+              <td colspan="12" style="border: 1px solid #000; text-align: center; font-weight: bold; font-size: 14px; padding: 6px; text-transform: uppercase;">
+                AMBE SERVICE FACILITY PVT. LTD.
+              </td>
+            </tr>
+            <tr>
+              <td colspan="12" style="border: 1px solid #000; text-align: center; font-weight: bold; font-size: 10px; padding: 4px;">
+                SITE - ${siteHeader}${woHeader}
+              </td>
+            </tr>
+            <tr>
+              <td colspan="12" style="border: 1.5px solid #000; text-align: center; font-weight: bold; font-size: 10px; padding: 4px; text-transform: uppercase;">
+                ATTENDANCE FOR THE MONTH OF ${monthName.toUpperCase()} - ${data.year}
+              </td>
+            </tr>
+            <tr style="height: 26px; background: #ffffff; font-weight: bold; font-size: 9px; text-align: center;">
+              <th style="border: 1px solid #000; width: 35px;">SR NO</th>
+              <th style="border: 1px solid #000; width: 95px; text-align: left; padding-left: 6px;">DESIGNATION</th>
+              <th style="border: 1px solid #000; width: 170px; text-align: left; padding-left: 6px;">NAME</th>
+              <th style="border: 1px solid #000; width: 80px; text-align: left; padding-left: 6px;">WO Day</th>
+              <th style="border: 1px solid #000; width: 55px;">PRESENT</th>
+              <th style="border: 1px solid #000; width: 45px;">WO</th>
+              <th style="border: 1px solid #000; width: 65px;">WO EXTRA</th>
+              <th style="border: 1px solid #000; width: 55px;">HOLIDAY</th>
+              <th style="border: 1px solid #000; width: 75px;">HOLIDAY EXTRA</th>
+              <th style="border: 1px solid #000; width: 65px;">Night Shift</th>
+              <th style="border: 1px solid #000; width: 55px;">TOTAL</th>
+              <th style="border: 1px solid #000; width: 40px;">OT</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${groupsHtml}
+            <tr style="height: 24px; font-weight: bold; font-size: 10px;">
+              <td colspan="4" style="border: 1.5px solid #000; background: #a9d08e; text-align: center; font-weight: bold; letter-spacing: 1px;">GRAND TOTAL</td>
+              <td style="border: 1.5px solid #000; background: #a9d08e; text-align: center; font-weight: bold;">${grandPresent}</td>
+              <td style="border: 1.5px solid #000; background: #a9d08e; text-align: center; font-weight: bold;">${grandWO}</td>
+              <td style="border: 1.5px solid #000; background: #a9d08e; text-align: center; font-weight: bold;">${grandWoExtra}</td>
+              <td style="border: 1.5px solid #000; background: #a9d08e; text-align: center; font-weight: bold;">0</td>
+              <td style="border: 1.5px solid #000; background: #a9d08e; text-align: center; font-weight: bold;">0</td>
+              <td style="border: 1.5px solid #000; background: #a9d08e; text-align: center; font-weight: bold;">0</td>
+              <td style="border: 1.5px solid #000; background: #274e13; color: #ffffff; text-align: center; font-weight: bold;">${grandTotal}</td>
+              <td style="border: 1.5px solid #000; background: #a9d08e; text-align: center; font-weight: bold;">0</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    document.body.appendChild(container);
+
+    try {
+      const canvas = await html2canvas(container, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+      });
+      const imgData = canvas.toDataURL('image/jpeg', 1.0);
+      const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      const pdfWidth = 297;
+      const pdfHeight = 210;
+      const margin = 8;
+      const printableWidth = pdfWidth - margin * 2;
+      const printableHeight = (canvas.height * printableWidth) / canvas.width;
+
+      pdf.addImage(imgData, 'JPEG', margin, margin, printableWidth, Math.min(printableHeight, pdfHeight - margin * 2));
+      const pdfBlob = pdf.output('blob');
+      saveAs(pdfBlob, fileName);
+    } finally {
+      document.body.removeChild(container);
+    }
+  },
 };

@@ -902,7 +902,7 @@ export const StaffFormModal: React.FC<StaffFormModalProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="block text-[11px] font-bold text-gray-700">Assigned Site</label>
@@ -986,6 +986,35 @@ export const StaffFormModal: React.FC<StaffFormModalProps> = ({
                         : 'bg-white border-gray-200 text-gray-800'
                     }`}
                   />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-bold text-gray-700">Weekly Off</label>
+                  </div>
+                  <select
+                    value={formData.weekly_off || 'Sunday'}
+                    onChange={(e) => setFormData({ ...formData, weekly_off: e.target.value })}
+                    className="w-full border rounded-lg px-3 py-2 text-xs font-semibold bg-white border-gray-200 text-gray-800 focus:border-[#20B2AA]"
+                  >
+                    <option value="Sunday">Sunday</option>
+                    <option value="Monday">Monday</option>
+                    <option value="Tuesday">Tuesday</option>
+                    <option value="Wednesday">Wednesday</option>
+                    <option value="Thursday">Thursday</option>
+                    <option value="Friday">Friday</option>
+                    <option value="Saturday">Saturday</option>
+                    <option value="Saturday, Sunday">Saturday, Sunday (2 days)</option>
+                    <option value="Friday, Saturday">Friday, Saturday (2 days)</option>
+                    <option value="Sunday, Monday">Sunday, Monday (2 days)</option>
+                    <option value="None">None</option>
+                    {formData.weekly_off && ![
+                      'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
+                      'Saturday, Sunday', 'Friday, Saturday', 'Sunday, Monday', 'None'
+                    ].includes(formData.weekly_off) && (
+                      <option value={formData.weekly_off}>{formData.weekly_off}</option>
+                    )}
+                  </select>
                 </div>
               </div>
             </div>
