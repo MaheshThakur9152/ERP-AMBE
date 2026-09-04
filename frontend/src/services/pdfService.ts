@@ -178,8 +178,21 @@ export const pdfService = {
       }
 
       rowsHtml += `
-        <td style="border-right: 1px solid #000; padding: 4px 6px; text-align: center;">${(item.workingDays || 0) > 0 ? item.workingDays : 0}</td>
-        <td style="border-right: 1px solid #000; padding: 4px 6px; text-align: center;">${(item.persons || 0) > 0 ? item.persons : 0}</td>
+        <td style="border-right: 1px solid #000; padding: 4px 6px; text-align: center;">${(item.workingDays || 0) > 0 ? item.workingDays : 0}</td>`;
+
+      if (!isOvertime && nextIsOvertime) {
+        rowsHtml += `
+          <td rowspan="2" style="border-right: 1px solid #000; border-bottom: 1px solid #000; padding: 4px 6px; text-align: center; vertical-align: middle;">
+            ${(item.persons || 0) > 0 ? item.persons : 0}
+          </td>`;
+      } else if (!isOvertime) {
+        rowsHtml += `
+          <td style="border-right: 1px solid #000; padding: 4px 6px; text-align: center;">
+            ${(item.persons || 0) > 0 ? item.persons : 0}
+          </td>`;
+      }
+
+      rowsHtml += `
         <td style="padding: 4px 6px; text-align: right;">${formatCurrency(item.amount)}</td>
       </tr>`;
     });

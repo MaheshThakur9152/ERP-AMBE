@@ -58,14 +58,33 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
   return (
     <div
       id="printable-invoice"
-      className={`w-full flex flex-col items-center select-none text-black print:w-full print:max-w-none ${
+      className={`w-full flex flex-col items-center select-none text-black print:block print:w-full print:m-0 print:p-0 ${
         isBw ? 'bw-mode grayscale' : ''
       }`}
       style={fontStyle}
     >
-      {/* Row 1: Document Title Header floating above main box (Arial, 12pt, Normal, No borders) */}
+      {/* 
+        Fix for the left-leaning print: 
+        Use symmetrical auto margins and don't force a 210mm width. 
+      */}
+      <style type="text/css" media="print">
+        {`
+          @page {
+            size: A4 portrait;
+            margin: 15mm auto; /* This guarantees equal left and right spacing */
+          }
+          body {
+            margin: 0 !important;
+            padding: 0 !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+        `}
+      </style>
+
+      {/* Row 1: Document Title Header floating above main box */}
       <div
-        className="text-center font-normal text-[12pt] tracking-normal uppercase text-black mb-6 print:mb-4"
+        className="text-center font-normal text-[12pt] tracking-normal uppercase text-black mb-4 print:mb-3 print:w-full"
         style={fontStyle}
       >
         {data.type === 'Proforma Invoice' || data.meta?.invoiceType === 'Proforma Invoice'
@@ -75,7 +94,7 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
 
       {/* Printable Invoice Container */}
       <div
-        className="w-full max-w-4xl bg-white text-black text-[11px] leading-tight shadow-2xl rounded-sm print:shadow-none print:p-0 print:max-w-none print:w-full"
+        className="w-full max-w-4xl bg-white text-black text-[11px] leading-tight shadow-2xl rounded-sm print:shadow-none print:p-0 print:max-w-[190mm] print:mx-auto"
         style={fontStyle}
       >
         {/* Single Outer Box surrounding all invoice sections starting at Row 2 */}
@@ -249,9 +268,20 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
                       <td className="border-r border-black py-0.5 px-1 text-center font-normal">
                         {(item.workingDays || 0) > 0 ? item.workingDays : 0}
                       </td>
-                      <td className="border-r border-black py-0.5 px-1 text-center font-normal">
-                        {(item.persons || 0) > 0 ? item.persons : 0}
-                      </td>
+
+                      {!isOvertime && nextIsOvertime ? (
+                        <td
+                          rowSpan={2}
+                          className="border-r border-b border-black py-0.5 px-1 text-center font-normal align-middle"
+                        >
+                          {(item.persons || 0) > 0 ? item.persons : 0}
+                        </td>
+                      ) : !isOvertime ? (
+                        <td className="border-r border-black py-0.5 px-1 text-center font-normal">
+                          {(item.persons || 0) > 0 ? item.persons : 0}
+                        </td>
+                      ) : null}
+
                       <td className="py-0.5 px-1.5 text-right font-normal">
                         {formatCurrency(item.amount)}
                       </td>
