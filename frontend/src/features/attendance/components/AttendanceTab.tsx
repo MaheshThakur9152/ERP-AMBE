@@ -80,6 +80,12 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
 
   const tableContainerRef = useRef<HTMLDivElement>(null);
 
+  // Multi-select state
+  const [selectedCellKeys, setSelectedCellKeys] = useState<Set<string>>(new Set());
+  const [anchorCell, setAnchorCell] = useState<{ empIdx: number; day: number } | null>(null);
+  const [focusedCell, setFocusedCell] = useState<{ empIdx: number; day: number } | null>(null);
+  const [isMouseDown, setIsMouseDown] = useState<boolean>(false);
+
   const attendanceByEmployee = useMemo(() => {
     const map = new Map<string, Map<string, AttendanceRecord>>();
     for (const r of attendanceRecords) {
@@ -251,6 +257,251 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
     }
 
     setEditingCell(null);
+  };
+
+  const computeRangeKeys = (
+    startEmpIdx: number,
+    endEmpIdx: number,
+    startDay: number,
+    endDay: number
+  ) => {
+    const minEmp = Math.max(0, Math.min(startEmpIdx, endEmpIdx));
+    const maxEmp = Math.min(filteredEmployees.length - 1, Math.max(startEmpIdx, endEmpIdx));
+    const minD = Math.max(1, Math.min(startDay, endDay));
+    const maxD = Math.min(daysInMonth, Math.max(startDay, endDay));
+
+    const keys = new Set<string>();
+    for (let eIdx = minEmp; eIdx <= maxEmp; eIdx++) {
+      const emp = filteredEmployees[eIdx];
+      if (!emp) continue;
+      for (let d = minD; d <= maxD; d++) {
+        const dateStr = `${selectedYear}-${selectedMonth.toString().padStart(2, '0')}-${d.toString().padStart(2, '0')}`;
+        keys.add(`${emp.id}:${dateStr}`);
+      }
+    }
+    return keys;
+  };
+
+  const handleCellMouseDown = (
+    empIdx: number,
+    day: number,
+    e: React.MouseEvent
+  ) => {
+    if (e.button !== 0) return;
+
+    if (e.shiftKey && anchorCell) {
+      const keys = computeRangeKeys(anchorCell.empIdx, empIdx, anchorCell.day, day);
+      setSelectedCellKeys(keys);
+      setFocusedCell({ empIdx, day });
+    } else if (e.ctrlKey || e.metaKey) {
+      const emp = filteredEmployees[empIdx];
+      const dateStr = `${selectedYear}-${selectedMonth.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
+      const key = `${emp.id}:${dateStr}`;
+      setSelectedCellKeys((prev) => {
+        const next = new Set(prev);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        return next;
+      });
+      setAnchorCell({ empIdx, day });
+      setFocusedCell({ empIdx, day });
+    } else {
+      const keys = computeRangeKeys(empIdx, empIdx, day, day);
+      setSelectedCellKeys(keys);
+      setAnchorCell({ empIdx, day });
+      setFocusedCell({ empIdx, day });
+      setIsMouseDown(true);
+    }
+  };
+
+  const handleCellMouseEnter = (empIdx: number, day: number) => {
+    if (isMouseDown && anchorCell) {
+      const keys = computeRangeKeys(anchorCell.empIdx, empIdx, anchorCell.day, day);
+      setSelectedCellKeys(keys);
+      setFocusedCell({ empIdx, day });
+    }
+  };
+
+  const handleSelectRow = (empIdx: number) => {
+    const keys = computeRangeKeys(empIdx, empIdx, 1, daysInMonth);
+    setSelectedCellKeys(keys);
+    setAnchorCell({ empIdx, day: 1 });
+    setFocusedCell({ empIdx, day: daysInMonth });
+  };
+
+  useEffect(() => {
+    const handleMouseUp = () => setIsMouseDown(false);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => window.removeEventListener('mouseup', handleMouseUp);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeElement = document.activeElement;
+      if (
+        activeElement &&
+        (activeElement.tagName === 'INPUT' ||
+          activeElement.tagName === 'SELECT' ||
+          activeElement.tagName === 'TEXTAREA' ||
+          editingCell)
+      ) {
+        return;
+      }
+
+      if (filteredEmployees.length === 0) return;
+
+      const isArrowKey = [
+        'ArrowLeft',
+        'ArrowRight',
+        'ArrowUp',
+        'ArrowDown',
+        'Home',
+        'End',
+      ].includes(e.key);
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        const keys = computeRangeKeys(
+          0,
+          filteredEmployees.length - 1,
+          1,
+          daysInMonth
+        );
+        setSelectedCellKeys(keys);
+        setAnchorCell({ empIdx: 0, day: 1 });
+        setFocusedCell({ empIdx: filteredEmployees.length - 1, day: daysInMonth });
+        return;
+      }
+
+      if (!isArrowKey) return;
+
+      e.preventDefault();
+
+      const currentFocus = focusedCell || { empIdx: 0, day: daysInMonth };
+      let { empIdx, day } = currentFocus;
+
+      if (e.key === 'ArrowLeft') {
+        day = Math.max(1, day - 1);
+      } else if (e.key === 'ArrowRight') {
+        day = Math.min(daysInMonth, day + 1);
+      } else if (e.key === 'ArrowUp') {
+        empIdx = Math.max(0, empIdx - 1);
+      } else if (e.key === 'ArrowDown') {
+        empIdx = Math.min(filteredEmployees.length - 1, empIdx + 1);
+      } else if (e.key === 'Home') {
+        day = 1;
+      } else if (e.key === 'End') {
+        day = daysInMonth;
+      }
+
+      if (e.shiftKey) {
+        const currentAnchor = anchorCell || currentFocus;
+        if (!anchorCell) setAnchorCell(currentAnchor);
+        const keys = computeRangeKeys(currentAnchor.empIdx, empIdx, currentAnchor.day, day);
+        setSelectedCellKeys(keys);
+        setFocusedCell({ empIdx, day });
+      } else {
+        const keys = computeRangeKeys(empIdx, empIdx, day, day);
+        setSelectedCellKeys(keys);
+        setAnchorCell({ empIdx, day });
+        setFocusedCell({ empIdx, day });
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    focusedCell,
+    anchorCell,
+    filteredEmployees,
+    daysInMonth,
+    selectedYear,
+    selectedMonth,
+    editingCell,
+  ]);
+
+  const handleBulkSaveStatus = (status: AttendanceStatus | null) => {
+    if (selectedCellKeys.size === 0) return;
+
+    const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const keysArray = Array.from(selectedCellKeys);
+
+    const newRecordsToUpsert: any[] = [];
+    let updatedAttendanceRecords = [...attendanceRecords];
+
+    for (const key of keysArray) {
+      const [empId, dateStr] = key.split(':');
+      const emp = employees.find((e) => e.id === empId);
+      if (!emp) continue;
+
+      const [rYear, rMonth, rDay] = dateStr.split('-').map(Number);
+      const dateObj = new Date(rYear, rMonth - 1, rDay);
+      const dayName = DAY_NAMES[dateObj.getDay()];
+      const offDays = (emp.weeklyOff || '').toLowerCase().split(/[,/&]+/).map((s: string) => s.trim());
+      const isWeeklyOffDay = Boolean(emp.weeklyOff && emp.weeklyOff !== 'None' && offDays.includes(dayName.toLowerCase()));
+
+      let targetStatus = status;
+      let overtimeVal: string | undefined = undefined;
+
+      if (status === 'P' && isWeeklyOffDay) {
+        targetStatus = 'WOP';
+        overtimeVal = 'P';
+      }
+
+      const existingIdx = updatedAttendanceRecords.findIndex(
+        (r) => r.employeeId === empId && r.date === dateStr
+      );
+      const existingRec = existingIdx >= 0 ? updatedAttendanceRecords[existingIdx] : undefined;
+
+      if (existingIdx >= 0) {
+        updatedAttendanceRecords.splice(existingIdx, 1);
+      }
+
+      if (targetStatus !== null) {
+        const updatedRec: AttendanceRecord = {
+          id: existingRec?.id || `${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          employeeId: empId,
+          date: dateStr,
+          status: targetStatus,
+          overtimeStatus: overtimeVal,
+          checkInTime: existingRec?.checkInTime || 'Manual',
+          timestamp: new Date().toISOString(),
+          remarks: targetStatus === 'WOP' ? 'Present on Weekly Off' : 'Bulk Updated',
+          inTime: existingRec?.inTime || null,
+          outTime: existingRec?.outTime || null,
+          durationHours: existingRec?.durationHours || null,
+          duration: existingRec?.duration || null,
+        };
+        updatedAttendanceRecords.push(updatedRec);
+
+        newRecordsToUpsert.push({
+          staff_id: empId,
+          site_id: selectedSiteFilter === 'all' ? (emp.siteId || null) : selectedSiteFilter,
+          record_date: dateStr,
+          shift_type: overtimeVal ? 'overtime' : 'regular',
+          status: targetStatus,
+          in_time: existingRec?.inTime || null,
+          out_time: existingRec?.outTime || null,
+          duration_hours: existingRec?.durationHours || 0,
+          duration: existingRec?.duration || null,
+        });
+      }
+    }
+
+    setAttendanceRecords(updatedAttendanceRecords);
+
+    try {
+      if (newRecordsToUpsert.length > 0) {
+        supabase
+          .from('attendance_records')
+          .upsert(newRecordsToUpsert, { onConflict: 'staff_id,record_date' })
+          .then(({ error }) => {
+            if (error) console.warn('⚠️ Error bulk upserting attendance:', error.message);
+          });
+      }
+    } catch (err) {
+      console.warn('⚠️ Could not save bulk attendance:', err);
+    }
   };
 
   // True relational fetch sequence: sites -> staff -> attendance_records
@@ -437,13 +688,20 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
       </div>
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
         {/* Left Title & Live Badges */}
-        <div className="flex items-center gap-3">
-          <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Attendance Grid</h2>
-          <div className="flex items-center gap-2">
-            <span className="bg-emerald-50 text-emerald-700 font-bold px-2.5 py-1 rounded-full text-xs border border-emerald-200">
-              ● LIVE DATA
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-3">
+            <h2 className="text-2xl font-black text-slate-900 tracking-tight">Attendance Grid</h2>
+            <span className="bg-emerald-50 text-emerald-700 font-extrabold px-3 py-1 rounded-full text-xs border border-emerald-200 shadow-2xs flex items-center gap-1.5">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              LIVE DATA
             </span>
           </div>
+          <span className="bg-slate-100/80 text-slate-600 font-medium px-3 py-1 rounded-lg text-xs border border-slate-200/80 shadow-2xs flex items-center gap-1.5 w-fit">
+            <span className="font-bold text-indigo-600">⌨️ Keyboard Selection:</span> Hold <kbd className="px-1.5 py-0.5 bg-white border border-slate-300 rounded text-[10px] font-mono shadow-2xs">Shift</kbd> + <kbd className="px-1.5 py-0.5 bg-white border border-slate-300 rounded text-[10px] font-mono shadow-2xs">← Arrow</kbd> to select range | Click employee to select row
+          </span>
         </div>
 
         {/* Right Actions Grid */}
@@ -735,7 +993,9 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
                     {/* Employee Profile Cell (Spans 2 rows with thick bottom & right borders) */}
                     <td
                       rowSpan={2}
-                      className="p-3 sticky left-0 bg-white z-20 border-r-2 border-b-2 border-slate-400 text-left font-medium text-gray-900 shadow-xs align-middle"
+                      className="p-3 sticky left-0 bg-white z-20 border-r-2 border-b-2 border-slate-400 text-left font-medium text-gray-900 shadow-xs align-middle group cursor-pointer"
+                      onClick={() => handleSelectRow(index)}
+                      title="Click to select entire row for this employee"
                     >
                       <div className="flex items-center justify-between gap-2 min-w-[210px]">
                         <div className="flex items-center gap-3">
@@ -764,15 +1024,31 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
                           </div>
                         </div>
 
-                        {onEditDeductions && (
+                        <div className="flex items-center gap-1">
                           <button
                             type="button"
-                            onClick={() => onEditDeductions(emp)}
-                            className="p-1 text-gray-400 hover:text-teal-600 rounded transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSelectRow(index);
+                            }}
+                            className="text-[10px] font-bold text-blue-600 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded opacity-80 group-hover:opacity-100 hover:bg-blue-100"
+                            title="Select entire row"
                           >
-                            <Banknote size={14} />
+                            Row
                           </button>
-                        )}
+                          {onEditDeductions && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onEditDeductions(emp);
+                              }}
+                              className="p-1 text-gray-400 hover:text-teal-600 rounded transition-colors"
+                            >
+                              <Banknote size={14} />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </td>
 
@@ -859,19 +1135,31 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
                         ? `In: ${record?.inTime || '--'} | Out: ${record?.outTime || '--'} | Duration: ${durationStr || '--'}`
                         : undefined;
 
+                      const cellKey = `${emp.id}:${dateStr}`;
+                      const isMultiSelected = selectedCellKeys.size > 1 && selectedCellKeys.has(cellKey);
+
+                      let selectionStyle = '';
+                      if (isMultiSelected) {
+                        selectionStyle = '!bg-indigo-100/90 !ring-2 !ring-indigo-600 !ring-inset z-20 font-black text-indigo-950 shadow-2xs';
+                      }
+
                       return (
                         <td
                           key={`reg-${d}`}
                           title={punchTooltip}
-                          onClick={() =>
-                            setEditingCell({
-                              empId: emp.id,
-                              empName: emp.name,
-                              date: dateStr,
-                              currentRecord: record,
-                            })
-                          }
-                          className={`border-r border-b border-slate-300 p-1 text-center align-middle cursor-pointer transition-colors w-[54px] min-w-[54px] max-w-[54px] h-9 ${cellBg}`}
+                          onMouseDown={(e) => handleCellMouseDown(index, d, e)}
+                          onMouseEnter={() => handleCellMouseEnter(index, d)}
+                          onClick={() => {
+                            if (!isMouseDown) {
+                              setEditingCell({
+                                empId: emp.id,
+                                empName: emp.name,
+                                date: dateStr,
+                                currentRecord: record,
+                              });
+                            }
+                          }}
+                          className={`border-r border-b border-slate-300 p-1 text-center align-middle cursor-pointer transition-colors w-[54px] min-w-[54px] max-w-[54px] h-9 select-none ${cellBg} ${selectionStyle}`}
                         >
                           {statusBadge}
                         </td>
@@ -937,23 +1225,35 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
                         ? `In: ${record?.inTime || '--'} | Out: ${record?.outTime || '--'} | Duration: ${durationDisplay || '--'}`
                         : undefined;
 
+                      const cellKey = `${emp.id}:${dateStr}`;
+                      const isMultiSelected = selectedCellKeys.size > 1 && selectedCellKeys.has(cellKey);
+
+                      let selectionStyle = '';
+                      if (isMultiSelected) {
+                        selectionStyle = '!bg-indigo-100/90 !ring-2 !ring-indigo-600 !ring-inset z-20 font-black text-indigo-950 shadow-2xs';
+                      }
+
                       return (
                         <td
                           key={`ot-${d}`}
                           title={subTooltip}
-                          onClick={() =>
-                            setEditingCell({
-                              empId: emp.id,
-                              empName: emp.name,
-                              date: dateStr,
-                              currentRecord: record,
-                            })
-                          }
-                          className={`border-r border-b-2 border-slate-400 p-0.5 text-center align-middle cursor-pointer transition-colors w-[54px] min-w-[54px] max-w-[54px] h-[52px] ${
+                          onMouseDown={(e) => handleCellMouseDown(index, d, e)}
+                          onMouseEnter={() => handleCellMouseEnter(index, d)}
+                          onClick={() => {
+                            if (!isMouseDown) {
+                              setEditingCell({
+                                empId: emp.id,
+                                empName: emp.name,
+                                date: dateStr,
+                                currentRecord: record,
+                              });
+                            }
+                          }}
+                          className={`border-r border-b-2 border-slate-400 p-0.5 text-center align-middle cursor-pointer transition-colors w-[54px] min-w-[54px] max-w-[54px] h-[52px] select-none ${
                             isOt
                               ? 'bg-emerald-200/90 hover:bg-emerald-300/90'
                               : 'hover:bg-amber-100/60'
-                          }`}
+                          } ${selectionStyle}`}
                         >
                           {isOt ? (
                             <span className="font-black text-emerald-900 text-xs bg-emerald-300/90 border border-emerald-400 px-1.5 py-0.5 rounded shadow-2xs">
@@ -986,6 +1286,84 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
           </tbody>
         </table>
       </div>
+
+      {/* Floating Bulk Attendance Action Bar */}
+      {selectedCellKeys.size > 1 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-4 animate-in slide-in-from-bottom-4 duration-200">
+          <div className="flex items-center gap-2 border-r border-slate-700 pr-4">
+            <span className="bg-blue-600 text-white font-extrabold px-2.5 py-0.5 rounded-full text-xs shadow-xs">
+              {selectedCellKeys.size}
+            </span>
+            <span className="text-xs font-bold text-slate-200">
+              Cells Selected
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleBulkSaveStatus('P')}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+            >
+              <Check size={14} /> Present (P)
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleBulkSaveStatus('A')}
+              className="bg-red-600 hover:bg-red-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+            >
+              <X size={14} /> Absent (A)
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleBulkSaveStatus('HD')}
+              className="bg-amber-600 hover:bg-amber-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs transition-all cursor-pointer"
+            >
+              Half Day (HD)
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleBulkSaveStatus('W/O')}
+              className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-xs transition-all cursor-pointer"
+            >
+              Week Off (W/O)
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleBulkSaveStatus(null)}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 shadow-xs transition-all cursor-pointer"
+              title="Clear status for selected cells"
+            >
+              <Trash2 size={13} /> Clear
+            </button>
+          </div>
+
+          <div className="flex items-center gap-3 border-l border-slate-700 pl-4">
+            <button
+              type="button"
+              onClick={() => {
+                const keys = computeRangeKeys(0, filteredEmployees.length - 1, 1, daysInMonth);
+                setSelectedCellKeys(keys);
+              }}
+              className="text-xs text-blue-400 hover:text-blue-300 font-bold underline cursor-pointer"
+            >
+              Select All
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedCellKeys(new Set())}
+              className="text-xs text-slate-400 hover:text-white font-medium p-1 rounded-full hover:bg-slate-800 cursor-pointer"
+              title="Deselect All"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Manual Edit Attendance Modal */}
       {editingCell && (
