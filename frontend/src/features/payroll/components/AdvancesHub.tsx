@@ -212,7 +212,7 @@ export const AdvancesHub: React.FC = () => {
       delete payload.staff;
 
       const { error: fullError } = await supabase.from('payroll_records').upsert([payload], {
-        onConflict: 'month_year,staff_id',
+        onConflict: 'staff_id,month_year',
       });
 
       if (fullError) {
@@ -231,7 +231,7 @@ export const AdvancesHub: React.FC = () => {
         delete fallbackPayload.in_next_mth;
 
         const { error: fallbackError } = await supabase.from('payroll_records').upsert([fallbackPayload], {
-          onConflict: 'month_year,staff_id',
+          onConflict: 'staff_id,month_year',
         });
 
         if (fallbackError) {

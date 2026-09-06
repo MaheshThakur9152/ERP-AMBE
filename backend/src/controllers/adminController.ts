@@ -359,14 +359,19 @@ export class AdminController {
 
       const lockStatus = is_locked !== undefined ? Boolean(is_locked) : true;
 
-      // 1. Try update with updated_at
+      // 1. Try update (omit updated_at for staff table)
+      const updatePayload: any = { is_locked: lockStatus };
+      if (entityType !== 'staff') {
+        updatePayload.updated_at = new Date().toISOString();
+      }
+
       let { error } = await supabaseAdmin
         .from(entityType)
-        .update({ is_locked: lockStatus, updated_at: new Date().toISOString() })
+        .update(updatePayload)
         .eq('id', id);
 
       // 2. If updated_at column does not exist on table, fallback to is_locked only
-      if (error) {
+      if (error && updatePayload.updated_at) {
         console.warn(`[admin:lock-item:warn] update with updated_at failed for ${entityType} id=${id}: ${error.message}. Retrying with is_locked only...`);
         const retryRes = await supabaseAdmin
           .from(entityType)
@@ -418,12 +423,17 @@ export class AdminController {
           return null;
         }
 
+        const itemPayload: any = { is_locked: lockStatus };
+        if (table !== 'staff') {
+          itemPayload.updated_at = new Date().toISOString();
+        }
+
         let { error } = await supabaseAdmin
           .from(table)
-          .update({ is_locked: lockStatus, updated_at: new Date().toISOString() })
+          .update(itemPayload)
           .eq('id', item.id);
 
-        if (error) {
+        if (error && itemPayload.updated_at) {
           const retryRes = await supabaseAdmin
             .from(table)
             .update({ is_locked: lockStatus })

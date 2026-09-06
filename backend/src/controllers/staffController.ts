@@ -73,6 +73,12 @@ export const StaffController = {
         updateData.designation = (body.designation || body.role || 'Janitor').trim();
       }
       if (body.status !== undefined) updateData.status = body.status || 'Active';
+      if (body.left_date !== undefined || body.leftDate !== undefined) {
+        updateData.left_date = body.left_date || body.leftDate || null;
+      }
+      if (body.inactive_reason !== undefined || body.inactiveReason !== undefined) {
+        updateData.inactive_reason = body.inactive_reason || body.inactiveReason || '';
+      }
       if (body.weekly_off !== undefined || body.weeklyOff !== undefined) {
         updateData.weekly_off = body.weekly_off || body.weeklyOff || 'Sunday';
       }

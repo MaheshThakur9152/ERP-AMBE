@@ -218,7 +218,7 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
       if (error) {
         console.error('Could not fetch site staff for roster:', error.message);
       } else if (data) {
-        setSiteStaff(data);
+        setSiteStaff(data.filter((s: any) => s.status !== 'Inactive'));
       }
     } catch (e) {
       console.error('Fetch site staff error:', e);

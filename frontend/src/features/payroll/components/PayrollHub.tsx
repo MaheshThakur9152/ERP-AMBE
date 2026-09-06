@@ -297,10 +297,31 @@ export const PayrollHub: React.FC = () => {
         };
       };
 
+      const MONTH_INDEX_MAP: Record<string, number> = {
+        January: 0, February: 1, March: 2, April: 3,
+        May: 4, June: 5, July: 6, August: 7,
+        September: 8, October: 9, November: 10, December: 11
+      };
+      const mIdx = MONTH_INDEX_MAP[selectedMonth] ?? (Number(selectedMonth) - 1);
+      const monthStart = new Date(Number(selectedYear), mIdx, 1);
+
       // 5. Generate UI state rows
       const initialRows: EmployeePayrollRow[] = [];
 
       staffList.forEach((emp: any, index: number) => {
+        if (emp.status === 'Inactive') {
+          const leftDStr = emp.left_date || emp.leftDate;
+          const hasSavedRecord = payrollRecordsMap.has(emp.id) || Array.from(payrollRecordsMap.keys()).some((k) => k.startsWith(`${emp.id}_`));
+          if (leftDStr) {
+            const leftDateObj = new Date(leftDStr);
+            if (leftDateObj < monthStart && !hasSavedRecord) {
+              return;
+            }
+          } else if (!hasSavedRecord) {
+            return;
+          }
+        }
+
         const staffDeps = staffDeploymentsMap.get(emp.id) || [];
 
         if (staffDeps.length >= 2) {
@@ -406,7 +427,7 @@ export const PayrollHub: React.FC = () => {
     loadPayrollData();
   }, [selectedMonth, selectedYear, selectedSiteId, daysInMonth]);
 
-  // Instant Auto-Save onBlur Handler matching DB unique constraint (month_year, staff_id, site_id)
+  // Instant Auto-Save onBlur Handler matching DB unique constraint (staff_id, month_year)
   const handleAutoSave = async (row: EmployeePayrollRow) => {
     if (!row.calc) return;
     try {
@@ -469,7 +490,7 @@ export const PayrollHub: React.FC = () => {
       console.log('SAVING total_net_salary:', row.name, row.calc.totalNetSalary, recordToSave.total_net_salary);
 
       const { error: fullError } = await supabase.from('payroll_records').upsert([recordToSave], {
-        onConflict: 'month_year,staff_id,site_id',
+        onConflict: 'staff_id,month_year',
       });
 
       if (fullError) {
@@ -495,7 +516,7 @@ export const PayrollHub: React.FC = () => {
         delete fallbackRecord.total_net_salary;
 
         const { error: fallbackError } = await supabase.from('payroll_records').upsert([fallbackRecord], {
-          onConflict: 'month_year,staff_id,site_id',
+          onConflict: 'staff_id,month_year',
         });
 
         if (fallbackError) {
@@ -695,7 +716,7 @@ export const PayrollHub: React.FC = () => {
       }));
 
       const { error } = await supabase.from('payroll_records').upsert(recordsToSave, {
-        onConflict: 'month_year,staff_id,site_id',
+        onConflict: 'staff_id,month_year',
       });
 
       if (error) {

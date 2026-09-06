@@ -13,6 +13,8 @@ import {
   ShieldCheck,
   X,
   User,
+  UserX,
+  UserCheck,
   MapPin,
   Briefcase,
   Calendar,
@@ -162,6 +164,10 @@ interface StaffMember {
     };
   };
   status?: string;
+  left_date?: string;
+  leftDate?: string;
+  inactive_reason?: string;
+  inactiveReason?: string;
   joining_date?: string;
   joiningDate?: string;
   created_at?: string;
@@ -197,6 +203,75 @@ export const StaffPage: React.FC = () => {
   const [filterMissingUan, setFilterMissingUan] = useState<boolean>(false);
   const [filterMissingEsic, setFilterMissingEsic] = useState<boolean>(false);
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // Offboarding Inactive Modal State
+  const [offboardModalStaff, setOffboardModalStaff] = useState<StaffMember | null>(null);
+  const [offboardLeftDate, setOffboardLeftDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [offboardReason, setOffboardReason] = useState<string>('');
+
+  const handleOpenOffboardModal = (staff: StaffMember) => {
+    setOffboardModalStaff(staff);
+    setOffboardLeftDate(new Date().toISOString().split('T')[0]);
+    setOffboardReason('');
+  };
+
+  const handleConfirmOffboard = async () => {
+    if (!offboardModalStaff || !offboardLeftDate) {
+      toast.error('Left date is required');
+      return;
+    }
+    const staffId = offboardModalStaff.id;
+    try {
+      // Note: staff table does NOT have updated_at column
+      const { error } = await supabase
+        .from('staff')
+        .update({
+          status: 'Inactive',
+          left_date: offboardLeftDate,
+          inactive_reason: offboardReason,
+        })
+        .eq('id', staffId);
+
+      if (error) {
+        console.warn('Full offboard update failed, retrying status only:', error.message);
+        const { error: retryErr } = await supabase
+          .from('staff')
+          .update({ status: 'Inactive' })
+          .eq('id', staffId);
+        if (retryErr) throw retryErr;
+      }
+
+      toast.success(`${offboardModalStaff.employee_name || offboardModalStaff.name || 'Staff'} marked as Inactive`);
+      setOffboardModalStaff(null);
+      setOffboardReason('');
+      setRefreshKey((prev) => prev + 1);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to set staff inactive');
+    }
+  };
+
+  const handleReactivateStaff = async (staff: StaffMember) => {
+    if (!staff.id) return;
+    try {
+      const { error } = await supabase
+        .from('staff')
+        .update({
+          status: 'Active',
+          left_date: null,
+          inactive_reason: '',
+        })
+        .eq('id', staff.id);
+
+      if (error) {
+        await supabase.from('staff').update({ status: 'Active' }).eq('id', staff.id);
+      }
+
+      toast.success(`${staff.employee_name || staff.name || 'Staff'} reactivated`);
+      setRefreshKey((prev) => prev + 1);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to reactivate staff');
+    }
+  };
 
   // Unified Staff Form Modal State
   const [staffModalOpen, setStaffModalOpen] = useState(false);
@@ -980,15 +1055,24 @@ export const StaffPage: React.FC = () => {
 
                       {/* Status */}
                       <td className="py-4 px-4 text-center">
-                        <span
-                          className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                            staff.status === 'Active'
-                              ? 'bg-green-100 text-green-700 border border-green-200'
-                              : 'bg-amber-100 text-amber-700 border border-amber-200'
-                          }`}
-                        >
-                          {staff.status || 'Active'}
-                        </span>
+                        <div className="flex flex-col items-center gap-1">
+                          <span
+                            className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                              staff.status === 'Inactive'
+                                ? 'bg-red-100 text-red-700 border border-red-200'
+                                : staff.status === 'On Leave'
+                                ? 'bg-amber-100 text-amber-700 border border-amber-200'
+                                : 'bg-green-100 text-green-700 border border-green-200'
+                            }`}
+                          >
+                            {staff.status || 'Active'}
+                          </span>
+                          {staff.status === 'Inactive' && (staff.left_date || staff.leftDate) && (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-50 text-red-700 border border-red-200">
+                              Left {staff.left_date || staff.leftDate}
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       {/* Actions */}
@@ -1003,6 +1087,28 @@ export const StaffPage: React.FC = () => {
                             <Edit2 className="w-3.5 h-3.5" />
                             <span>Edit / KYC</span>
                           </button>
+
+                          {staff.status === 'Inactive' ? (
+                            <button
+                              type="button"
+                              onClick={() => handleReactivateStaff(staff)}
+                              className="px-2.5 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
+                              title="Reactivate Staff Member"
+                            >
+                              <UserCheck className="w-3.5 h-3.5" />
+                              <span>Reactivate</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenOffboardModal(staff)}
+                              className="px-2.5 py-1.5 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-300 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
+                              title="Mark Staff as Inactive"
+                            >
+                              <UserX className="w-3.5 h-3.5" />
+                              <span>Mark Inactive</span>
+                            </button>
+                          )}
 
                           <button
                             type="button"
@@ -1185,6 +1291,82 @@ export const StaffPage: React.FC = () => {
         fileName={activeDocPreview?.fileName}
         title={activeDocPreview?.title}
       />
+
+      {/* Offboarding / Mark Inactive Modal */}
+      {offboardModalStaff && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150"
+          onClick={() => setOffboardModalStaff(null)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden border border-gray-200 p-6 space-y-4 animate-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+              <h3 className="font-bold text-gray-900 text-base flex items-center gap-2">
+                <UserX className="w-5 h-5 text-rose-600" />
+                <span>Mark as Inactive</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setOffboardModalStaff(null)}
+                className="text-gray-400 hover:text-gray-600 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-600">
+              Mark <strong className="text-gray-900">{offboardModalStaff.employee_name || offboardModalStaff.name}</strong> as inactive. Historical payroll & attendance records will remain fully intact.
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">
+                  Left Date <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={offboardLeftDate}
+                  onChange={(e) => setOffboardLeftDate(e.target.value)}
+                  className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-xs font-medium text-gray-800 focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1">
+                  Reason (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Resigned, Terminated, Site transfer"
+                  value={offboardReason}
+                  onChange={(e) => setOffboardReason(e.target.value)}
+                  className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-xs font-medium text-gray-800 focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => setOffboardModalStaff(null)}
+                className="px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded-lg border border-gray-200 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmOffboard}
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-sm cursor-pointer"
+              >
+                Confirm Inactive
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

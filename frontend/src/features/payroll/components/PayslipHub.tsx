@@ -78,6 +78,7 @@
     });
     const [sites, setSites] = useState<SiteOption[]>([]);
     const [records, setRecords] = useState<any[]>([]);
+    const [selectedRecordIds, setSelectedRecordIds] = useState<Set<string>>(new Set());
     const [isLoading, setIsLoading] = useState<boolean>(false);
 
     // Sync filter changes to localStorage
@@ -115,16 +116,10 @@
         if (error) {
           console.error('Error fetching payslips:', error);
         } else {
-          console.log(
-            '[PayslipHub:records]',
-            data?.map((r) => ({
-              id: r.id,
-              name: r.employee_name,
-              net_salary: r.net_salary,
-              total_net_salary: r.total_net_salary,
-            }))
-          );
-          setRecords(data || []);
+          const fetchedData = data || [];
+          setRecords(fetchedData);
+          // Default state: ALL staff checked/selected
+          setSelectedRecordIds(new Set(fetchedData.map((r: any) => r.id)));
         }
       } catch (err) {
         console.error('Failed to load payslips:', err);
@@ -136,6 +131,31 @@
     useEffect(() => {
       loadPayslips();
     }, [selectedMonth, selectedYear, selectedSiteId]);
+
+    const isAllSelected = records.length > 0 && records.every((r: any) => selectedRecordIds.has(r.id));
+    const isSomeSelected = selectedRecordIds.size > 0 && !isAllSelected;
+
+    const handleToggleSelectAll = () => {
+      if (isAllSelected) {
+        setSelectedRecordIds(new Set());
+      } else {
+        setSelectedRecordIds(new Set(records.map((r: any) => r.id)));
+      }
+    };
+
+    const handleToggleSelectRecord = (id: string) => {
+      setSelectedRecordIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
+        return next;
+      });
+    };
+
+    const printableRecords = records.filter((r: any) => selectedRecordIds.has(r.id));
 
     return (
       <div className="p-6 space-y-6 bg-slate-50 min-h-screen font-sans">
@@ -251,14 +271,33 @@
             <button
               type="button"
               onClick={() => window.print()}
-              disabled={!records.length || isLoading}
-              className="bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow-xs flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap"
+              disabled={!selectedRecordIds.size || isLoading}
+              className="bg-teal-600 hover:bg-teal-700 disabled:opacity-40 disabled:cursor-not-allowed text-white px-4 py-2 rounded-xl text-xs font-semibold shadow-xs flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap"
             >
               <Printer className="w-4 h-4" />
-              <span>Print Payslips ({records.length})</span>
+              <span>Print Payslips ({selectedRecordIds.size} selected)</span>
             </button>
           </div>
         </div>
+
+        {/* Selection Control Bar (Hidden during print) */}
+        {!isLoading && records.length > 0 && (
+          <div className="no-print bg-white p-4 rounded-2xl border border-gray-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
+            <label className="flex items-center gap-2.5 cursor-pointer text-xs font-bold text-gray-800 select-none">
+              <input
+                type="checkbox"
+                checked={isAllSelected}
+                ref={(el) => { if (el) el.indeterminate = isSomeSelected; }}
+                onChange={handleToggleSelectAll}
+                className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500 cursor-pointer"
+              />
+              <span>Select All Employees ({records.length})</span>
+            </label>
+            <div className="text-xs text-gray-500 font-medium">
+              Showing <strong className="text-gray-900">{selectedRecordIds.size}</strong> of <strong className="text-gray-900">{records.length}</strong> payslips selected for batch print
+            </div>
+          </div>
+        )}
 
         {/* Main Content Area / Print Container */}
         <div className="print-wrapper">
@@ -276,6 +315,7 @@
           ) : (
             <div className="grid gap-6 print:block print:w-full print:m-0 print:p-0">
               {records.map((record: any, index: number) => {
+                const isSelected = selectedRecordIds.has(record.id);
                 const totalNetPayable =
                   record.total_net_salary != null && Number(record.total_net_salary) > 0
                     ? Number(record.total_net_salary)
@@ -293,8 +333,43 @@
                 return (
                   <div
                     key={record.id || index}
-                    className="payslip-card w-full h-auto print:min-h-[90mm] border-[2px] border-solid border-black p-3 print:p-2 flex flex-col justify-between mb-6 print:mb-2 box-border bg-white rounded-lg print:rounded-none"
+                    className={`payslip-card w-full h-auto print:min-h-[90mm] border-[2px] border-solid border-black p-3 print:p-2 flex flex-col justify-between mb-6 print:mb-2 box-border bg-white rounded-lg print:rounded-none ${
+                      !isSelected ? 'no-print opacity-50 bg-gray-50/70 border-gray-300' : ''
+                    }`}
                   >
+                    {/* Screen-only Row Selection Bar */}
+                    <div className="no-print flex items-center justify-between pb-2 mb-2 border-b border-gray-200">
+                      <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-gray-800 select-none">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => handleToggleSelectRecord(record.id)}
+                          className="w-4 h-4 text-teal-600 rounded border-gray-300 focus:ring-teal-500 cursor-pointer"
+                        />
+                        <span>{record.employee_name || staff.name || 'Employee'} ({record.emp_id || staff.biometric_code || '-'})</span>
+                      </label>
+
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          isSelected ? 'bg-teal-100 text-teal-800' : 'bg-gray-200 text-gray-600'
+                        }`}>
+                          {isSelected ? 'Included in Batch' : 'Excluded'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedRecordIds(new Set([record.id]));
+                            setTimeout(() => window.print(), 100);
+                          }}
+                          className="px-2.5 py-1 text-xs font-semibold text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-200 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
+                          title="Print only this employee's payslip"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                          <span>Print Single</span>
+                        </button>
+                      </div>
+                    </div>
+
                     {/* Header */}
                     <div className="text-center border-b border-gray-800 pb-1">
                       <h1 className="font-bold text-sm text-center uppercase tracking-wider text-gray-900">

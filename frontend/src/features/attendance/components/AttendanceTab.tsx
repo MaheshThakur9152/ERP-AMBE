@@ -291,8 +291,25 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
 
         const { data: dbStaff, error: staffErr } = await staffQuery;
 
+        const monthStart = new Date(Number(selectedYear), Number(selectedMonth) - 1, 1);
+
         if (!staffErr && dbStaff) {
-          const mappedStaff: EmployeeAttendanceData[] = dbStaff.map((st: any) => ({
+          const activeStaffList = dbStaff.filter((st: any) => {
+            if (st.status === 'Inactive') {
+              const leftDStr = st.left_date || st.leftDate;
+              if (leftDStr) {
+                const leftDateObj = new Date(leftDStr);
+                if (leftDateObj < monthStart) {
+                  return false;
+                }
+              } else {
+                return false;
+              }
+            }
+            return true;
+          });
+
+          const mappedStaff: EmployeeAttendanceData[] = activeStaffList.map((st: any) => ({
             id: st.id,
             name: st.employee_name || st.name || st.employeeName || '',
             biometricCode: st.biometric_code || st.biometricCode || '',
