@@ -15,6 +15,7 @@
     "@supabase/supabase-js": "^2.48.1",
     "@types/cookie-parser": "^1.4.10",
     "@types/multer": "^2.2.0",
+    "@types/pg": "^8.23.1",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
@@ -25,6 +26,7 @@
     "helmet": "^8.0.0",
     "multer": "^2.2.0",
     "pdf-lib": "^1.17.1",
+    "pg": "^8.23.0",
     "sharp": "^0.35.4",
     "zod": "^3.24.2"
   },

@@ -13,6 +13,7 @@ import {
   X,
   Save,
   RefreshCw,
+  Edit,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { calculatePayroll, RateCard, PayrollCalculationResult } from '../utils/payrollCalculator';
@@ -47,6 +48,8 @@ export interface EmployeePayrollRow {
   adv_total?: number;
   in_this_mth?: number;
   in_next_mth?: number;
+  manualPtAdjustment?: number;
+  manualPtAdjustmentReason?: string;
   calc: PayrollCalculationResult | null;
   isSaved?: boolean;
   isPaid: boolean;
@@ -98,6 +101,11 @@ export const PayrollHub: React.FC = () => {
   const [remark, setRemark] = useState<string>('');
   const [inThisMth, setInThisMth] = useState<number>(0);
   const [isCustomInThisMth, setIsCustomInThisMth] = useState<boolean>(false);
+
+  // Manual PT Adjustment Modal State
+  const [activePtRow, setActivePtRow] = useState<EmployeePayrollRow | null>(null);
+  const [manualPtVal, setManualPtVal] = useState<number>(0);
+  const [manualPtReasonVal, setManualPtReasonVal] = useState<string>('');
 
   // Save filters to local storage so they survive page refreshes
   useEffect(() => {
@@ -266,6 +274,12 @@ export const PayrollHub: React.FC = () => {
             }
           : null;
         const calc = calculatePayroll(rateCard, emp, pd, wo, daysInMonth, advances);
+        const manualPtAdjustment = saved?.manual_pt_adjustment !== undefined && saved?.manual_pt_adjustment !== null
+          ? Number(saved.manual_pt_adjustment)
+          : ((saved?.pt !== undefined || saved?.pt_deduction !== undefined) && calc
+            ? (Number(saved?.pt ?? saved?.pt_deduction ?? 0) - calc.pt)
+            : 0);
+        const manualPtAdjustmentReason = saved?.manual_pt_adjustment_reason || '';
 
         return {
           id: emp.id || `emp-${index}`,
@@ -290,6 +304,8 @@ export const PayrollHub: React.FC = () => {
           adv_total,
           in_this_mth,
           in_next_mth,
+          manualPtAdjustment,
+          manualPtAdjustmentReason,
           calc,
           isSaved: !!saved,
           isPaid,
@@ -431,6 +447,12 @@ export const PayrollHub: React.FC = () => {
   const handleAutoSave = async (row: EmployeePayrollRow) => {
     if (!row.calc) return;
     try {
+      const systemPt = row.calc.pt;
+      const manualPt = row.manualPtAdjustment || 0;
+      const adjustedPt = systemPt + manualPt;
+      const adjustedNetSalary = row.calc.earnedGross - row.calc.epf - row.calc.esic - adjustedPt - row.advances;
+      const adjustedTotalNetSalary = adjustedNetSalary + row.calc.earnedPartBonus;
+
       const recordToSave = {
         month_year: `${selectedMonth} ${selectedYear}`,
         site_id: row.siteId,
@@ -449,15 +471,19 @@ export const PayrollHub: React.FC = () => {
         earned_bonus: row.calc.earnedBonus,
         earned_gross: row.calc.earnedGross,
 
-        // Satisfy original NOT NULL constraints
+        // Satisfy original NOT NULL constraints with adjusted PT
         epf_deduction: row.calc.epf,
         esic_deduction: row.calc.esic,
-        pt_deduction: row.calc.pt,
+        pt_deduction: adjustedPt,
 
         // Populate new columns
         epf: row.calc.epf,
         esic: row.calc.esic,
-        pt: row.calc.pt,
+        pt: adjustedPt,
+
+        // Manual PT Adjustment fields
+        manual_pt_adjustment: manualPt,
+        manual_pt_adjustment_reason: row.manualPtAdjustmentReason || '',
 
         // Part Bonus Tracking Snapshot Columns
         bonus_amount_snapshot: row.calc.bonusAmountSnapshot ?? null,
@@ -465,7 +491,7 @@ export const PayrollHub: React.FC = () => {
         rate_card_remark_snapshot: row.calc.rateCardRemarkSnapshot ?? row.rateCard?.remark ?? '',
         earned_part_bonus: row.calc.earnedPartBonus,
         remaining_part_bonus: row.calc.remainingPartBonus,
-        total_net_salary: row.calc.totalNetSalary,
+        total_net_salary: adjustedTotalNetSalary,
 
         // Itemized Advance Ledger Columns
         adv_amt: row.adv_amt ?? 0,
@@ -481,13 +507,13 @@ export const PayrollHub: React.FC = () => {
         in_next_mth: row.in_next_mth ?? 0,
 
         advances: row.advances,
-        net_salary: row.calc.netSalary,
+        net_salary: adjustedNetSalary,
         is_paid: row.isPaid,
         updated_at: new Date().toISOString(),
       };
 
       console.log('Attempting full save for', row.name, recordToSave);
-      console.log('SAVING total_net_salary:', row.name, row.calc.totalNetSalary, recordToSave.total_net_salary);
+      console.log('SAVING total_net_salary:', row.name, adjustedTotalNetSalary, recordToSave.total_net_salary);
 
       const { error: fullError } = await supabase.from('payroll_records').upsert([recordToSave], {
         onConflict: 'staff_id,month_year',
@@ -495,8 +521,10 @@ export const PayrollHub: React.FC = () => {
 
       if (fullError) {
         console.error('FULL UPSERT FAILED:', fullError);
-        console.warn('Full advance record upsert failed, retrying fallback to core advances column:', fullError.message);
+        console.warn('Full record upsert failed, retrying fallback to core columns:', fullError.message);
         const fallbackRecord: any = { ...recordToSave };
+        delete fallbackRecord.manual_pt_adjustment;
+        delete fallbackRecord.manual_pt_adjustment_reason;
         delete fallbackRecord.adv_amt;
         delete fallbackRecord.shirt;
         delete fallbackRecord.pant;
@@ -510,6 +538,10 @@ export const PayrollHub: React.FC = () => {
         delete fallbackRecord.in_next_mth;
         delete fallbackRecord.bonus_amount_snapshot;
         delete fallbackRecord.part_bonus_amount_snapshot;
+        delete fallbackRecord.rate_card_remark_snapshot;
+        delete fallbackRecord.earned_part_bonus;
+        delete fallbackRecord.remaining_part_bonus;
+        delete fallbackRecord.total_net_salary;
         delete fallbackRecord.rate_card_remark_snapshot;
         delete fallbackRecord.earned_part_bonus;
         delete fallbackRecord.remaining_part_bonus;
@@ -532,6 +564,26 @@ export const PayrollHub: React.FC = () => {
       console.error('Auto-save error:', err);
       alert(`Auto-save error: ${err.message}`);
     }
+  };
+
+  // Open Manual PT Modal & Hydrate Form
+  const openPtModal = (row: EmployeePayrollRow) => {
+    setActivePtRow(row);
+    setManualPtVal(row.manualPtAdjustment || 0);
+    setManualPtReasonVal(row.manualPtAdjustmentReason || '');
+  };
+
+  const handleSavePtModal = async () => {
+    if (!activePtRow) return;
+    const updatedRow: EmployeePayrollRow = {
+      ...activePtRow,
+      manualPtAdjustment: manualPtVal,
+      manualPtAdjustmentReason: manualPtReasonVal,
+      isSaved: false,
+    };
+    setRows((prev) => prev.map((r) => (r.id === activePtRow.id && r.siteId === activePtRow.siteId ? updatedRow : r)));
+    await handleAutoSave(updatedRow);
+    setActivePtRow(null);
   };
 
   // Open Advance Ledger Modal & Hydrate Form
@@ -669,51 +721,61 @@ export const PayrollHub: React.FC = () => {
     if (!selectedRows.length) return;
 
     try {
-      const recordsToSave = selectedRows.map((r) => ({
-        month_year: `${selectedMonth} ${selectedYear}`,
-        site_id: r.siteId,
-        site_name: r.siteName,
-        staff_id: r.id,
-        emp_id: r.empId,
-        employee_name: r.name,
-        pd: r.pd,
-        wo: r.wo,
-        payable_days: r.calc!.payableDays,
-        earned_basic: r.calc!.earnedBasic,
-        earned_hra: r.calc!.earnedHRA,
-        earned_other: r.calc!.earnedOther,
-        earned_conveyance: r.calc!.earnedConveyance,
-        earned_incentive: r.calc!.earnedIncentive,
-        earned_bonus: r.calc!.earnedBonus,
-        earned_gross: r.calc!.earnedGross,
-        epf_deduction: r.calc!.epf,
-        esic_deduction: r.calc!.esic,
-        pt_deduction: r.calc!.pt,
-        epf: r.calc!.epf,
-        esic: r.calc!.esic,
-        pt: r.calc!.pt,
-        bonus_amount_snapshot: r.calc!.bonusAmountSnapshot ?? null,
-        part_bonus_amount_snapshot: r.calc!.partBonusAmountSnapshot ?? null,
-        rate_card_remark_snapshot: r.calc!.rateCardRemarkSnapshot ?? r.rateCard?.remark ?? '',
-        earned_part_bonus: r.calc!.earnedPartBonus,
-        remaining_part_bonus: r.calc!.remainingPartBonus,
-        total_net_salary: r.calc!.totalNetSalary,
-        adv_amt: r.adv_amt ?? 0,
-        shirt: r.shirt ?? 0,
-        pant: r.pant ?? 0,
-        shoes: r.shoes ?? 0,
-        id_card: r.id_card ?? 0,
-        other_amt: r.other_amt ?? 0,
-        remark: r.remark ?? '',
-        adv_date: r.adv_date ?? '',
-        adv_total: r.adv_total ?? (r.advances || 0),
-        in_this_mth: r.in_this_mth ?? r.advances,
-        in_next_mth: r.in_next_mth ?? 0,
-        advances: r.advances,
-        net_salary: r.calc!.netSalary,
-        is_paid: true,
-        updated_at: new Date().toISOString(),
-      }));
+      const recordsToSave = selectedRows.map((r) => {
+        const sysPt = r.calc!.pt;
+        const manPt = r.manualPtAdjustment || 0;
+        const adjPt = sysPt + manPt;
+        const adjNet = r.calc!.earnedGross - r.calc!.epf - r.calc!.esic - adjPt - r.advances;
+        const adjTotalNet = adjNet + r.calc!.earnedPartBonus;
+
+        return {
+          month_year: `${selectedMonth} ${selectedYear}`,
+          site_id: r.siteId,
+          site_name: r.siteName,
+          staff_id: r.id,
+          emp_id: r.empId,
+          employee_name: r.name,
+          pd: r.pd,
+          wo: r.wo,
+          payable_days: r.calc!.payableDays,
+          earned_basic: r.calc!.earnedBasic,
+          earned_hra: r.calc!.earnedHRA,
+          earned_other: r.calc!.earnedOther,
+          earned_conveyance: r.calc!.earnedConveyance,
+          earned_incentive: r.calc!.earnedIncentive,
+          earned_bonus: r.calc!.earnedBonus,
+          earned_gross: r.calc!.earnedGross,
+          epf_deduction: r.calc!.epf,
+          esic_deduction: r.calc!.esic,
+          pt_deduction: adjPt,
+          epf: r.calc!.epf,
+          esic: r.calc!.esic,
+          pt: adjPt,
+          manual_pt_adjustment: manPt,
+          manual_pt_adjustment_reason: r.manualPtAdjustmentReason || '',
+          bonus_amount_snapshot: r.calc!.bonusAmountSnapshot ?? null,
+          part_bonus_amount_snapshot: r.calc!.partBonusAmountSnapshot ?? null,
+          rate_card_remark_snapshot: r.calc!.rateCardRemarkSnapshot ?? r.rateCard?.remark ?? '',
+          earned_part_bonus: r.calc!.earnedPartBonus,
+          remaining_part_bonus: r.calc!.remainingPartBonus,
+          total_net_salary: adjTotalNet,
+          adv_amt: r.adv_amt ?? 0,
+          shirt: r.shirt ?? 0,
+          pant: r.pant ?? 0,
+          shoes: r.shoes ?? 0,
+          id_card: r.id_card ?? 0,
+          other_amt: r.other_amt ?? 0,
+          remark: r.remark ?? '',
+          adv_date: r.adv_date ?? '',
+          adv_total: r.adv_total ?? (r.advances || 0),
+          in_this_mth: r.in_this_mth ?? r.advances,
+          in_next_mth: r.in_next_mth ?? 0,
+          advances: r.advances,
+          net_salary: adjNet,
+          is_paid: true,
+          updated_at: new Date().toISOString(),
+        };
+      });
 
       const { error } = await supabase.from('payroll_records').upsert(recordsToSave, {
         onConflict: 'staff_id,month_year',
@@ -771,13 +833,18 @@ export const PayrollHub: React.FC = () => {
 
       const axisRecords: AxisExportRecord[] = selectedRows.map((r) => {
         const emp = r.empRaw || {};
+        const sysPt = r.calc!.pt;
+        const manPt = r.manualPtAdjustment || 0;
+        const adjPt = sysPt + manPt;
+        const adjNet = r.calc!.earnedGross - r.calc!.epf - r.calc!.esic - adjPt - r.advances;
+
         return {
           empId: r.empId,
           name: r.name,
           payeeName: emp.payee_name || r.name,
           bankAccountNo: emp.bank_account_no || emp.bank_account_number || emp.bank_account || emp.account_no || '',
           bankIfscCode: emp.bank_ifsc_code || emp.ifsc_code || emp.ifsc || '',
-          netSalary: r.calc!.netSalary,
+          netSalary: adjNet,
         };
       });
 
@@ -859,7 +926,13 @@ export const PayrollHub: React.FC = () => {
         const grossRate = rc.is_flat_wage
           ? (rc.gross_salary || 0)
           : ((rc.basic_da || 0) + (rc.hra || 0) + otherAllowance + conveyanceAllowance + incentive || (rc.gross_salary || 0));
-        const totalDeductions = calc.epf + calc.esic + calc.pt + r.advances;
+        const sysPt = calc.pt;
+        const manPt = r.manualPtAdjustment || 0;
+        const adjPt = sysPt + manPt;
+        const adjNet = calc.earnedGross - calc.epf - calc.esic - adjPt - r.advances;
+        const adjTotalNet = adjNet + calc.earnedPartBonus;
+        const totalDeductions = calc.epf + calc.esic + adjPt + r.advances;
+
         const siteObj = (sites.find((s: any) => s.id === r.siteId) as any) || emp.sites || {};
         const siteCodeName = (siteObj.code_name || emp.sites?.code_name || '').trim();
         const siteName = r.siteName || siteObj.site_name || emp.sites?.site_name || 'Site';
@@ -908,10 +981,10 @@ export const PayrollHub: React.FC = () => {
           earnedGross: calc.earnedGross,
           epf: calc.epf,
           esic: calc.esic,
-          pt: calc.pt,
+          pt: adjPt,
           totalDeductions,
-          netSalary: calc.netSalary,
-          totalNetSalary: calc.totalNetSalary,
+          netSalary: adjNet,
+          totalNetSalary: adjTotalNet,
           payeeName: emp.payee_name || emp.payeeName || emp.employee_name || emp.name || r.name,
           bankAccountNo: emp.bank_account_no || emp.bankAccountNo || emp.bank_account || '',
           bankIfscCode: emp.bank_ifsc_code || emp.bankIfsc || emp.bankIfscCode || emp.ifsc || '',
@@ -997,16 +1070,22 @@ export const PayrollHub: React.FC = () => {
     return displayedRows.reduce(
       (acc, r) => {
         if (r.calc) {
+          const sysPt = r.calc.pt;
+          const manPt = r.manualPtAdjustment || 0;
+          const adjPt = sysPt + manPt;
+          const adjNet = r.calc.earnedGross - r.calc.epf - r.calc.esic - adjPt - r.advances;
+          const adjTotalNet = adjNet + r.calc.earnedPartBonus;
+
           acc.earnedGross += r.calc.earnedGross;
           acc.epf += r.calc.epf;
           acc.esic += r.calc.esic;
-          acc.pt += r.calc.pt;
+          acc.pt += adjPt;
           acc.earnedBonus += r.calc.earnedBonus;
           acc.earnedPartBonus += r.calc.earnedPartBonus;
           acc.remainingPartBonus += r.calc.remainingPartBonus;
-          acc.totalNetSalary += r.calc.totalNetSalary;
+          acc.totalNetSalary += adjTotalNet;
           acc.advances += r.advances;
-          acc.netSalary += r.calc.netSalary;
+          acc.netSalary += adjNet;
         }
         return acc;
       },
@@ -1249,6 +1328,13 @@ export const PayrollHub: React.FC = () => {
                     (r) => (r.designation || 'Unassigned').trim().toUpperCase() === currentPost.toUpperCase()
                   ).length;
                   const rowKey = `${row.id}_${row.siteId}`;
+                  const sysPt = row.calc ? row.calc.pt : 0;
+                  const manPt = row.manualPtAdjustment || 0;
+                  const adjPt = sysPt + manPt;
+                  const adjNet = row.calc
+                    ? row.calc.earnedGross - row.calc.epf - row.calc.esic - adjPt - row.advances
+                    : 0;
+                  const adjTotalNet = row.calc ? adjNet + row.calc.earnedPartBonus : 0;
 
                   return (
                     <React.Fragment key={rowKey}>
@@ -1405,7 +1491,24 @@ export const PayrollHub: React.FC = () => {
                           -₹{row.calc.esic.toLocaleString('en-IN')}
                         </td>
                         <td className="p-3 text-right text-amber-700 font-semibold">
-                          -₹{row.calc.pt.toLocaleString('en-IN')}
+                          <div className="flex items-center justify-end gap-1">
+                            {manPt !== 0 && (
+                              <span
+                                className="w-2 h-2 rounded-full bg-amber-500 flex-shrink-0 animate-pulse"
+                                title={`Manual PT Override: ${manPt > 0 ? '+' : ''}₹${manPt} (${row.manualPtAdjustmentReason || 'Manual adjustment'})`}
+                              />
+                            )}
+                            <span>-₹{adjPt.toLocaleString('en-IN')}</span>
+                            <button
+                              type="button"
+                              onClick={() => openPtModal(row)}
+                              disabled={row.isPaid}
+                              className="p-1 rounded hover:bg-amber-100 text-amber-800 transition-colors cursor-pointer disabled:opacity-40"
+                              title="Edit Manual PT Adjustment"
+                            >
+                              <Edit className="w-3.5 h-3.5 text-amber-700" />
+                            </button>
+                          </div>
                         </td>
 
                         {/* Earned Bonus */}
@@ -1425,7 +1528,7 @@ export const PayrollHub: React.FC = () => {
 
                         {/* Total Net Salary */}
                         <td className="p-3 text-right font-bold text-emerald-800 bg-emerald-50/60 min-w-[130px] text-xs">
-                          ₹{row.calc.totalNetSalary.toLocaleString('en-IN')}
+                          ₹{adjTotalNet.toLocaleString('en-IN')}
                         </td>
 
                         {/* Advances Input + Ledger Modal Button */}
@@ -1453,7 +1556,7 @@ export const PayrollHub: React.FC = () => {
 
                         {/* Net Salary Read-Only */}
                         <td className="p-3 text-right font-bold text-emerald-700 bg-emerald-50/50 text-xs">
-                          ₹{row.calc.netSalary.toLocaleString('en-IN')}
+                          ₹{adjNet.toLocaleString('en-IN')}
                         </td>
                       </>
                     )}
@@ -1711,6 +1814,114 @@ export const PayrollHub: React.FC = () => {
                 >
                   <Save className="w-3.5 h-3.5" />
                   <span>Save Advance Ledger</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manual PT Adjustment Popover Modal */}
+      {activePtRow && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 font-sans">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 border border-gray-100">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-gray-200 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-800 border border-amber-300 flex items-center justify-center">
+                  <Edit className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-gray-900 leading-tight">
+                    Manual PT Adjustment
+                  </h2>
+                  <p className="text-xs text-gray-500">
+                    {activePtRow.name} ({activePtRow.empId})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePtRow(null)}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Formula vs Manual Breakdown Card */}
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 space-y-2 text-xs">
+              <div className="flex justify-between items-center text-gray-700">
+                <span className="font-semibold">System calculated:</span>
+                <span className="font-mono font-bold">₹{activePtRow.calc?.pt || 0}</span>
+              </div>
+              <div className="flex justify-between items-center text-amber-900">
+                <span className="font-semibold">Manual adjustment:</span>
+                <span className="font-mono font-bold">
+                  {manualPtVal >= 0 ? '+' : ''}₹{manualPtVal}
+                </span>
+              </div>
+              <div className="flex justify-between items-center font-bold text-amber-950 border-t border-amber-200/80 pt-2 text-sm">
+                <span>Total PT:</span>
+                <span className="font-mono">₹{(activePtRow.calc?.pt || 0) + manualPtVal}</span>
+              </div>
+            </div>
+
+            {/* Input Form Fields */}
+            <div className="space-y-4 text-xs">
+              <div>
+                <label className="block text-gray-700 font-semibold mb-1">
+                  Manual PT Adjustment (₹)
+                </label>
+                <input
+                  type="number"
+                  disabled={activePtRow.isPaid}
+                  value={manualPtVal === 0 ? '' : manualPtVal}
+                  onChange={(e) => setManualPtVal(e.target.value === '' ? 0 : Number(e.target.value))}
+                  placeholder="0"
+                  className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 font-mono font-bold text-gray-900 outline-none focus:ring-2 focus:ring-amber-500 disabled:bg-gray-100 disabled:opacity-60 cursor-not-allowed"
+                />
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Use positive amount (e.g. 200) to add PT paid out of pocket, or negative to reduce.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-gray-700 font-semibold mb-1">
+                  Reason / Notes
+                </label>
+                <input
+                  type="text"
+                  disabled={activePtRow.isPaid}
+                  value={manualPtReasonVal}
+                  onChange={(e) => setManualPtReasonVal(e.target.value)}
+                  placeholder="e.g. Paid out of pocket - attendance shortfall"
+                  className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-900 outline-none focus:ring-2 focus:ring-amber-500 disabled:bg-gray-100 disabled:opacity-60 cursor-not-allowed"
+                />
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center justify-end gap-3 border-t border-gray-200 pt-3">
+              <button
+                type="button"
+                onClick={() => setActivePtRow(null)}
+                className="px-4 py-2 rounded-xl border border-gray-300 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              {activePtRow.isPaid ? (
+                <span className="px-4 py-2 rounded-xl bg-gray-100 text-gray-500 border border-gray-300 font-bold text-xs">
+                  Locked (PAID)
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleSavePtModal}
+                  className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Save Adjustment</span>
                 </button>
               )}
             </div>

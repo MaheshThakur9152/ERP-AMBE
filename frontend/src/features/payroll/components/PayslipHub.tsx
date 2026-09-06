@@ -6,6 +6,9 @@ import {
   Loader2,
   Filter,
   FileText,
+  Edit,
+  Save,
+  X,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
@@ -80,6 +83,66 @@ export const PayslipHub: React.FC = () => {
   const [records, setRecords] = useState<any[]>([]);
   const [selectedRecordIds, setSelectedRecordIds] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState<boolean>(false);
+
+  // Manual PT Modal State
+  const [activePtRecord, setActivePtRecord] = useState<any | null>(null);
+  const [manualPtVal, setManualPtVal] = useState<number>(0);
+  const [manualPtReasonVal, setManualPtReasonVal] = useState<string>('');
+
+  const openPtModal = (record: any) => {
+    setActivePtRecord(record);
+    setManualPtVal(Number(record.manual_pt_adjustment || 0));
+    setManualPtReasonVal(record.manual_pt_adjustment_reason || '');
+  };
+
+  const handleSavePtModal = async () => {
+    if (!activePtRecord) return;
+    const manualPt = manualPtVal;
+    const currentTotalPt = Number(activePtRecord.pt ?? activePtRecord.pt_deduction ?? 0);
+    const currentManualPt = Number(activePtRecord.manual_pt_adjustment || 0);
+    const systemPt = currentTotalPt - currentManualPt;
+    const newTotalPt = systemPt + manualPt;
+
+    const earnedGross = Number(activePtRecord.earned_gross || 0);
+    const epf = Number(activePtRecord.epf || activePtRecord.epf_deduction || 0);
+    const esic = Number(activePtRecord.esic || activePtRecord.esic_deduction || 0);
+    const advances = Number(activePtRecord.advances ?? activePtRecord.in_this_mth ?? 0);
+    const earnedPartBonus = Number(activePtRecord.earned_part_bonus || 0);
+
+    const netSalary = earnedGross - epf - esic - newTotalPt - advances;
+    const totalNetSalary = netSalary + earnedPartBonus;
+
+    const recordToSave: any = {
+      ...activePtRecord,
+      pt: newTotalPt,
+      pt_deduction: newTotalPt,
+      manual_pt_adjustment: manualPt,
+      manual_pt_adjustment_reason: manualPtReasonVal,
+      net_salary: netSalary,
+      total_net_salary: totalNetSalary,
+      updated_at: new Date().toISOString(),
+    };
+    delete recordToSave.staff;
+
+    const { error: fullError } = await supabase.from('payroll_records').upsert([recordToSave], {
+      onConflict: 'staff_id,month_year',
+    });
+
+    if (fullError) {
+      console.warn('Fallback save for payslip record:', fullError.message);
+      const fallbackRecord = { ...recordToSave };
+      delete fallbackRecord.manual_pt_adjustment;
+      delete fallbackRecord.manual_pt_adjustment_reason;
+      await supabase.from('payroll_records').upsert([fallbackRecord], {
+        onConflict: 'staff_id,month_year',
+      });
+    }
+
+    setRecords((prev) =>
+      prev.map((r) => (r.id === activePtRecord.id ? { ...r, ...recordToSave } : r))
+    );
+    setActivePtRecord(null);
+  };
 
   // Sync filter changes to localStorage
   useEffect(() => {
@@ -201,6 +264,16 @@ export const PayslipHub: React.FC = () => {
               </span>
               <button
                 type="button"
+                onClick={() => openPtModal(record)}
+                className="px-2.5 py-1 text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
+                title="Edit Manual PT Adjustment"
+              >
+                <Edit className="w-3.5 h-3.5" />
+                <span>Edit PT</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => {
                   setSelectedRecordIds(new Set([record.id]));
                   setTimeout(() => window.print(), 100);
@@ -284,7 +357,18 @@ export const PayslipHub: React.FC = () => {
                 </div>
                 <div className="flex justify-between border-b border-dotted border-gray-200"><span>EPF</span><span>{(record.epf || record.epf_deduction || 0).toLocaleString('en-IN')}</span></div>
                 <div className="flex justify-between border-b border-dotted border-gray-200"><span>ESIC</span><span>{(record.esic || record.esic_deduction || 0).toLocaleString('en-IN')}</span></div>
-                <div className="flex justify-between border-b border-dotted border-gray-200"><span>PT</span><span>{(record.pt || record.pt_deduction || 0).toLocaleString('en-IN')}</span></div>
+                <div className="flex justify-between border-b border-dotted border-gray-200">
+                  <span className="flex items-center gap-1">
+                    <span>PT</span>
+                    {!isPrintOnly && Number(record.manual_pt_adjustment || 0) !== 0 && (
+                      <span
+                        className="w-1.5 h-1.5 rounded-full bg-amber-500 flex-shrink-0 animate-pulse"
+                        title={`Manual PT: ${Number(record.manual_pt_adjustment) > 0 ? '+' : ''}₹${record.manual_pt_adjustment} (${record.manual_pt_adjustment_reason || ''})`}
+                      />
+                    )}
+                  </span>
+                  <span>{(record.pt || record.pt_deduction || 0).toLocaleString('en-IN')}</span>
+                </div>
                 {advanceDeducted > 0 && (
                   <div className="flex justify-between border-b border-dotted border-gray-200 leading-tight py-0 text-[7.5px]"><span>Advance (This Month)</span><span>{advanceDeducted.toLocaleString('en-IN')}</span></div>
                 )}
@@ -481,6 +565,116 @@ export const PayslipHub: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Dedicated Print-Only Container (Render ONLY printableRecords, Hidden on screen, Visible during print) */}
+      {/* Manual PT Adjustment Popover Modal */}
+      {activePtRecord && (
+        <div className="no-print fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 font-sans">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 border border-gray-100">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-gray-200 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-800 border border-amber-300 flex items-center justify-center">
+                  <Edit className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-gray-900 leading-tight">
+                    Manual PT Adjustment
+                  </h2>
+                  <p className="text-xs text-gray-500">
+                    {activePtRecord.employee_name || activePtRecord.staff?.employee_name || 'Employee'} ({activePtRecord.emp_id || activePtRecord.staff?.biometric_code || '-'})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePtRecord(null)}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Formula vs Manual Breakdown Card */}
+            {(() => {
+              const currentTotalPt = Number(activePtRecord.pt ?? activePtRecord.pt_deduction ?? 0);
+              const currentManualPt = Number(activePtRecord.manual_pt_adjustment || 0);
+              const systemPt = currentTotalPt - currentManualPt;
+              const newTotalPt = systemPt + manualPtVal;
+
+              return (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 space-y-2 text-xs">
+                  <div className="flex justify-between items-center text-gray-700">
+                    <span className="font-semibold">System calculated:</span>
+                    <span className="font-mono font-bold">₹{systemPt}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-amber-900">
+                    <span className="font-semibold">Manual adjustment:</span>
+                    <span className="font-mono font-bold">
+                      {manualPtVal >= 0 ? '+' : ''}₹{manualPtVal}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center font-bold text-amber-950 border-t border-amber-200/80 pt-2 text-sm">
+                    <span>Total PT:</span>
+                    <span className="font-mono">₹{newTotalPt}</span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Input Form Fields */}
+            <div className="space-y-4 text-xs">
+              <div>
+                <label className="block text-gray-700 font-semibold mb-1">
+                  Manual PT Adjustment (₹)
+                </label>
+                <input
+                  type="number"
+                  value={manualPtVal === 0 ? '' : manualPtVal}
+                  onChange={(e) => setManualPtVal(e.target.value === '' ? 0 : Number(e.target.value))}
+                  placeholder="0"
+                  className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 font-mono font-bold text-gray-900 outline-none focus:ring-2 focus:ring-amber-500"
+                />
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Use positive amount (e.g. 200) to add PT paid out of pocket, or negative to reduce.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-gray-700 font-semibold mb-1">
+                  Reason / Notes
+                </label>
+                <input
+                  type="text"
+                  value={manualPtReasonVal}
+                  onChange={(e) => setManualPtReasonVal(e.target.value)}
+                  placeholder="e.g. Paid out of pocket - attendance shortfall"
+                  className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-900 outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center justify-end gap-3 border-t border-gray-200 pt-3">
+              <button
+                type="button"
+                onClick={() => setActivePtRecord(null)}
+                className="px-4 py-2 rounded-xl border border-gray-300 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSavePtModal}
+                className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Save Adjustment</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Dedicated Print-Only Container (Render ONLY printableRecords, Hidden on screen, Visible during print) */}
       <div className="print-wrapper hidden print:block print:w-full print:m-0 print:p-0">
