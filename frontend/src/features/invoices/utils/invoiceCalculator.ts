@@ -11,24 +11,22 @@ export function calculateLineItemAmount(
   workingDays: number,
   daysInMonth: number = 31,
   isOvertime: boolean = false,
-  persons: number = 1,
   hasExplicitOtRate: boolean = false
 ): number {
   if (!rate || !workingDays) return 0;
-  const pMultiplier = persons > 0 ? persons : 1;
   if (isOvertime) {
     if (hasExplicitOtRate) {
-      const amount = rate * workingDays * pMultiplier;
+      const amount = rate * workingDays;
       return Math.round(amount * 100) / 100;
     } else {
       if (daysInMonth <= 0) return 0;
       const hourlyRate = rate / daysInMonth / 8;
-      const amount = hourlyRate * workingDays * pMultiplier;
+      const amount = hourlyRate * workingDays;
       return Math.round(amount * 100) / 100;
     }
   }
   if (daysInMonth <= 0) return 0;
-  const amount = (rate / daysInMonth) * workingDays * pMultiplier;
+  const amount = (rate / daysInMonth) * workingDays;
   return Math.round(amount * 100) / 100;
 }
 
@@ -48,7 +46,6 @@ export function computeInvoiceCalculations(
   const resolvedItems = items.map((item, idx) => {
     const isOt = (item.description || '').toLowerCase().includes('overtime');
     const wDays = item.workingDays ?? 0;
-    const pCount = item.persons ?? 1;
     if (isOt && (!item.amount || item.amount === 0) && wDays > 0) {
       const parentRate = idx > 0 ? (items[idx - 1]?.rate || 0) : 0;
       const effectiveRate = item.rate > 0 ? item.rate : parentRate;
@@ -57,7 +54,6 @@ export function computeInvoiceCalculations(
         wDays,
         daysInMonth,
         true,
-        pCount,
         item.rate > 0
       );
       return { ...item, amount: computedAmount };

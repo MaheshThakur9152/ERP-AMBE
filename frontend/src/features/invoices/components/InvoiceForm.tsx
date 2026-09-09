@@ -40,7 +40,6 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     if (field === 'rate' || field === 'workingDays' || field === 'persons') {
       const rateNum = Number(field === 'rate' ? value : item.rate) || 0;
       const daysNum = Number(field === 'workingDays' ? value : item.workingDays) || 0;
-      const personsNum = Number(field === 'persons' ? value : item.persons) || 1;
       const isOt = (item.description || '').toLowerCase().includes('overtime');
 
       let effectiveRate = rateNum;
@@ -48,14 +47,13 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         effectiveRate = updatedItems[index - 1]?.rate || 0;
       }
 
-      item.amount = calculateLineItemAmount(effectiveRate, daysNum, 31, isOt, personsNum, rateNum > 0);
+      item.amount = calculateLineItemAmount(effectiveRate, daysNum, 31, isOt, rateNum > 0);
 
       if (!isOt && updatedItems[index + 1] && (updatedItems[index + 1].description || '').toLowerCase().includes('overtime')) {
         const otItem = { ...updatedItems[index + 1] };
         if (!otItem.rate) {
           const otDays = Number(otItem.workingDays) || 0;
-          const otPersons = Number(otItem.persons) || personsNum;
-          otItem.amount = calculateLineItemAmount(rateNum, otDays, 31, true, otPersons, false);
+          otItem.amount = calculateLineItemAmount(rateNum, otDays, 31, true, false);
           updatedItems[index + 1] = otItem;
         }
       }

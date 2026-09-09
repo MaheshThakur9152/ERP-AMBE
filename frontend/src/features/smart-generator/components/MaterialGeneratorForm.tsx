@@ -173,6 +173,12 @@ export const MaterialGeneratorForm: React.FC<MaterialGeneratorFormProps> = ({
   // Edit mode initial values
   useEffect(() => {
     if (!initialRecord) return;
+    const recType = (initialRecord as any).type || (initialRecord as any).invoice_type || (initialRecord as any).invoiceType;
+    if (recType === 'Proforma Invoice' || recType === 'Proforma') {
+      setInvoiceType('Proforma Invoice');
+    } else if (recType === 'Tax Invoice' || recType === 'Tax') {
+      setInvoiceType('Tax Invoice');
+    }
     setInvoiceNo(initialRecord.invoiceNo);
     setInvoiceDate(initialRecord.date);
     setBillingPeriod(initialRecord.monthYear || '');

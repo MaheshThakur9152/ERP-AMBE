@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Site } from '@/features/sites/types';
 import { fetchSitesApi } from '@/features/sites/api/siteApi';
@@ -164,6 +164,15 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
   // Handle Edit Mode initialRecord populate
   useEffect(() => {
     if (!initialRecord || !sites.length) return;
+    setIsEditLoaded(true);
+
+    const recType = (initialRecord as any).type || (initialRecord as any).invoice_type || (initialRecord as any).invoiceType;
+    if (recType === 'Proforma Invoice' || recType === 'Proforma') {
+      setInvoiceType('Proforma Invoice');
+    } else if (recType === 'Tax Invoice' || recType === 'Tax') {
+      setInvoiceType('Tax Invoice');
+    }
+
     setInvoiceNo(initialRecord.invoiceNo);
     setInvoiceDate(initialRecord.date);
     if (initialRecord.monthYear) {
@@ -292,7 +301,7 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
         if (item.rate > 0 && wDays > 0) {
           const isOt = (item.description || '').toLowerCase().includes('overtime');
           const daysToUse = (!isOt && (wDays === 31 || wDays === 30 || wDays === 28 || wDays === 29)) ? daysInNewMonth : wDays;
-          const newAmount = calculateLineItemAmount(item.rate, daysToUse, daysInNewMonth, isOt, item.persons);
+          const newAmount = calculateLineItemAmount(item.rate, daysToUse, daysInNewMonth, isOt, item.rate > 0);
           return { ...item, workingDays: daysToUse, amount: newAmount };
         }
         return item;
@@ -300,14 +309,24 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
     );
   };
 
-  // Auto-sync Operating Company when selected site changes
+  // Filter site location list based on selected Operating Entity company
+  const availableSites = useMemo(() => {
+    if (!selectedCompanyId || !sites.length) return sites;
+    const filtered = sites.filter((s: Site) => {
+      const compId = s.company_id || (s as any).companyId;
+      return !compId || compId === selectedCompanyId;
+    });
+    return filtered.length > 0 ? filtered : sites;
+  }, [sites, selectedCompanyId]);
+
+  // Auto-switch selectedSiteId if current site does not belong to selected company entity
   useEffect(() => {
-    if (!selectedSite) return;
-    const siteCompId = selectedSite.company_id || selectedSite.companyId;
-    if (siteCompId && companies.some((c) => c.id === siteCompId)) {
-      setSelectedCompanyId(siteCompId);
+    if (isEditLoaded || !availableSites.length) return;
+    const isCurrentSiteValid = availableSites.some((s) => s.id === selectedSiteId);
+    if (!isCurrentSiteValid) {
+      setSelectedSiteId(availableSites[0].id);
     }
-  }, [selectedSiteId, selectedSite, companies]);
+  }, [selectedCompanyId, availableSites, selectedSiteId, isEditLoaded]);
 
   // Populate line items dynamically when selected site changes
   useEffect(() => {
@@ -365,7 +384,6 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
     if (field === 'rate' || field === 'workingDays' || field === 'persons') {
       const r = Number(field === 'rate' ? value : item.rate) || 0;
       const d = Number(field === 'workingDays' ? value : item.workingDays) || 0;
-      const p = Number(field === 'persons' ? value : item.persons) || 1;
       const currentDays = getDaysInMonth(selectedMonth, selectedYear);
       const isOt = (item.description || '').toLowerCase().includes('overtime');
 
@@ -374,14 +392,13 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
         effectiveRate = updated[index - 1]?.rate || 0;
       }
 
-      item.amount = calculateLineItemAmount(effectiveRate, d, currentDays, isOt, p, r > 0);
+      item.amount = calculateLineItemAmount(effectiveRate, d, currentDays, isOt, r > 0);
 
       if (!isOt && updated[index + 1] && (updated[index + 1].description || '').toLowerCase().includes('overtime')) {
         const otItem = { ...updated[index + 1] };
         if (!otItem.rate) {
           const otDays = Number(otItem.workingDays) || 0;
-          const otPersons = Number(otItem.persons) || p;
-          otItem.amount = calculateLineItemAmount(r, otDays, currentDays, true, otPersons, false);
+          otItem.amount = calculateLineItemAmount(r, otDays, currentDays, true, false);
           updated[index + 1] = otItem;
         }
       }
@@ -646,7 +663,7 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
                   }}
                   className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-800 font-medium transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 truncate"
                 >
-                  {sites.map((s) => (
+                  {availableSites.map((s: Site) => (
                     <option key={s.id} value={s.id}>
                       🏢 {s.codeName || s.code_name ? `[${s.codeName || s.code_name}] ` : ''}{s.siteName} ({s.clientName})
                     </option>
