@@ -69,8 +69,8 @@ export function computeInvoiceCalculations(
   const totalWithTaxRaw = totalBeforeTax + cgstAmount + sgstAmount;
   const totalWithTax = Math.round(totalWithTaxRaw * 100) / 100;
 
-  // 7. Round off calculation
-  const grandTotalRounded = Math.round(totalWithTax);
+  // 7. Round down calculation
+  const grandTotalRounded = Math.floor(totalWithTax);
   const roundOff = Math.round((grandTotalRounded - totalWithTax) * 100) / 100;
   const grandTotal = grandTotalRounded;
 

@@ -102,8 +102,8 @@ export function computeMaterialCalculations(items: MaterialLineItem[]): Material
   // 3. Gross total = Goods (A) + Tax (B)
   const grossTotal = Math.round((goodsSubTotal + taxTotal) * 100) / 100;
 
-  // 4. Round off calculation
-  const grandTotal = Math.round(grossTotal);
+  // 4. Round down calculation
+  const grandTotal = Math.floor(grossTotal);
   const roundOff = Math.round((grandTotal - grossTotal) * 100) / 100;
 
   // 5. Amount in words
