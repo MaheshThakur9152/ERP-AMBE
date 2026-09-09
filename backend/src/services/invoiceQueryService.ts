@@ -426,7 +426,12 @@ export class InvoiceQueryService {
       }
     }
 
-    if (companyId) {
+    const isRevision = Boolean(
+      insertRow.previous_version_id ||
+      /-(?:R|REV)\d+/i.test(insertRow.invoice_no)
+    );
+
+    if (companyId && !isRevision) {
       await InvoiceSequenceService.incrementSequence(companyId, insertRow.type);
     }
 

@@ -40,7 +40,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     if (field === 'rate' || field === 'workingDays' || field === 'persons') {
       const rateNum = Number(field === 'rate' ? value : item.rate) || 0;
       const daysNum = Number(field === 'workingDays' ? value : item.workingDays) || 0;
-      item.amount = calculateLineItemAmount(rateNum, daysNum, 31);
+      const personsNum = Number(field === 'persons' ? value : item.persons) || 1;
+      const isOt = (item.description || '').toLowerCase().includes('overtime');
+      item.amount = calculateLineItemAmount(rateNum, daysNum, 31, isOt, personsNum);
     } else if (field === 'amount') {
       item.amount = Number(value) || 0;
     } else if (field === 'description') {

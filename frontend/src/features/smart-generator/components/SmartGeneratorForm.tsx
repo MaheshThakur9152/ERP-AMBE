@@ -290,8 +290,9 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
       prevItems.map((item) => {
         const wDays = item.workingDays ?? 0;
         if (item.rate > 0 && wDays > 0) {
-          const daysToUse = (wDays === 31 || wDays === 30 || wDays === 28 || wDays === 29) ? daysInNewMonth : wDays;
-          const newAmount = calculateLineItemAmount(item.rate, daysToUse, daysInNewMonth);
+          const isOt = (item.description || '').toLowerCase().includes('overtime');
+          const daysToUse = (!isOt && (wDays === 31 || wDays === 30 || wDays === 28 || wDays === 29)) ? daysInNewMonth : wDays;
+          const newAmount = calculateLineItemAmount(item.rate, daysToUse, daysInNewMonth, isOt, item.persons);
           return { ...item, workingDays: daysToUse, amount: newAmount };
         }
         return item;
@@ -364,8 +365,10 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
     if (field === 'rate' || field === 'workingDays' || field === 'persons') {
       const r = Number(field === 'rate' ? value : item.rate) || 0;
       const d = Number(field === 'workingDays' ? value : item.workingDays) || 0;
+      const p = Number(field === 'persons' ? value : item.persons) || 1;
       const currentDays = getDaysInMonth(selectedMonth, selectedYear);
-      item.amount = calculateLineItemAmount(r, d, currentDays);
+      const isOt = (item.description || '').toLowerCase().includes('overtime');
+      item.amount = calculateLineItemAmount(r, d, currentDays, isOt, p);
     } else if (field === 'amount') {
       item.amount = Number(value) || 0;
     }

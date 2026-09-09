@@ -9,10 +9,18 @@ import { numberToIndianWords } from './numberToWords';
 export function calculateLineItemAmount(
   rate: number,
   workingDays: number,
-  daysInMonth: number = 31
+  daysInMonth: number = 31,
+  isOvertime: boolean = false,
+  persons: number = 1
 ): number {
-  if (!rate || !workingDays || daysInMonth <= 0) return 0;
-  const amount = (rate / daysInMonth) * workingDays;
+  if (!rate || !workingDays) return 0;
+  const pMultiplier = persons > 0 ? persons : 1;
+  if (isOvertime) {
+    const amount = rate * workingDays * pMultiplier;
+    return Math.round(amount * 100) / 100;
+  }
+  if (daysInMonth <= 0) return 0;
+  const amount = (rate / daysInMonth) * workingDays * pMultiplier;
   return Math.round(amount * 100) / 100;
 }
 
