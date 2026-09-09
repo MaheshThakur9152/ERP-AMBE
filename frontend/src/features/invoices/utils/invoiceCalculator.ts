@@ -11,13 +11,21 @@ export function calculateLineItemAmount(
   workingDays: number,
   daysInMonth: number = 31,
   isOvertime: boolean = false,
-  persons: number = 1
+  persons: number = 1,
+  hasExplicitOtRate: boolean = false
 ): number {
   if (!rate || !workingDays) return 0;
   const pMultiplier = persons > 0 ? persons : 1;
   if (isOvertime) {
-    const amount = rate * workingDays * pMultiplier;
-    return Math.round(amount * 100) / 100;
+    if (hasExplicitOtRate) {
+      const amount = rate * workingDays * pMultiplier;
+      return Math.round(amount * 100) / 100;
+    } else {
+      if (daysInMonth <= 0) return 0;
+      const hourlyRate = rate / daysInMonth / 8;
+      const amount = hourlyRate * workingDays * pMultiplier;
+      return Math.round(amount * 100) / 100;
+    }
   }
   if (daysInMonth <= 0) return 0;
   const amount = (rate / daysInMonth) * workingDays * pMultiplier;
@@ -33,10 +41,32 @@ export function computeInvoiceCalculations(
   cgstPercent: number = 9,
   sgstPercent: number = 9,
   additionalChargesInput: AdditionalChargeItem[] | number = [],
-  legacyMaterialCharges: number = 0
+  legacyMaterialCharges: number = 0,
+  daysInMonth: number = 31
 ): InvoiceCalculations {
+  // Auto-resolve OT item amounts if missing or 0
+  const resolvedItems = items.map((item, idx) => {
+    const isOt = (item.description || '').toLowerCase().includes('overtime');
+    const wDays = item.workingDays ?? 0;
+    const pCount = item.persons ?? 1;
+    if (isOt && (!item.amount || item.amount === 0) && wDays > 0) {
+      const parentRate = idx > 0 ? (items[idx - 1]?.rate || 0) : 0;
+      const effectiveRate = item.rate > 0 ? item.rate : parentRate;
+      const computedAmount = calculateLineItemAmount(
+        effectiveRate,
+        wDays,
+        daysInMonth,
+        true,
+        pCount,
+        item.rate > 0
+      );
+      return { ...item, amount: computedAmount };
+    }
+    return item;
+  });
+
   // 1. Sub total from items
-  const subTotalRaw = items.reduce((sum, item) => sum + (item.amount || 0), 0);
+  const subTotalRaw = resolvedItems.reduce((sum, item) => sum + (item.amount || 0), 0);
   const subTotal = Math.round(subTotalRaw * 100) / 100;
 
   // 2. Management charges

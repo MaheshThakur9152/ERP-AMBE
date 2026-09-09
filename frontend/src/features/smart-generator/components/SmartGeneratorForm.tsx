@@ -368,7 +368,23 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
       const p = Number(field === 'persons' ? value : item.persons) || 1;
       const currentDays = getDaysInMonth(selectedMonth, selectedYear);
       const isOt = (item.description || '').toLowerCase().includes('overtime');
-      item.amount = calculateLineItemAmount(r, d, currentDays, isOt, p);
+
+      let effectiveRate = r;
+      if (isOt && effectiveRate === 0 && index > 0) {
+        effectiveRate = updated[index - 1]?.rate || 0;
+      }
+
+      item.amount = calculateLineItemAmount(effectiveRate, d, currentDays, isOt, p, r > 0);
+
+      if (!isOt && updated[index + 1] && (updated[index + 1].description || '').toLowerCase().includes('overtime')) {
+        const otItem = { ...updated[index + 1] };
+        if (!otItem.rate) {
+          const otDays = Number(otItem.workingDays) || 0;
+          const otPersons = Number(otItem.persons) || p;
+          otItem.amount = calculateLineItemAmount(r, otDays, currentDays, true, otPersons, false);
+          updated[index + 1] = otItem;
+        }
+      }
     } else if (field === 'amount') {
       item.amount = Number(value) || 0;
     }
@@ -380,12 +396,15 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
   // Computations
   const selectedSiteObj = sites.find((s) => s.id === selectedSiteId);
   const dynamicMgmtPercent = selectedSiteObj?.management_fee_percent ?? selectedSiteObj?.mgmtPercent ?? 5;
+  const currentDaysInMonth = getDaysInMonth(selectedMonth, selectedYear);
   const calc = computeInvoiceCalculations(
     lineItems,
     dynamicMgmtPercent,
     9,
     9,
-    additionalCharges
+    additionalCharges,
+    0,
+    currentDaysInMonth
   );
 
   const handleGenerateInvoice = async () => {
