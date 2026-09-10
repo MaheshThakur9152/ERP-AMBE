@@ -780,7 +780,7 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
                     )}
                     <th className="py-3 px-3 text-center w-24">HSN Code</th>
                     <th className="py-3 px-3 text-right w-28">Rate (₹)</th>
-                    <th className="py-3 px-3 text-right w-24">Working Days</th>
+                    <th className="py-3 px-3 text-right w-28">Working Days / Hours</th>
                     <th className="py-3 px-3 text-right w-20">Persons</th>
                     <th className="py-3 px-3 text-right w-32">Amount (₹)</th>
                   </tr>
@@ -830,8 +830,8 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
                             type="number"
                             value={item.workingDays === 0 ? '' : item.workingDays}
                             onChange={(e) => handleItemChange(idx, 'workingDays', e.target.value === '' ? 0 : e.target.value)}
-                            placeholder="0"
-                            className="w-20 bg-white border border-gray-200 rounded px-2.5 py-1 text-right text-gray-800 transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 font-mono"
+                            placeholder={item.description?.toLowerCase().includes('overtime') ? 'Hours' : 'Days'}
+                            className="w-24 bg-white border border-gray-200 rounded px-2.5 py-1 text-right text-gray-800 transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 font-mono"
                           />
                         </td>
                         <td className="py-2.5 px-3 text-right">
@@ -843,8 +843,15 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
                             className="w-16 bg-white border border-gray-200 rounded px-2.5 py-1 text-right text-gray-800 transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 font-mono"
                           />
                         </td>
-                        <td className="py-2.5 px-3 text-right font-bold text-teal-700 font-mono">
-                          ₹{formatCurrency(item.amount)}
+                        <td className="py-2.5 px-3 text-right font-bold font-mono">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={item.amount === 0 ? '' : item.amount}
+                            onChange={(e) => handleItemChange(idx, 'amount', e.target.value === '' ? 0 : e.target.value)}
+                            placeholder="0.00"
+                            className="w-28 bg-white border border-gray-200 rounded px-2.5 py-1 text-right text-teal-700 font-bold font-mono transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                          />
                         </td>
                       </tr>
                     ))

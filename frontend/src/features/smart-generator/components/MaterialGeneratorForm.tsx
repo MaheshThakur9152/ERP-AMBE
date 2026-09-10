@@ -755,7 +755,15 @@ export const MaterialGeneratorForm: React.FC<MaterialGeneratorFormProps> = ({
 
                   {/* Amount */}
                   <td className="py-2.5 px-3 text-right font-bold text-teal-700 font-mono text-xs">
-                    ₹{formatCurrency(item.amount)}
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={item.amount === 0 ? '' : item.amount}
+                      onChange={(e) => handleItemChange(idx, 'amount', e.target.value === '' ? 0 : Number(e.target.value))}
+                      placeholder="0.00"
+                      className="w-28 bg-white border border-gray-200 rounded px-2 py-1 text-right font-mono text-xs font-bold text-teal-700 outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                    />
                   </td>
 
                   {/* Action */}
