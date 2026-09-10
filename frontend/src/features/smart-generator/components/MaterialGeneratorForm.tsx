@@ -138,7 +138,7 @@ export const MaterialGeneratorForm: React.FC<MaterialGeneratorFormProps> = ({
       .then((data) => {
         setSites(data);
         if (data.length > 0) {
-          setSelectedSiteId(data[0].id);
+          setSelectedSiteId((prev) => prev || data[0].id);
         }
       })
       .catch((err) => {

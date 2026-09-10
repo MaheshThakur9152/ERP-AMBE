@@ -81,7 +81,7 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
       .then((data) => {
         setSites(data);
         if (data.length > 0 && !initialRecord) {
-          setSelectedSiteId(data[0].id);
+          setSelectedSiteId((prev) => prev || data[0].id);
         }
       })
       .catch((err) => {
@@ -321,12 +321,13 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
 
   // Auto-switch selectedSiteId if current site does not belong to selected company entity
   useEffect(() => {
-    if (isEditLoaded || !availableSites.length) return;
+    if (isEditLoaded || !availableSites.length || !selectedCompanyId) return;
+    if (selectedSiteId && sites.some((s) => s.id === selectedSiteId)) return;
     const isCurrentSiteValid = availableSites.some((s) => s.id === selectedSiteId);
-    if (!isCurrentSiteValid) {
+    if (!isCurrentSiteValid && availableSites.length > 0) {
       setSelectedSiteId(availableSites[0].id);
     }
-  }, [selectedCompanyId, availableSites, selectedSiteId, isEditLoaded]);
+  }, [selectedCompanyId, availableSites, selectedSiteId, isEditLoaded, sites]);
 
   // Populate line items dynamically when selected site changes
   useEffect(() => {
