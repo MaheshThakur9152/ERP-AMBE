@@ -8,14 +8,14 @@ const router = Router();
 router.get('/', requireAuth, StaffController.list);
 router.get('/:id', requireAuth, StaffController.getById);
 
+// Bulk assign staff to rate card
+router.patch('/bulk-assign-rate-card', requireAuth, requireAdmin, StaffController.bulkAssignRateCard);
+
 // Staff updates (partial field-level locking for admins)
 router.put('/:id', requireAuth, requireAdmin, checkFieldLockBouncer('staff'), StaffController.update);
 router.patch('/:id', requireAuth, requireAdmin, checkFieldLockBouncer('staff'), StaffController.update);
 
 // Staff deletion (full lock protection)
 router.delete('/:id', requireAuth, requireAdmin, checkLockBouncer('staff'), StaffController.delete);
-
-// Bulk assign staff to rate card
-router.patch('/bulk-assign-rate-card', requireAuth, requireAdmin, StaffController.bulkAssignRateCard);
 
 export default router;
