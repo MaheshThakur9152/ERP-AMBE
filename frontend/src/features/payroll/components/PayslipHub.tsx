@@ -9,6 +9,10 @@ import {
   Edit,
   Save,
   X,
+  Plus,
+  Trash2,
+  RotateCcw,
+  AlertCircle,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 
@@ -16,6 +20,12 @@ export interface SiteOption {
   id: string;
   site_name: string;
   code_name?: string;
+}
+
+export interface CustomLineItem {
+  id: string;
+  name: string;
+  amount: number;
 }
 
 const MONTHS = [
@@ -84,64 +94,448 @@ export const PayslipHub: React.FC = () => {
   const [selectedRecordIds, setSelectedRecordIds] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
-  // Manual PT Modal State
-  const [activePtRecord, setActivePtRecord] = useState<any | null>(null);
-  const [manualPtVal, setManualPtVal] = useState<number>(0);
-  const [manualPtReasonVal, setManualPtReasonVal] = useState<string>('');
+  // Edit Payslip Modal State
+  const [activeEditPayslipRecord, setActiveEditPayslipRecord] = useState<any | null>(null);
 
-  const openPtModal = (record: any) => {
-    setActivePtRecord(record);
-    setManualPtVal(Number(record.manual_pt_adjustment || 0));
-    setManualPtReasonVal(record.manual_pt_adjustment_reason || '');
+  // Employee details fields
+  const [editEmpName, setEditEmpName] = useState<string>('');
+  const [editEmpId, setEditEmpId] = useState<string>('');
+  const [editDesignation, setEditDesignation] = useState<string>('');
+  const [editPfNo, setEditPfNo] = useState<string>('');
+  const [editEsicNo, setEditEsicNo] = useState<string>('');
+  const [editBankAccountNo, setEditBankAccountNo] = useState<string>('');
+  const [editBankIfscCode, setEditBankIfscCode] = useState<string>('');
+
+  // Attendance fields
+  const [editPd, setEditPd] = useState<number>(0);
+  const [editWo, setEditWo] = useState<number>(0);
+  const [editPayableDays, setEditPayableDays] = useState<number>(0);
+  const [editDaysInMonth, setEditDaysInMonth] = useState<number>(30);
+
+  // Earnings fields
+  const [editEarnedBasic, setEditEarnedBasic] = useState<number>(0);
+  const [editEarnedHra, setEditEarnedHra] = useState<number>(0);
+  const [editEarnedOther, setEditEarnedOther] = useState<number>(0);
+  const [editEarnedConveyance, setEditEarnedConveyance] = useState<number>(0);
+  const [editEarnedIncentive, setEditEarnedIncentive] = useState<number>(0);
+  const [editCustomEarnings, setEditCustomEarnings] = useState<CustomLineItem[]>([]);
+
+  // Deductions fields
+  const [editEpf, setEditEpf] = useState<number>(0);
+  const [editEsic, setEditEsic] = useState<number>(0);
+  const [editPt, setEditPt] = useState<number>(0);
+  const [editAdvances, setEditAdvances] = useState<number>(0);
+  const [editCustomDeductions, setEditCustomDeductions] = useState<CustomLineItem[]>([]);
+
+  // Net Payable editable field
+  const [editNetPayable, setEditNetPayable] = useState<number>(0);
+  const [isCustomNetPayable, setIsCustomNetPayable] = useState<boolean>(false);
+
+  const [editReason, setEditReason] = useState<string>('');
+
+  // Live computed totals for Edit Payslip Modal
+  const modalTotalCustomEarnings = editCustomEarnings.reduce(
+    (sum, item) => sum + (Number(item.amount) || 0),
+    0
+  );
+  const modalTotalEarnings =
+    editEarnedBasic +
+    editEarnedHra +
+    editEarnedOther +
+    editEarnedConveyance +
+    editEarnedIncentive +
+    modalTotalCustomEarnings;
+
+  const modalTotalCustomDeductions = editCustomDeductions.reduce(
+    (sum, item) => sum + (Number(item.amount) || 0),
+    0
+  );
+  const modalTotalDeductions =
+    editEpf + editEsic + editPt + editAdvances + modalTotalCustomDeductions;
+
+  const modalAutoNetPayable = modalTotalEarnings - modalTotalDeductions;
+
+  // Auto-sync Net Payable if user has not manually set a custom net payable amount
+  useEffect(() => {
+    if (!isCustomNetPayable && activeEditPayslipRecord) {
+      setEditNetPayable(modalAutoNetPayable);
+    }
+  }, [
+    modalAutoNetPayable,
+    isCustomNetPayable,
+    activeEditPayslipRecord,
+  ]);
+
+  const openEditPayslipModal = (record: any) => {
+    const staff = record.staff || {};
+
+    const initialCustomEarnings: CustomLineItem[] =
+      Array.isArray(record.custom_earnings)
+        ? record.custom_earnings
+        : record.manual_override_data?.custom_earnings || [];
+
+    const initialCustomDeductions: CustomLineItem[] =
+      Array.isArray(record.custom_deductions)
+        ? record.custom_deductions
+        : record.manual_override_data?.custom_deductions || [];
+
+    const defaultDaysInMonth = new Date(selectedYear, MONTHS.indexOf(selectedMonth) + 1, 0).getDate();
+
+    setActiveEditPayslipRecord(record);
+    setEditEmpName(record.employee_name || staff.employee_name || staff.name || '');
+    setEditEmpId(record.emp_id || staff.biometric_code || staff.emp_id || '');
+    setEditDesignation(record.designation || staff.designation || staff.role || 'Staff');
+    setEditPfNo(record.pf_no || staff.pf_no || staff.pfNo || staff.uan_no || '');
+    setEditEsicNo(record.esic_no || staff.esic_no || staff.esicNo || '');
+    setEditBankAccountNo(record.bank_account_no || staff.bank_account_no || staff.bank_account || '');
+    setEditBankIfscCode(record.bank_ifsc_code || staff.bank_ifsc_code || staff.ifsc || '');
+
+    const pdVal = Number(record.pd ?? 0);
+    const woVal = Number(record.wo ?? 0);
+    setEditPd(pdVal);
+    setEditWo(woVal);
+    setEditPayableDays(Number(record.payable_days ?? (pdVal + woVal)));
+    setEditDaysInMonth(Number(record.days_in_month ?? defaultDaysInMonth));
+
+    const basic = Number(record.earned_basic || 0);
+    const hra = Number(record.earned_hra || 0);
+    const other = Number(record.earned_other || 0);
+    const conveyance = Number(record.earned_conveyance || 0);
+    const incentive = Number(record.earned_incentive || 0);
+    setEditEarnedBasic(basic);
+    setEditEarnedHra(hra);
+    setEditEarnedOther(other);
+    setEditEarnedConveyance(conveyance);
+    setEditEarnedIncentive(incentive);
+    setEditCustomEarnings(initialCustomEarnings);
+
+    const epf = Number(record.epf ?? record.epf_deduction ?? 0);
+    const esic = Number(record.esic ?? record.esic_deduction ?? 0);
+    const pt = Number(record.pt ?? record.pt_deduction ?? 0);
+    const adv = Number(record.advances ?? record.in_this_mth ?? 0);
+    setEditEpf(epf);
+    setEditEsic(esic);
+    setEditPt(pt);
+    setEditAdvances(adv);
+    setEditCustomDeductions(initialCustomDeductions);
+
+    const totalCustEarn = initialCustomEarnings.reduce((s, i) => s + (Number(i.amount) || 0), 0);
+    const calcEarnedGross = basic + hra + other + conveyance + incentive + totalCustEarn;
+    const totalCustDeduct = initialCustomDeductions.reduce((s, i) => s + (Number(i.amount) || 0), 0);
+    const calcTotalDeduct = epf + esic + pt + adv + totalCustDeduct;
+    const autoCalculatedNet = calcEarnedGross - calcTotalDeduct;
+
+    const hasCustomNetFlag = Boolean(record.manual_override_data?.is_custom_net_payable);
+    const isManuallyEdited = Boolean(record.is_manually_edited);
+
+    if (isManuallyEdited && hasCustomNetFlag && record.total_net_salary != null) {
+      setEditNetPayable(Number(record.total_net_salary));
+      setIsCustomNetPayable(true);
+    } else {
+      setEditNetPayable(autoCalculatedNet);
+      setIsCustomNetPayable(false);
+    }
+
+    setEditReason(record.manual_override_data?.audit_log?.[0]?.reason || '');
   };
 
-  const handleSavePtModal = async () => {
-    if (!activePtRecord) return;
-    const manualPt = manualPtVal;
-    const currentTotalPt = Number(activePtRecord.pt ?? activePtRecord.pt_deduction ?? 0);
-    const currentManualPt = Number(activePtRecord.manual_pt_adjustment || 0);
-    const systemPt = currentTotalPt - currentManualPt;
-    const newTotalPt = systemPt + manualPt;
+  const handleOpenAddPayslipModal = () => {
+    const defaultDaysInMonth = new Date(selectedYear, MONTHS.indexOf(selectedMonth) + 1, 0).getDate();
+    const currentSite = sites.find((s) => s.id === selectedSiteId);
+    const defaultSiteName = currentSite ? (currentSite.code_name || currentSite.site_name) : (sites[0]?.site_name || 'Main Site');
+    const defaultSiteId = currentSite ? currentSite.id : (sites[0]?.id || null);
 
-    const earnedGross = Number(activePtRecord.earned_gross || 0);
-    const epf = Number(activePtRecord.epf || activePtRecord.epf_deduction || 0);
-    const esic = Number(activePtRecord.esic || activePtRecord.esic_deduction || 0);
-    const advances = Number(activePtRecord.advances ?? activePtRecord.in_this_mth ?? 0);
-    const earnedPartBonus = Number(activePtRecord.earned_part_bonus || 0);
+    const newRecord = {
+      isNew: true,
+      id: `new-${Date.now()}`,
+      staff_id: null,
+      month_year: `${selectedMonth} ${selectedYear}`,
+      site_id: defaultSiteId,
+      site_name: defaultSiteName,
+      employee_name: '',
+      emp_id: '',
+      designation: 'Staff',
+      pf_no: '',
+      esic_no: '',
+      bank_account_no: '',
+      bank_ifsc_code: '',
+      pd: 26,
+      wo: 4,
+      payable_days: 30,
+      days_in_month: defaultDaysInMonth,
+      earned_basic: 0,
+      earned_hra: 0,
+      earned_other: 0,
+      earned_conveyance: 0,
+      earned_incentive: 0,
+      earned_gross: 0,
+      epf_deduction: 0,
+      esic_deduction: 0,
+      pt_deduction: 0,
+      epf: 0,
+      esic: 0,
+      pt: 0,
+      advances: 0,
+      custom_earnings: [],
+      custom_deductions: [],
+      is_manually_edited: true,
+      manual_override_data: null,
+      net_salary: 0,
+      total_net_salary: 0,
+    };
 
-    const netSalary = earnedGross - epf - esic - newTotalPt - advances;
-    const totalNetSalary = netSalary + earnedPartBonus;
+    openEditPayslipModal(newRecord);
+  };
+
+  const handleSaveEditPayslipModal = async () => {
+    if (!activeEditPayslipRecord) return;
+
+    const totalCustomEarnings = editCustomEarnings.reduce(
+      (sum, item) => sum + (Number(item.amount) || 0),
+      0
+    );
+    const totalEarnings =
+      editEarnedBasic +
+      editEarnedHra +
+      editEarnedOther +
+      editEarnedConveyance +
+      editEarnedIncentive +
+      totalCustomEarnings;
+
+    const totalCustomDeductions = editCustomDeductions.reduce(
+      (sum, item) => sum + (Number(item.amount) || 0),
+      0
+    );
+    const totalDeductions =
+      editEpf + editEsic + editPt + editAdvances + totalCustomDeductions;
+
+    const finalNetSalary = editNetPayable;
+    const finalTotalNetSalary = editNetPayable;
+
+    const existingAuditLog =
+      activeEditPayslipRecord.manual_override_data?.audit_log || [];
+
+    const auditEntry = {
+      edited_at: new Date().toISOString(),
+      edited_by: 'Admin',
+      reason: editReason || (activeEditPayslipRecord.isNew ? 'New ad-hoc payslip created' : 'Manual payslip override'),
+      changes: [
+        { field: 'employee_name', old: activeEditPayslipRecord.employee_name, new: editEmpName },
+        { field: 'earned_gross', old: activeEditPayslipRecord.earned_gross, new: totalEarnings },
+        { field: 'total_net_salary', old: activeEditPayslipRecord.total_net_salary, new: finalTotalNetSalary },
+      ],
+    };
+
+    const manualOverrideData = {
+      employee_name: editEmpName,
+      emp_id: editEmpId,
+      designation: editDesignation,
+      pf_no: editPfNo,
+      esic_no: editEsicNo,
+      bank_account_no: editBankAccountNo,
+      bank_ifsc_code: editBankIfscCode,
+      pd: editPd,
+      wo: editWo,
+      payable_days: editPayableDays,
+      days_in_month: editDaysInMonth,
+      custom_earnings: editCustomEarnings,
+      custom_deductions: editCustomDeductions,
+      is_custom_net_payable: isCustomNetPayable,
+      audit_log: [auditEntry, ...existingAuditLog],
+    };
 
     const recordToSave: any = {
-      ...activePtRecord,
-      pt: newTotalPt,
-      pt_deduction: newTotalPt,
-      manual_pt_adjustment: manualPt,
-      manual_pt_adjustment_reason: manualPtReasonVal,
-      net_salary: netSalary,
-      total_net_salary: totalNetSalary,
+      ...activeEditPayslipRecord,
+      employee_name: editEmpName || 'Unnamed Employee',
+      emp_id: editEmpId || `EMP${Date.now().toString().slice(-4)}`,
+      designation: editDesignation || 'Staff',
+      pf_no: editPfNo,
+      esic_no: editEsicNo,
+      bank_account_no: editBankAccountNo,
+      bank_ifsc_code: editBankIfscCode,
+
+      pd: editPd,
+      wo: editWo,
+      payable_days: editPayableDays,
+      days_in_month: editDaysInMonth,
+
+      earned_basic: editEarnedBasic,
+      earned_hra: editEarnedHra,
+      earned_other: editEarnedOther,
+      earned_conveyance: editEarnedConveyance,
+      earned_incentive: editEarnedIncentive,
+      earned_gross: totalEarnings,
+
+      epf_deduction: editEpf,
+      esic_deduction: editEsic,
+      pt_deduction: editPt,
+      epf: editEpf,
+      esic: editEsic,
+      pt: editPt,
+      advances: editAdvances,
+
+      custom_earnings: editCustomEarnings,
+      custom_deductions: editCustomDeductions,
+      is_manually_edited: true,
+      manual_override_data: manualOverrideData,
+
+      net_salary: finalNetSalary,
+      total_net_salary: finalTotalNetSalary,
       updated_at: new Date().toISOString(),
     };
     delete recordToSave.staff;
 
-    const { error: fullError } = await supabase.from('payroll_records').upsert([recordToSave], {
-      onConflict: 'staff_id,month_year',
-    });
+    // Resolve or create staff_id if person does not exist in master table yet
+    let staffId = activeEditPayslipRecord.staff_id;
+
+    if (!staffId || activeEditPayslipRecord.isNew) {
+      let existingStaff: any = null;
+
+      if (editEmpId && editEmpId.trim()) {
+        const { data: matchedById } = await supabase
+          .from('staff')
+          .select('id')
+          .eq('biometric_code', editEmpId.trim())
+          .maybeSingle();
+        if (matchedById) existingStaff = matchedById;
+      }
+
+      if (!existingStaff && editEmpName && editEmpName.trim()) {
+        const { data: matchedByName } = await supabase
+          .from('staff')
+          .select('id')
+          .ilike('employee_name', editEmpName.trim())
+          .maybeSingle();
+        if (matchedByName) existingStaff = matchedByName;
+      }
+
+      if (existingStaff) {
+        staffId = existingStaff.id;
+      } else {
+        const newStaffId = crypto.randomUUID();
+        const newStaffObj = {
+          id: newStaffId,
+          employee_name: editEmpName || 'Ad-Hoc Staff',
+          biometric_code: editEmpId || `ADHOC_${Date.now().toString().slice(-6)}`,
+          designation: editDesignation || 'Staff',
+          pf_no: editPfNo || null,
+          esic_no: editEsicNo || null,
+          bank_account_no: editBankAccountNo || null,
+          bank_ifsc_code: editBankIfscCode || null,
+          site_id: recordToSave.site_id || null,
+          status: 'Active',
+        };
+
+        const { data: insertedStaff, error: staffErr } = await supabase
+          .from('staff')
+          .insert([newStaffObj])
+          .select();
+
+        if (staffErr) {
+          console.error('Error inserting ad-hoc staff:', staffErr);
+          staffId = newStaffId;
+        } else {
+          staffId = insertedStaff?.[0]?.id || newStaffId;
+        }
+      }
+    }
+
+    recordToSave.staff_id = staffId;
+    delete recordToSave.isNew;
+
+    const { data: savedData, error: fullError } = await supabase
+      .from('payroll_records')
+      .upsert([recordToSave], { onConflict: 'staff_id,month_year' })
+      .select('*, staff(*)');
+
+    let finalSavedRecord = savedData?.[0] || {
+      ...recordToSave,
+      id: recordToSave.id || `rec-${Date.now()}`,
+    };
 
     if (fullError) {
       console.warn('Fallback save for payslip record:', fullError.message);
       const fallbackRecord = { ...recordToSave };
-      delete fallbackRecord.manual_pt_adjustment;
-      delete fallbackRecord.manual_pt_adjustment_reason;
-      await supabase.from('payroll_records').upsert([fallbackRecord], {
-        onConflict: 'staff_id,month_year',
-      });
+      delete fallbackRecord.designation;
+      delete fallbackRecord.pf_no;
+      delete fallbackRecord.esic_no;
+      delete fallbackRecord.bank_account_no;
+      delete fallbackRecord.bank_ifsc_code;
+      delete fallbackRecord.days_in_month;
+      delete fallbackRecord.custom_earnings;
+      delete fallbackRecord.custom_deductions;
+      delete fallbackRecord.is_manually_edited;
+      delete fallbackRecord.manual_override_data;
+
+      const { data: fallbackSaved } = await supabase
+        .from('payroll_records')
+        .upsert([fallbackRecord], { onConflict: 'staff_id,month_year' })
+        .select('*, staff(*)');
+
+      if (fallbackSaved?.[0]) {
+        finalSavedRecord = fallbackSaved[0];
+      }
     }
 
+    setRecords((prev) => {
+      const exists = prev.some(
+        (r) => r.id === activeEditPayslipRecord.id || r.id === finalSavedRecord.id
+      );
+      if (exists) {
+        return prev.map((r) =>
+          r.id === activeEditPayslipRecord.id || r.id === finalSavedRecord.id
+            ? { ...r, ...finalSavedRecord }
+            : r
+        );
+      } else {
+        return [finalSavedRecord, ...prev];
+      }
+    });
+
+    setSelectedRecordIds((prev) => new Set([...prev, finalSavedRecord.id]));
+    setActiveEditPayslipRecord(null);
+  };
+
+  const handleResetToPayrollData = async () => {
+    if (!activeEditPayslipRecord) return;
+    const staff = activeEditPayslipRecord.staff || {};
+
+    const defaultPd = Number(activeEditPayslipRecord.original_pd ?? activeEditPayslipRecord.pd ?? 0);
+    const defaultWo = Number(activeEditPayslipRecord.original_wo ?? activeEditPayslipRecord.wo ?? 4);
+
+    const recordToSave: any = {
+      ...activeEditPayslipRecord,
+      employee_name: staff.employee_name || staff.name || activeEditPayslipRecord.employee_name,
+      emp_id: staff.biometric_code || activeEditPayslipRecord.emp_id,
+      designation: staff.designation || 'Staff',
+      pf_no: staff.pf_no || staff.pfNo || staff.uan_no || '',
+      esic_no: staff.esic_no || staff.esicNo || '',
+      bank_account_no: staff.bank_account_no || staff.bank_account || '',
+      bank_ifsc_code: staff.bank_ifsc_code || staff.ifsc || '',
+
+      pd: defaultPd,
+      wo: defaultWo,
+      payable_days: defaultPd + defaultWo,
+      days_in_month: new Date(selectedYear, MONTHS.indexOf(selectedMonth) + 1, 0).getDate(),
+
+      custom_earnings: [],
+      custom_deductions: [],
+      is_manually_edited: false,
+      manual_override_data: null,
+      manual_pt_adjustment: 0,
+      manual_pt_adjustment_reason: '',
+      updated_at: new Date().toISOString(),
+    };
+    delete recordToSave.staff;
+
+    await supabase
+      .from('payroll_records')
+      .upsert([recordToSave], { onConflict: 'staff_id,month_year' });
+
     setRecords((prev) =>
-      prev.map((r) => (r.id === activePtRecord.id ? { ...r, ...recordToSave } : r))
+      prev.map((r) => (r.id === activeEditPayslipRecord.id ? { ...r, ...recordToSave } : r))
     );
-    setActivePtRecord(null);
+    setActiveEditPayslipRecord(null);
   };
 
   // Sync filter changes to localStorage
@@ -155,7 +549,7 @@ export const PayslipHub: React.FC = () => {
   useEffect(() => {
     const fetchSites = async () => {
       try {
-        const { data, error } = await supabase.from('sites').select('id, site_name, code_name').order('site_name');
+        const { data } = await supabase.from('sites').select('id, site_name, code_name').order('site_name');
         if (data) setSites(data);
       } catch (err) {
         console.error('Error fetching sites:', err);
@@ -181,7 +575,6 @@ export const PayslipHub: React.FC = () => {
       } else {
         const fetchedData = data || [];
         setRecords(fetchedData);
-        // Default state: ALL staff checked/selected
         setSelectedRecordIds(new Set(fetchedData.map((r: any) => r.id)));
       }
     } catch (err) {
@@ -222,19 +615,64 @@ export const PayslipHub: React.FC = () => {
 
   const renderPayslipCard = (record: any, index: number, isPrintOnly: boolean = false) => {
     const isSelected = selectedRecordIds.has(record.id);
-    const totalNetPayable =
-      record.total_net_salary != null && Number(record.total_net_salary) > 0
-        ? Number(record.total_net_salary)
-        : Number(record.net_salary || 0);
+    const staff = record.staff || {};
+
+    const customEarningsList: CustomLineItem[] =
+      Array.isArray(record.custom_earnings)
+        ? record.custom_earnings
+        : record.manual_override_data?.custom_earnings || [];
+
+    const customDeductionsList: CustomLineItem[] =
+      Array.isArray(record.custom_deductions)
+        ? record.custom_deductions
+        : record.manual_override_data?.custom_deductions || [];
+
+    const totalCustomEarnings = customEarningsList.reduce(
+      (sum, item) => sum + (Number(item.amount) || 0),
+      0
+    );
+
+    const totalCustomDeductions = customDeductionsList.reduce(
+      (sum, item) => sum + (Number(item.amount) || 0),
+      0
+    );
 
     const advanceDeducted = Number(record.advances ?? record.in_this_mth ?? 0);
-    const totalDeductions =
-      (record.epf || record.epf_deduction || 0) +
-      (record.esic || record.esic_deduction || 0) +
-      (record.pt || record.pt_deduction || 0) +
-      advanceDeducted;
 
-    const staff = record.staff || {};
+    const earnedBasic = Number(record.earned_basic || 0);
+    const earnedHra = Number(record.earned_hra || 0);
+    const earnedOther = Number(record.earned_other || 0);
+    const earnedConveyance = Number(record.earned_conveyance || 0);
+    const earnedIncentive = Number(record.earned_incentive || 0);
+
+    const totalEarnings =
+      earnedBasic + earnedHra + earnedOther + earnedConveyance + earnedIncentive + totalCustomEarnings;
+
+    const epfVal = Number(record.epf || record.epf_deduction || 0);
+    const esicVal = Number(record.esic || record.esic_deduction || 0);
+    const ptVal = Number(record.pt || record.pt_deduction || 0);
+
+    const totalDeductions = epfVal + esicVal + ptVal + advanceDeducted + totalCustomDeductions;
+
+    const calculatedNet = totalEarnings - totalDeductions;
+
+    const totalNetPayable =
+      record.is_manually_edited && record.total_net_salary != null
+        ? Number(record.total_net_salary)
+        : calculatedNet;
+
+    const designation = record.designation || staff.designation || 'Staff';
+    const pfNo = record.pf_no || staff.pf_no || staff.pfNo || staff.uan_no || 'N/A';
+    const esicNo = record.esic_no || staff.esic_no || staff.esicNo || 'N/A';
+    const bankAcc = record.bank_account_no || staff.bank_account_no || staff.bank_account || 'N/A';
+    const ifsc = record.bank_ifsc_code || staff.bank_ifsc_code || staff.ifsc || 'N/A';
+    const defaultDaysInMonth = new Date(selectedYear, MONTHS.indexOf(selectedMonth) + 1, 0).getDate();
+    const daysInMonthVal = record.days_in_month ?? defaultDaysInMonth;
+
+    const isEdited =
+      record.is_manually_edited ||
+      record.manual_override_data != null ||
+      Number(record.manual_pt_adjustment || 0) !== 0;
 
     return (
       <div
@@ -243,7 +681,7 @@ export const PayslipHub: React.FC = () => {
           !isPrintOnly && !isSelected ? 'opacity-50 bg-gray-50/70 border-gray-300' : ''
         }`}
       >
-        {/* Screen-only Row Selection Bar */}
+        {/* Screen-only Row Selection & Action Bar */}
         {!isPrintOnly && (
           <div className="no-print flex items-center justify-between pb-2 mb-2 border-b border-gray-200">
             <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-gray-800 select-none">
@@ -257,19 +695,26 @@ export const PayslipHub: React.FC = () => {
             </label>
 
             <div className="flex items-center gap-2">
+              {isEdited && (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-pulse" />
+                  Manually Edited
+                </span>
+              )}
               <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                 isSelected ? 'bg-teal-100 text-teal-800' : 'bg-gray-200 text-gray-600'
               }`}>
                 {isSelected ? 'Included in Batch' : 'Excluded'}
               </span>
+
               <button
                 type="button"
-                onClick={() => openPtModal(record)}
-                className="px-2.5 py-1 text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
-                title="Edit Manual PT Adjustment"
+                onClick={() => openEditPayslipModal(record)}
+                className="px-2.5 py-1 text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
+                title="Edit Employee Payslip"
               >
                 <Edit className="w-3.5 h-3.5" />
-                <span>Edit PT</span>
+                <span>Edit Payslip</span>
               </button>
 
               <button
@@ -304,11 +749,11 @@ export const PayslipHub: React.FC = () => {
           <div className="w-[40%] border-r border-gray-800 py-1 pr-2 flex flex-col justify-start space-y-0.5 text-[8.5px] font-mono">
             <div className="flex justify-between"><span className="font-sans font-bold">NAME:</span> <span>{record.employee_name || staff.name || '-'}</span></div>
             <div className="flex justify-between"><span className="font-sans font-bold">EMP ID:</span> <span>{record.emp_id || staff.biometric_code || '-'}</span></div>
-            <div className="flex justify-between"><span className="font-sans font-bold">DESIGNATION:</span> <span>{staff.designation || 'Staff'}</span></div>
-            <div className="flex justify-between"><span className="font-sans font-bold">PF NO:</span> <span>{staff.pf_no || staff.pfNo || staff.uan_no || 'N/A'}</span></div>
-            <div className="flex justify-between"><span className="font-sans font-bold">ESIC NO:</span> <span>{staff.esic_no || staff.esicNo || 'N/A'}</span></div>
-            <div className="flex justify-between"><span className="font-sans font-bold">BANK A/C:</span> <span>{staff.bank_account_no || staff.bank_account || 'N/A'}</span></div>
-            <div className="flex justify-between"><span className="font-sans font-bold">IFSC:</span> <span>{staff.bank_ifsc_code || staff.ifsc || 'N/A'}</span></div>
+            <div className="flex justify-between"><span className="font-sans font-bold">DESIGNATION:</span> <span>{designation}</span></div>
+            <div className="flex justify-between"><span className="font-sans font-bold">PF NO:</span> <span>{pfNo}</span></div>
+            <div className="flex justify-between"><span className="font-sans font-bold">ESIC NO:</span> <span>{esicNo}</span></div>
+            <div className="flex justify-between"><span className="font-sans font-bold">BANK A/C:</span> <span>{bankAcc}</span></div>
+            <div className="flex justify-between"><span className="font-sans font-bold">IFSC:</span> <span>{ifsc}</span></div>
             {(record.adv_total || 0) > 0 && (
               <div className="flex justify-between border-t border-gray-300 mt-0.5 pt-0.5"><span className="font-sans font-bold">ADVANCE TOTAL:</span> <span>₹{(record.adv_total || 0).toLocaleString('en-IN')}</span></div>
             )}
@@ -326,7 +771,7 @@ export const PayslipHub: React.FC = () => {
             </div>
             <div className="flex justify-between">
               <span className="font-sans font-bold">DAYS IN MONTH:</span> 
-              <span>{new Date(selectedYear, MONTHS.indexOf(selectedMonth) + 1, 0).getDate()}</span>
+              <span>{daysInMonthVal}</span>
             </div>
           </div>
 
@@ -338,15 +783,21 @@ export const PayslipHub: React.FC = () => {
                 <div className="flex justify-between font-bold font-sans border-b border-gray-400 pb-0.5 mb-0.5 text-[8px] uppercase">
                   <span>EARNINGS</span><span>₹</span>
                 </div>
-                <div className="flex justify-between border-b border-dotted border-gray-200"><span>Basic Pay</span><span>{(record.earned_basic || 0).toLocaleString('en-IN')}</span></div>
-                <div className="flex justify-between border-b border-dotted border-gray-200"><span>HRA</span><span>{(record.earned_hra || 0).toLocaleString('en-IN')}</span></div>
-                <div className="flex justify-between border-b border-dotted border-gray-200"><span>Washing Allow.</span><span>{(record.earned_other || 0).toLocaleString('en-IN')}</span></div>
-                <div className="flex justify-between border-b border-dotted border-gray-200"><span>Conveyance</span><span>{(record.earned_conveyance || 0).toLocaleString('en-IN')}</span></div>
-                {(record.earned_incentive || 0) > 0 && (
-                  <div className="flex justify-between border-b border-dotted border-gray-200"><span>Incentive</span><span>{(record.earned_incentive || 0).toLocaleString('en-IN')}</span></div>
+                <div className="flex justify-between border-b border-dotted border-gray-200"><span>Basic Pay</span><span>{earnedBasic.toLocaleString('en-IN')}</span></div>
+                <div className="flex justify-between border-b border-dotted border-gray-200"><span>HRA</span><span>{earnedHra.toLocaleString('en-IN')}</span></div>
+                <div className="flex justify-between border-b border-dotted border-gray-200"><span>Washing Allow.</span><span>{earnedOther.toLocaleString('en-IN')}</span></div>
+                <div className="flex justify-between border-b border-dotted border-gray-200"><span>Conveyance</span><span>{earnedConveyance.toLocaleString('en-IN')}</span></div>
+                {earnedIncentive > 0 && (
+                  <div className="flex justify-between border-b border-dotted border-gray-200"><span>Incentive</span><span>{earnedIncentive.toLocaleString('en-IN')}</span></div>
                 )}
+                {customEarningsList.map((item, idx) => (
+                  <div key={item.id || idx} className="flex justify-between border-b border-dotted border-gray-200 text-teal-800">
+                    <span>{item.name || 'Custom Earning'}</span>
+                    <span>{(Number(item.amount) || 0).toLocaleString('en-IN')}</span>
+                  </div>
+                ))}
                 <div className="mt-1 pt-1 flex justify-between font-bold text-[9px] border-t border-gray-800">
-                  <span>TOTAL EARNINGS</span><span>₹{(record.earned_gross || 0).toLocaleString('en-IN')}</span>
+                  <span>TOTAL EARNINGS</span><span>₹{totalEarnings.toLocaleString('en-IN')}</span>
                 </div>
               </div>
               
@@ -355,8 +806,8 @@ export const PayslipHub: React.FC = () => {
                 <div className="flex justify-between font-bold font-sans border-b border-gray-400 pb-0.5 mb-0.5 text-[8px] uppercase">
                   <span>DEDUCTIONS</span><span>₹</span>
                 </div>
-                <div className="flex justify-between border-b border-dotted border-gray-200"><span>EPF</span><span>{(record.epf || record.epf_deduction || 0).toLocaleString('en-IN')}</span></div>
-                <div className="flex justify-between border-b border-dotted border-gray-200"><span>ESIC</span><span>{(record.esic || record.esic_deduction || 0).toLocaleString('en-IN')}</span></div>
+                <div className="flex justify-between border-b border-dotted border-gray-200"><span>EPF</span><span>{epfVal.toLocaleString('en-IN')}</span></div>
+                <div className="flex justify-between border-b border-dotted border-gray-200"><span>ESIC</span><span>{esicVal.toLocaleString('en-IN')}</span></div>
                 <div className="flex justify-between border-b border-dotted border-gray-200">
                   <span className="flex items-center gap-1">
                     <span>PT</span>
@@ -367,7 +818,7 @@ export const PayslipHub: React.FC = () => {
                       />
                     )}
                   </span>
-                  <span>{(record.pt || record.pt_deduction || 0).toLocaleString('en-IN')}</span>
+                  <span>{ptVal.toLocaleString('en-IN')}</span>
                 </div>
                 {advanceDeducted > 0 && (
                   <div className="flex justify-between border-b border-dotted border-gray-200 leading-tight py-0 text-[7.5px]"><span>Advance (This Month)</span><span>{advanceDeducted.toLocaleString('en-IN')}</span></div>
@@ -375,6 +826,12 @@ export const PayslipHub: React.FC = () => {
                 {(record.in_next_mth || 0) > 0 && (
                   <div className="flex justify-between border-b border-dotted border-gray-200 leading-tight py-0 text-[7.5px]"><span>Advance (Next Month)</span><span>{(record.in_next_mth || 0).toLocaleString('en-IN')}</span></div>
                 )}
+                {customDeductionsList.map((item, idx) => (
+                  <div key={item.id || idx} className="flex justify-between border-b border-dotted border-gray-200 text-amber-800">
+                    <span>{item.name || 'Custom Deduction'}</span>
+                    <span>{(Number(item.amount) || 0).toLocaleString('en-IN')}</span>
+                  </div>
+                ))}
                 <div className="mt-1 pt-1 flex justify-between font-bold text-[9px] border-t border-gray-800">
                   <span>TOTAL DEDUCT.</span><span>₹{totalDeductions.toLocaleString('en-IN')}</span>
                 </div>
@@ -473,6 +930,17 @@ export const PayslipHub: React.FC = () => {
 
         {/* Filters & Print Action */}
         <div className="flex flex-wrap items-center gap-3">
+          {/* Add Payslip Action Button */}
+          <button
+            type="button"
+            onClick={handleOpenAddPayslipModal}
+            className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow-xs flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap"
+            title="Create a new payslip for any person (existing or new)"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add Payslip</span>
+          </button>
+
           {/* Month Dropdown */}
           <div className="flex items-center border border-gray-300 rounded-xl px-3 py-2 bg-white text-xs font-semibold text-gray-800 shadow-xs gap-2">
             <Calendar className="w-3.5 h-3.5 text-gray-400" />
@@ -557,7 +1025,7 @@ export const PayslipHub: React.FC = () => {
           <div className="text-center py-16 text-xs text-gray-500 space-y-2 bg-white rounded-2xl border border-gray-200 shadow-xs">
             <Filter className="w-8 h-8 text-gray-300 mx-auto" />
             <p className="font-semibold text-gray-700">No payroll records found for selected period.</p>
-            <p>Process payroll in the Payroll tab first to generate printable payslips.</p>
+            <p>Process payroll in the Payroll tab or click "+ Add Payslip" to create manual payslips.</p>
           </div>
         ) : (
           <div className="grid gap-6">
@@ -566,112 +1034,483 @@ export const PayslipHub: React.FC = () => {
         )}
       </div>
 
-      {/* Dedicated Print-Only Container (Render ONLY printableRecords, Hidden on screen, Visible during print) */}
-      {/* Manual PT Adjustment Popover Modal */}
-      {activePtRecord && (
-        <div className="no-print fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 font-sans">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 border border-gray-100">
+      {/* EDIT / ADD PAYSLIP MODAL */}
+      {activeEditPayslipRecord && (
+        <div className="no-print fixed inset-0 bg-black/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto font-sans">
+          <div className="bg-white rounded-2xl max-w-3xl w-full my-8 shadow-2xl border border-gray-100 flex flex-col max-h-[90vh]">
             {/* Modal Header */}
-            <div className="flex items-center justify-between border-b border-gray-200 pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-800 border border-amber-300 flex items-center justify-center">
+            <div className="flex items-center justify-between p-5 border-b border-gray-200 bg-gray-50/50 rounded-t-2xl shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-900 border border-amber-300 flex items-center justify-center shrink-0">
                   <Edit className="w-5 h-5" />
                 </div>
                 <div>
                   <h2 className="text-base font-bold text-gray-900 leading-tight">
-                    Manual PT Adjustment
+                    {activeEditPayslipRecord.isNew ? 'Add New Payslip' : 'Edit Payslip'}
                   </h2>
-                  <p className="text-xs text-gray-500">
-                    {activePtRecord.employee_name || activePtRecord.staff?.employee_name || 'Employee'} ({activePtRecord.emp_id || activePtRecord.staff?.biometric_code || '-'})
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Employee: <span className="font-semibold text-gray-800">{editEmpName || activeEditPayslipRecord.employee_name || 'New Person'}</span> {editEmpId ? `(${editEmpId})` : ''} | Month: <span className="font-semibold text-gray-800">{selectedMonth} {selectedYear}</span> | Site: <span className="font-semibold text-gray-800">{activeEditPayslipRecord.site_name || 'All'}</span>
                   </p>
                 </div>
               </div>
               <button
                 type="button"
-                onClick={() => setActivePtRecord(null)}
-                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100 transition-colors"
+                onClick={() => setActiveEditPayslipRecord(null)}
+                className="text-gray-400 hover:text-gray-600 p-1.5 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Formula vs Manual Breakdown Card */}
-            {(() => {
-              const currentTotalPt = Number(activePtRecord.pt ?? activePtRecord.pt_deduction ?? 0);
-              const currentManualPt = Number(activePtRecord.manual_pt_adjustment || 0);
-              const systemPt = currentTotalPt - currentManualPt;
-              const newTotalPt = systemPt + manualPtVal;
+            {/* Scrollable Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-6 text-xs flex-1">
 
-              return (
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 space-y-2 text-xs">
-                  <div className="flex justify-between items-center text-gray-700">
-                    <span className="font-semibold">System calculated:</span>
-                    <span className="font-mono font-bold">₹{systemPt}</span>
+              {/* Employee Details Section */}
+              <div className="space-y-3">
+                <h3 className="font-bold text-gray-900 uppercase tracking-wider text-[11px] flex items-center gap-1.5 border-b border-gray-200 pb-1.5">
+                  <span>Employee Details</span>
+                  <span className="text-[10px] font-normal text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 lowercase">
+                    (applies to this month's payslip)
+                  </span>
+                </h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-gray-700 font-semibold mb-1">Employee Name *</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Ramesh Sharma"
+                      value={editEmpName}
+                      onChange={(e) => setEditEmpName(e.target.value)}
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs text-gray-900 outline-none focus:ring-2 focus:ring-amber-500"
+                    />
                   </div>
-                  <div className="flex justify-between items-center text-amber-900">
-                    <span className="font-semibold">Manual adjustment:</span>
-                    <span className="font-mono font-bold">
-                      {manualPtVal >= 0 ? '+' : ''}₹{manualPtVal}
-                    </span>
+                  <div>
+                    <label className="block text-gray-700 font-semibold mb-1">Employee ID</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. EMP102"
+                      value={editEmpId}
+                      onChange={(e) => setEditEmpId(e.target.value)}
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs text-gray-900 outline-none focus:ring-2 focus:ring-amber-500"
+                    />
                   </div>
-                  <div className="flex justify-between items-center font-bold text-amber-950 border-t border-amber-200/80 pt-2 text-sm">
-                    <span>Total PT:</span>
-                    <span className="font-mono">₹{newTotalPt}</span>
+                  <div>
+                    <label className="block text-gray-700 font-semibold mb-1">Designation</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Supervisor"
+                      value={editDesignation}
+                      onChange={(e) => setEditDesignation(e.target.value)}
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs text-gray-900 outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-gray-700 font-semibold mb-1">PF Number</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. MH/12345/678"
+                      value={editPfNo}
+                      onChange={(e) => setEditPfNo(e.target.value)}
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs text-gray-900 outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-gray-700 font-semibold mb-1">ESIC Number</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 3100123456"
+                      value={editEsicNo}
+                      onChange={(e) => setEditEsicNo(e.target.value)}
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs text-gray-900 outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-gray-700 font-semibold mb-1">Bank Account</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 63090017002"
+                      value={editBankAccountNo}
+                      onChange={(e) => setEditBankAccountNo(e.target.value)}
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs text-gray-900 outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-gray-700 font-semibold mb-1">IFSC Code</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. PUNB0630900"
+                      value={editBankIfscCode}
+                      onChange={(e) => setEditBankIfscCode(e.target.value)}
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-1.5 text-xs text-gray-900 outline-none focus:ring-2 focus:ring-amber-500"
+                    />
                   </div>
                 </div>
-              );
-            })()}
-
-            {/* Input Form Fields */}
-            <div className="space-y-4 text-xs">
-              <div>
-                <label className="block text-gray-700 font-semibold mb-1">
-                  Manual PT Adjustment (₹)
-                </label>
-                <input
-                  type="number"
-                  value={manualPtVal === 0 ? '' : manualPtVal}
-                  onChange={(e) => setManualPtVal(e.target.value === '' ? 0 : Number(e.target.value))}
-                  placeholder="0"
-                  className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 font-mono font-bold text-gray-900 outline-none focus:ring-2 focus:ring-amber-500"
-                />
-                <p className="text-[11px] text-gray-500 mt-1">
-                  Use positive amount (e.g. 200) to add PT paid out of pocket, or negative to reduce.
-                </p>
               </div>
 
+              {/* Attendance Section */}
+              <div className="space-y-3">
+                <h3 className="font-bold text-gray-900 uppercase tracking-wider text-[11px] border-b border-gray-200 pb-1.5">
+                  Attendance & Days
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block text-gray-700 font-semibold mb-1">Present Days (PD)</label>
+                    <input
+                      type="number"
+                      value={editPd}
+                      onChange={(e) => {
+                        const newPd = Number(e.target.value) || 0;
+                        setEditPd(newPd);
+                        setEditPayableDays(newPd + editWo);
+                      }}
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-1.5 font-mono text-xs text-gray-900 outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-gray-700 font-semibold mb-1">Weekly Off (WO)</label>
+                    <input
+                      type="number"
+                      value={editWo}
+                      onChange={(e) => {
+                        const newWo = Number(e.target.value) || 0;
+                        setEditWo(newWo);
+                        setEditPayableDays(editPd + newWo);
+                      }}
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-1.5 font-mono text-xs text-gray-900 outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-gray-700 font-semibold mb-1">Total Payable Days</label>
+                    <input
+                      type="number"
+                      value={editPayableDays}
+                      onChange={(e) => setEditPayableDays(Number(e.target.value) || 0)}
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-1.5 font-mono text-xs text-gray-900 outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-gray-700 font-semibold mb-1">Days in Month</label>
+                    <input
+                      type="number"
+                      value={editDaysInMonth}
+                      onChange={(e) => setEditDaysInMonth(Number(e.target.value) || 30)}
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-1.5 font-mono text-xs text-gray-900 outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Earnings & Deductions Side-by-Side */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                {/* Earnings */}
+                <div className="space-y-3 bg-teal-50/40 p-4 rounded-xl border border-teal-100">
+                  <div className="flex items-center justify-between border-b border-teal-200 pb-1.5">
+                    <h3 className="font-bold text-teal-900 uppercase tracking-wider text-[11px]">
+                      Earnings (₹)
+                    </h3>
+                    <span className="font-mono font-bold text-teal-800 text-xs">
+                      Total: ₹{modalTotalEarnings.toLocaleString('en-IN')}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-gray-700 w-1/2 font-medium">Basic Pay</span>
+                      <input
+                        type="number"
+                        value={editEarnedBasic}
+                        onChange={(e) => setEditEarnedBasic(Number(e.target.value) || 0)}
+                        className="w-1/2 bg-white border border-gray-300 rounded-lg px-2.5 py-1 font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-gray-700 w-1/2 font-medium">HRA</span>
+                      <input
+                        type="number"
+                        value={editEarnedHra}
+                        onChange={(e) => setEditEarnedHra(Number(e.target.value) || 0)}
+                        className="w-1/2 bg-white border border-gray-300 rounded-lg px-2.5 py-1 font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-gray-700 w-1/2 font-medium">Washing Allowance</span>
+                      <input
+                        type="number"
+                        value={editEarnedOther}
+                        onChange={(e) => setEditEarnedOther(Number(e.target.value) || 0)}
+                        className="w-1/2 bg-white border border-gray-300 rounded-lg px-2.5 py-1 font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-gray-700 w-1/2 font-medium">Conveyance</span>
+                      <input
+                        type="number"
+                        value={editEarnedConveyance}
+                        onChange={(e) => setEditEarnedConveyance(Number(e.target.value) || 0)}
+                        className="w-1/2 bg-white border border-gray-300 rounded-lg px-2.5 py-1 font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-gray-700 w-1/2 font-medium">Incentive</span>
+                      <input
+                        type="number"
+                        value={editEarnedIncentive}
+                        onChange={(e) => setEditEarnedIncentive(Number(e.target.value) || 0)}
+                        className="w-1/2 bg-white border border-gray-300 rounded-lg px-2.5 py-1 font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500"
+                      />
+                    </div>
+
+                    {/* Custom Earnings Rows */}
+                    {editCustomEarnings.map((item, idx) => (
+                      <div key={item.id} className="flex items-center gap-2 pt-1">
+                        <input
+                          type="text"
+                          placeholder="Earning Description"
+                          value={item.name}
+                          onChange={(e) => {
+                            const newArr = [...editCustomEarnings];
+                            newArr[idx].name = e.target.value;
+                            setEditCustomEarnings(newArr);
+                          }}
+                          className="w-1/2 bg-white border border-teal-300 rounded-lg px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-teal-500"
+                        />
+                        <input
+                          type="number"
+                          placeholder="Amount"
+                          value={item.amount}
+                          onChange={(e) => {
+                            const newArr = [...editCustomEarnings];
+                            newArr[idx].amount = Number(e.target.value) || 0;
+                            setEditCustomEarnings(newArr);
+                          }}
+                          className="w-5/12 bg-white border border-teal-300 rounded-lg px-2 py-1 font-mono text-xs outline-none focus:ring-2 focus:ring-teal-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditCustomEarnings(editCustomEarnings.filter((c) => c.id !== item.id));
+                          }}
+                          className="text-red-500 hover:text-red-700 p-1 rounded transition-colors"
+                          title="Remove custom earning"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditCustomEarnings([
+                        ...editCustomEarnings,
+                        { id: Date.now().toString(), name: 'Other Earning', amount: 0 },
+                      ]);
+                    }}
+                    className="mt-2 text-xs font-semibold text-teal-700 hover:text-teal-900 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Custom Earning</span>
+                  </button>
+                </div>
+
+                {/* Deductions */}
+                <div className="space-y-3 bg-amber-50/40 p-4 rounded-xl border border-amber-100">
+                  <div className="flex items-center justify-between border-b border-amber-200 pb-1.5">
+                    <h3 className="font-bold text-amber-950 uppercase tracking-wider text-[11px]">
+                      Deductions (₹)
+                    </h3>
+                    <span className="font-mono font-bold text-amber-900 text-xs">
+                      Total: ₹{modalTotalDeductions.toLocaleString('en-IN')}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-gray-700 w-1/2 font-medium">EPF</span>
+                      <input
+                        type="number"
+                        value={editEpf}
+                        onChange={(e) => setEditEpf(Number(e.target.value) || 0)}
+                        className="w-1/2 bg-white border border-gray-300 rounded-lg px-2.5 py-1 font-mono text-xs outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-gray-700 w-1/2 font-medium">ESIC</span>
+                      <input
+                        type="number"
+                        value={editEsic}
+                        onChange={(e) => setEditEsic(Number(e.target.value) || 0)}
+                        className="w-1/2 bg-white border border-gray-300 rounded-lg px-2.5 py-1 font-mono text-xs outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-gray-700 w-1/2 font-medium">PT (Professional Tax)</span>
+                      <input
+                        type="number"
+                        value={editPt}
+                        onChange={(e) => setEditPt(Number(e.target.value) || 0)}
+                        className="w-1/2 bg-white border border-gray-300 rounded-lg px-2.5 py-1 font-mono text-xs outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-gray-700 w-1/2 font-medium">Advance (This Month)</span>
+                      <input
+                        type="number"
+                        value={editAdvances}
+                        onChange={(e) => setEditAdvances(Number(e.target.value) || 0)}
+                        className="w-1/2 bg-white border border-gray-300 rounded-lg px-2.5 py-1 font-mono text-xs outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                    </div>
+
+                    {/* Custom Deductions Rows */}
+                    {editCustomDeductions.map((item, idx) => (
+                      <div key={item.id} className="flex items-center gap-2 pt-1">
+                        <input
+                          type="text"
+                          placeholder="Deduction Description"
+                          value={item.name}
+                          onChange={(e) => {
+                            const newArr = [...editCustomDeductions];
+                            newArr[idx].name = e.target.value;
+                            setEditCustomDeductions(newArr);
+                          }}
+                          className="w-1/2 bg-white border border-amber-300 rounded-lg px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-amber-500"
+                        />
+                        <input
+                          type="number"
+                          placeholder="Amount"
+                          value={item.amount}
+                          onChange={(e) => {
+                            const newArr = [...editCustomDeductions];
+                            newArr[idx].amount = Number(e.target.value) || 0;
+                            setEditCustomDeductions(newArr);
+                          }}
+                          className="w-5/12 bg-white border border-amber-300 rounded-lg px-2 py-1 font-mono text-xs outline-none focus:ring-2 focus:ring-amber-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditCustomDeductions(editCustomDeductions.filter((c) => c.id !== item.id));
+                          }}
+                          className="text-red-500 hover:text-red-700 p-1 rounded transition-colors"
+                          title="Remove custom deduction"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditCustomDeductions([
+                        ...editCustomDeductions,
+                        { id: Date.now().toString(), name: 'Other Deduction', amount: 0 },
+                      ]);
+                    }}
+                    className="mt-2 text-xs font-semibold text-amber-800 hover:text-amber-950 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Custom Deduction</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Net Payable & Amount in Words Editable Card */}
+              <div className="bg-slate-900 text-white p-4 rounded-xl space-y-3">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold font-mono">Net Payable Amount:</span>
+                    {isCustomNetPayable && (
+                      <span className="text-[10px] font-semibold bg-amber-400/20 text-amber-300 px-2 py-0.5 rounded border border-amber-400/30">
+                        Manually Overridden
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <span className="text-teal-400 text-base font-bold">₹</span>
+                    <input
+                      type="number"
+                      value={editNetPayable}
+                      onChange={(e) => {
+                        const val = Number(e.target.value) || 0;
+                        setEditNetPayable(val);
+                        setIsCustomNetPayable(true);
+                      }}
+                      className="w-full sm:w-40 bg-slate-800 border border-teal-500/50 focus:border-teal-400 rounded-lg px-3 py-1.5 font-mono text-base font-bold text-teal-300 outline-none ring-2 ring-teal-500/20"
+                    />
+                    {isCustomNetPayable && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditNetPayable(modalAutoNetPayable);
+                          setIsCustomNetPayable(false);
+                        }}
+                        className="text-[11px] font-semibold text-slate-400 hover:text-slate-200 underline whitespace-nowrap cursor-pointer"
+                        title="Reset to Total Earnings - Total Deductions"
+                      >
+                        Auto Calc
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="text-xs text-slate-300 font-sans italic border-t border-slate-800 pt-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1">
+                  <span className="font-semibold text-slate-400 uppercase text-[10px]">Amount Chargeable in Words:</span>
+                  <span className="text-teal-200 font-medium">Rupees {numberToWordsINR(editNetPayable)} Only</span>
+                </div>
+              </div>
+
+              {/* Audit Reason & Notes */}
               <div>
                 <label className="block text-gray-700 font-semibold mb-1">
-                  Reason / Notes
+                  Reason for Edit / Audit Notes
                 </label>
                 <input
                   type="text"
-                  value={manualPtReasonVal}
-                  onChange={(e) => setManualPtReasonVal(e.target.value)}
-                  placeholder="e.g. Paid out of pocket - attendance shortfall"
+                  value={editReason}
+                  onChange={(e) => setEditReason(e.target.value)}
+                  placeholder="e.g. Manual override for June 2026 performance bonus & attendance correction"
                   className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-900 outline-none focus:ring-2 focus:ring-amber-500"
                 />
               </div>
+
             </div>
 
-            {/* Actions */}
-            <div className="flex items-center justify-end gap-3 border-t border-gray-200 pt-3">
+            {/* Modal Footer Actions */}
+            <div className="flex items-center justify-between p-4 border-t border-gray-200 bg-gray-50/50 rounded-b-2xl shrink-0">
               <button
                 type="button"
-                onClick={() => setActivePtRecord(null)}
-                className="px-4 py-2 rounded-xl border border-gray-300 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-colors cursor-pointer"
+                onClick={handleResetToPayrollData}
+                className="px-3.5 py-2 rounded-xl border border-gray-300 text-xs font-semibold text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-1.5 cursor-pointer"
+                title="Discard manual overrides and restore original payroll values"
               >
-                Cancel
+                <RotateCcw className="w-3.5 h-3.5 text-gray-500" />
+                <span>Reset to Payroll Data</span>
               </button>
-              <button
-                type="button"
-                onClick={handleSavePtModal}
-                className="px-4 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
-              >
-                <Save className="w-3.5 h-3.5" />
-                <span>Save Adjustment</span>
-              </button>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setActiveEditPayslipRecord(null)}
+                  className="px-4 py-2 rounded-xl border border-gray-300 text-xs font-semibold text-gray-700 hover:bg-gray-100 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveEditPayslipModal}
+                  className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-700 text-white text-xs font-semibold shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>Save Payslip</span>
+                </button>
+              </div>
             </div>
+
           </div>
         </div>
       )}
