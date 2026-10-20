@@ -1,11 +1,9 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { pool } from '../db/pool';
-import { env } from '../config/env';
 import { AuthUser } from '../types/express';
-import { TokenService } from './tokenService';
 
-const JWT_SECRET = process.env.JWT_SECRET || env.SUPABASE_SERVICE_ROLE_KEY || 'fallback_erp_super_secret_jwt_key_2026';
+const JWT_SECRET = process.env.JWT_SECRET || 'fallback_erp_super_secret_jwt_key_2026';
 const ACCESS_TOKEN_EXPIRY = '15m';
 
 export interface AppUserRow {

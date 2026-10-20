@@ -1,7 +1,5 @@
 import { Request, Response } from 'express';
-import { supabaseAdmin } from '../config/supabase';
 import { COOKIE_OPTIONS, REFRESH_TOKEN_MAX_AGE } from '../config/constants';
-import { fetchUserRole } from '../middlewares/authMiddleware';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { TokenService } from '../services/tokenService';
@@ -12,7 +10,7 @@ import { AuthUser } from '../types/express';
 export class AuthController {
   /**
    * POST /api/auth/login
-   * Authenticates user via PostgreSQL native auth, falling back to Supabase.
+   * Authenticates user via PostgreSQL native auth.
    * Returns short-lived access token in response body.
    * Sets long-lived rotating refresh token in HTTP-only, Secure, SameSite=Strict cookie.
    */
@@ -30,77 +28,37 @@ export class AuthController {
 
       // 1. Native PostgreSQL authentication via public.app_users
       const nativeAuth = await NativeAuthService.validateCredentials(email, password);
-      if (nativeAuth) {
-        const { user } = nativeAuth;
-        const accessToken = NativeAuthService.generateAccessToken(user);
-
-        let rawRefreshToken: string;
-        try {
-          const tokenResult = await TokenService.createRefreshToken(user.id, undefined);
-          rawRefreshToken = tokenResult.rawToken;
-        } catch (dbErr: any) {
-          rawRefreshToken = accessToken;
-        }
-
-        res.cookie('refresh_token', rawRefreshToken, {
-          ...COOKIE_OPTIONS,
-          maxAge: REFRESH_TOKEN_MAX_AGE,
-        });
-
-        res.status(200).json({
-          success: true,
-          token: accessToken,
-          access_token: accessToken,
-          user: {
-            id: user.id,
-            email: user.email,
-            role: user.role,
-          },
-        });
+      if (!nativeAuth) {
+        res.status(401).json({ error: 'Invalid email or password' });
         return;
       }
 
-      // 2. Fallback to Supabase Auth
-      const { data, error } = await supabaseAdmin.auth.signInWithPassword({
-        email,
-        password,
-      });
+      const { user } = nativeAuth;
+      const accessToken = NativeAuthService.generateAccessToken(user);
 
-      if (error || !data.session || !data.user) {
-        res.status(401).json({ error: error?.message || 'Invalid credentials' });
-        return;
-      }
-
-      const accessToken = data.session.access_token;
-      const supabaseRefreshToken = data.session.refresh_token;
-
-      // Create server-side refresh token record with rotation & family tracking
       let rawRefreshToken: string;
       try {
-        const tokenResult = await TokenService.createRefreshToken(data.user.id, supabaseRefreshToken);
+        const tokenResult = await TokenService.createRefreshToken(user.id);
         rawRefreshToken = tokenResult.rawToken;
       } catch (dbErr: any) {
-        console.error('[auth:login] Failed to store refresh token in DB, falling back to Supabase refresh token:', dbErr.message);
-        rawRefreshToken = supabaseRefreshToken;
+        console.error('[auth:login] Failed to store refresh token in DB:', dbErr.message);
+        res.status(500).json({ error: 'Failed to issue session credentials' });
+        return;
       }
 
-      // Set 30-Day Long-Lived Refresh Token Cookie (httpOnly, secure, SameSite=Strict)
       res.cookie('refresh_token', rawRefreshToken, {
         ...COOKIE_OPTIONS,
         maxAge: REFRESH_TOKEN_MAX_AGE,
       });
-
-      // Fetch user role from user_roles table with retry
-      const { role } = await fetchUserRole(data.user.id, data.user.email);
 
       res.status(200).json({
         success: true,
         token: accessToken,
         access_token: accessToken,
         user: {
-          id: data.user.id,
-          email: data.user.email,
-          role,
+          id: user.id,
+          email: user.email,
+          role: user.role,
         },
       });
     } catch (err: any) {
@@ -131,134 +89,75 @@ export class AuthController {
       }
 
       // Validate & rotate token in DB
-      let newRawRefreshToken: string | undefined;
-      let targetUserId: string | undefined;
-      let targetSupabaseRefreshToken: string | null | undefined = presentedRefreshToken;
+      const validation = await TokenService.validateAndRotate(presentedRefreshToken);
 
-      try {
-        const validation = await TokenService.validateAndRotate(presentedRefreshToken);
+      if (!validation.valid) {
+        console.warn(`[auth:refresh] Token validation failed: ${validation.error}`);
+        res.clearCookie('refresh_token', COOKIE_OPTIONS);
+        res.clearCookie('access_token', COOKIE_OPTIONS);
 
-        if (!validation.valid) {
-          console.warn(`[auth:refresh] Token validation failed: ${validation.error}`);
-          // Clear refresh cookie
-          res.clearCookie('refresh_token', COOKIE_OPTIONS);
-          res.clearCookie('access_token', COOKIE_OPTIONS);
-
-          if (validation.theftDetected) {
-            console.error(`🚨 [auth:theft] Token family revoked for user_id=${validation.userId}`);
-            res.status(401).json({
-              error: 'Security alert: Token reuse detected. All sessions terminated.',
-              theftDetected: true,
-            });
-            return;
-          }
-
-          res.status(401).json({ error: validation.error || 'Session expired, please log in again' });
+        if (validation.theftDetected) {
+          console.error(`🚨 [auth:theft] Token family revoked for user_id=${validation.userId}`);
+          res.status(401).json({
+            error: 'Security alert: Token reuse detected. All sessions terminated.',
+            theftDetected: true,
+          });
           return;
         }
 
-        targetUserId = validation.userId;
-        targetSupabaseRefreshToken = validation.supabaseRefreshToken || presentedRefreshToken;
-        newRawRefreshToken = validation.newRawToken;
-
-        // Check if targetUserId is a native PostgreSQL app_user
-        if (targetUserId) {
-          const appUserRes = await pool.query('SELECT * FROM public.app_users WHERE id = $1 LIMIT 1;', [targetUserId]);
-          if (appUserRes.rows && appUserRes.rows.length > 0) {
-            const row = appUserRes.rows[0];
-            const user = {
-              id: row.id,
-              email: row.email,
-              role: (row.role === 'superadmin' ? 'superadmin' : 'admin') as 'superadmin' | 'admin',
-              company_id: row.company_id || undefined,
-              companyId: row.company_id || undefined,
-            };
-            const newAccessToken = NativeAuthService.generateAccessToken(user);
-
-            if (newRawRefreshToken) {
-              res.cookie('refresh_token', newRawRefreshToken, {
-                ...COOKIE_OPTIONS,
-                maxAge: REFRESH_TOKEN_MAX_AGE,
-              });
-            }
-
-            res.status(200).json({
-              success: true,
-              token: newAccessToken,
-              access_token: newAccessToken,
-              refresh_token: newRawRefreshToken,
-              user: {
-                id: user.id,
-                email: user.email,
-                role: user.role,
-              },
-            });
-            return;
-          }
-        }
-      } catch (dbErr: any) {
-        console.warn('[auth:refresh] DB validation exception, checking direct Supabase refresh:', dbErr.message);
-      }
-
-      // Refresh session via Supabase to obtain new short-lived access token
-      const { data: refreshData, error: refreshError } = await supabaseAdmin.auth.refreshSession({
-        refresh_token: targetSupabaseRefreshToken || presentedRefreshToken,
-      });
-
-      if (refreshError || !refreshData.session || !refreshData.user) {
-        console.error('[auth:refresh] Supabase refreshSession failed:', refreshError?.message);
-        res.clearCookie('refresh_token', COOKIE_OPTIONS);
-        res.clearCookie('access_token', COOKIE_OPTIONS);
-        res.status(401).json({ error: 'Session expired or invalid, please log in again' });
+        res.status(401).json({ error: validation.error || 'Session expired, please log in again' });
         return;
       }
 
-      const newAccessToken = refreshData.session.access_token;
-      const latestSupabaseRefreshToken = refreshData.session.refresh_token;
+      const targetUserId = validation.userId;
+      const newRawRefreshToken = validation.newRawToken;
 
-      // Update the DB record with the latest Supabase refresh token if rotated
-      if (newRawRefreshToken && latestSupabaseRefreshToken) {
-        try {
-          await TokenService.updateSupabaseRefreshToken(
-            TokenService.hashToken(newRawRefreshToken),
-            latestSupabaseRefreshToken
-          );
-        } catch (err: any) {
-          console.error('[auth:refresh] Error updating Supabase refresh token in DB:', err.message);
-        }
+      if (!targetUserId || !newRawRefreshToken) {
+        res.clearCookie('refresh_token', COOKIE_OPTIONS);
+        res.clearCookie('access_token', COOKIE_OPTIONS);
+        res.status(401).json({ error: 'Invalid session state, please log in again' });
+        return;
       }
 
-      const finalRefreshToken = newRawRefreshToken || latestSupabaseRefreshToken;
-
-      // Set new rotated 30-day refresh token cookie
-      if (finalRefreshToken) {
-        res.cookie('refresh_token', finalRefreshToken, {
-          ...COOKIE_OPTIONS,
-          maxAge: REFRESH_TOKEN_MAX_AGE,
-        });
+      const appUserRes = await pool.query('SELECT * FROM public.app_users WHERE id = $1 LIMIT 1;', [targetUserId]);
+      if (!appUserRes.rows || appUserRes.rows.length === 0) {
+        res.clearCookie('refresh_token', COOKIE_OPTIONS);
+        res.clearCookie('access_token', COOKIE_OPTIONS);
+        res.status(401).json({ error: 'User account not found or deactivated' });
+        return;
       }
 
-      // Fetch fresh role
-      const userId = refreshData.user.id || targetUserId;
-      const userEmail = refreshData.user.email;
-      const { role } = await fetchUserRole(userId!, userEmail);
+      const row = appUserRes.rows[0];
+      const user: AuthUser = {
+        id: row.id,
+        email: row.email,
+        role: (row.role === 'superadmin' ? 'superadmin' : 'admin') as 'superadmin' | 'admin',
+        company_id: row.company_id || undefined,
+        companyId: row.company_id || undefined,
+      };
+      const newAccessToken = NativeAuthService.generateAccessToken(user);
 
-      console.log(`[auth:refresh] Successfully refreshed session for user=${userEmail} (${userId}) role=${role}`);
+      res.cookie('refresh_token', newRawRefreshToken, {
+        ...COOKIE_OPTIONS,
+        maxAge: REFRESH_TOKEN_MAX_AGE,
+      });
 
       res.status(200).json({
         success: true,
         token: newAccessToken,
         access_token: newAccessToken,
-        refresh_token: finalRefreshToken,
+        refresh_token: newRawRefreshToken,
         user: {
-          id: userId,
-          email: userEmail,
-          role,
+          id: user.id,
+          email: user.email,
+          role: user.role,
         },
       });
     } catch (err: any) {
-      console.error('Refresh token error:', err);
-      res.status(500).json({ error: 'Internal server error during token refresh' });
+      console.error('[auth:refresh] Unexpected error during refresh:', err);
+      res.clearCookie('refresh_token', COOKIE_OPTIONS);
+      res.clearCookie('access_token', COOKIE_OPTIONS);
+      res.status(500).json({ error: 'Internal server error during session refresh' });
     }
   }
 
@@ -473,7 +372,7 @@ export class AuthController {
       };
 
       const accessToken = NativeAuthService.generateAccessToken(authUser);
-      const rawRefreshToken = await TokenService.createRefreshToken(invitation.user_id, undefined, authUser.role);
+      const { rawToken: rawRefreshToken } = await TokenService.createRefreshToken(invitation.user_id);
 
       res.cookie('refresh_token', rawRefreshToken, {
         ...COOKIE_OPTIONS,
@@ -587,7 +486,7 @@ export class AuthController {
       };
 
       const accessToken = NativeAuthService.generateAccessToken(authUser);
-      const rawRefreshToken = await TokenService.createRefreshToken(invitation.user_id, undefined, authUser.role);
+      const { rawToken: rawRefreshToken } = await TokenService.createRefreshToken(invitation.user_id);
 
       res.cookie('refresh_token', rawRefreshToken, {
         ...COOKIE_OPTIONS,

@@ -7,7 +7,6 @@ export interface RefreshTokenRecord {
   user_id: string;
   token_hash: string;
   family_id: string;
-  supabase_refresh_token: string | null;
   expires_at: string;
   revoked_at: string | null;
   created_at: string;
@@ -16,7 +15,6 @@ export interface RefreshTokenRecord {
 export interface ValidationResult {
   valid: boolean;
   userId?: string;
-  supabaseRefreshToken?: string | null;
   newRawToken?: string;
   familyId?: string;
   error?: string;
@@ -43,7 +41,6 @@ export class TokenService {
    */
   static async createRefreshToken(
     userId: string,
-    supabaseRefreshToken?: string,
     familyId?: string
   ): Promise<{ rawToken: string; record: RefreshTokenRecord }> {
     const rawToken = this.generateRawToken();
@@ -53,8 +50,8 @@ export class TokenService {
 
     const insertSql = `
       INSERT INTO public.refresh_tokens (
-        user_id, token_hash, family_id, supabase_refresh_token, expires_at, revoked_at, created_at
-      ) VALUES ($1, $2, $3, $4, $5, NULL, NOW())
+        user_id, token_hash, family_id, expires_at, revoked_at, created_at
+      ) VALUES ($1, $2, $3, $4, NULL, NOW())
       RETURNING *;
     `;
 
@@ -62,7 +59,6 @@ export class TokenService {
       userId,
       tokenHash,
       finalFamilyId,
-      supabaseRefreshToken || null,
       expiresAt,
     ]);
 
@@ -119,7 +115,6 @@ export class TokenService {
           return {
             valid: true,
             userId: activeToken.user_id,
-            supabaseRefreshToken: activeToken.supabase_refresh_token,
             familyId: activeToken.family_id,
           };
         }
@@ -151,27 +146,15 @@ export class TokenService {
     // Issue new token in same family
     const { rawToken: newRawToken } = await this.createRefreshToken(
       record.user_id,
-      record.supabase_refresh_token,
       record.family_id
     );
 
     return {
       valid: true,
       userId: record.user_id,
-      supabaseRefreshToken: record.supabase_refresh_token,
       newRawToken,
       familyId: record.family_id,
     };
-  }
-
-  /**
-   * Updates supabase_refresh_token on the latest active token of a family.
-   */
-  static async updateSupabaseRefreshToken(tokenHash: string, newSupabaseRefreshToken: string): Promise<void> {
-    await pool.query(
-      'UPDATE public.refresh_tokens SET supabase_refresh_token = $1 WHERE token_hash = $2',
-      [newSupabaseRefreshToken, tokenHash]
-    );
   }
 
   /**

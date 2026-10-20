@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { supabaseAdmin } from '../config/supabase';
 import { pool } from '../db/pool';
 import { CompanyProfile } from '../types/company';
 
@@ -150,48 +149,16 @@ export class CompanyService {
    * Fetch all companies from DB strictly using SELECT * FROM companies ORDER BY name ASC
    */
   static async getAllCompanies(): Promise<CompanyProfile[]> {
-    try {
-      const res = await pool.query('SELECT * FROM public.companies ORDER BY name ASC');
-      if (res.rows) {
-        return res.rows.map(mapRowToCompanyProfile);
-      }
-    } catch (pgErr: any) {
-      console.warn('[CompanyService.getAllCompanies:pg] Fallback to Supabase:', pgErr?.message || pgErr);
-    }
-
-    const { data, error } = await supabaseAdmin
-      .from('companies')
-      .select('*')
-      .order('name', { ascending: true });
-
-    if (error) {
-      console.error('❌ Database error fetching companies:', error.message);
-      throw new Error(`Database query failed: ${error.message}`);
-    }
-    return (data || []).map(mapRowToCompanyProfile);
+    const res = await pool.query('SELECT * FROM public.companies ORDER BY name ASC');
+    return (res.rows || []).map(mapRowToCompanyProfile);
   }
 
   /**
    * Fetch company by ID strictly using eq('id', id)
    */
   static async getCompanyById(id: string): Promise<CompanyProfile | null> {
-    try {
-      const res = await pool.query('SELECT * FROM public.companies WHERE id = $1 LIMIT 1', [id]);
-      if (res.rows?.[0]) {
-        return mapRowToCompanyProfile(res.rows[0]);
-      }
-    } catch (pgErr: any) {
-      console.warn('[CompanyService.getCompanyById:pg] Fallback to Supabase:', pgErr?.message || pgErr);
-    }
-
-    const { data, error } = await supabaseAdmin
-      .from('companies')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (error) return null;
-    return data ? mapRowToCompanyProfile(data) : null;
+    const res = await pool.query('SELECT * FROM public.companies WHERE id = $1 LIMIT 1', [id]);
+    return res.rows?.[0] ? mapRowToCompanyProfile(res.rows[0]) : null;
   }
 
   /**
@@ -199,44 +166,32 @@ export class CompanyService {
    */
   static async getCompanyByCode(code: string): Promise<CompanyProfile | null> {
     const formattedCode = code.toUpperCase().trim();
-    try {
-      const res = await pool.query(
-        'SELECT * FROM public.companies WHERE UPPER(entity_code) = $1 OR UPPER(code) = $1 LIMIT 1',
-        [formattedCode]
-      );
-      if (res.rows?.[0]) {
-        return mapRowToCompanyProfile(res.rows[0]);
-      }
-    } catch (pgErr: any) {
-      console.warn('[CompanyService.getCompanyByCode:pg] Fallback to Supabase:', pgErr?.message || pgErr);
-    }
-
-    const { data, error } = await supabaseAdmin
-      .from('companies')
-      .select('*')
-      .or(`entity_code.eq.${formattedCode},code.eq.${formattedCode}`)
-      .single();
-
-    if (error) return null;
-    return data ? mapRowToCompanyProfile(data) : null;
+    const res = await pool.query(
+      'SELECT * FROM public.companies WHERE UPPER(entity_code) = $1 OR UPPER(code) = $1 LIMIT 1',
+      [formattedCode]
+    );
+    return res.rows?.[0] ? mapRowToCompanyProfile(res.rows[0]) : null;
   }
 
   /**
    * Create a new company profile with strict PostgreSQL schema mapping
    */
   static async createCompany(payload: any): Promise<CompanyProfile> {
-    const rawCode = payload.code || payload.entity_code || 'COMP';
-    const formattedCode = rawCode.toUpperCase().trim();
     const now = new Date().toISOString();
 
-    const insertRow = {
-      entity_code: formattedCode,
+    const insertRow: any = {
+      entity_code: (payload.entity_code || payload.code || '').toUpperCase().trim(),
       name: payload.name || payload.legal_name,
-      address_line1: payload.address_line1,
-      address_line2: formatAddressLine2(payload.address_line2, payload.city, payload.state, payload.pincode),
-      contact_no: payload.phone || payload.contact_no || '',
-      email_website: payload.email || payload.email_website || '',
-      cin_no: payload.cin || payload.cin_no || '',
+      address_line1: payload.address_line1 || '',
+      address_line2: formatAddressLine2(
+        payload.address_line2,
+        payload.city,
+        payload.state,
+        payload.pincode
+      ),
+      contact_no: payload.contact_no || payload.phone || '',
+      email_website: payload.email_website || payload.email || '',
+      cin_no: payload.cin_no || payload.cin || '',
       gstin: payload.gstin || '',
       bank_name: payload.bank_name || '',
       account_no: payload.bank_account_no || payload.account_no || '',
@@ -248,19 +203,49 @@ export class CompanyService {
       proforma_prefix: payload.proforma_prefix || 'AS/P/26-27/',
       proforma_sequence: payload.proforma_sequence ?? 1,
       created_at: now,
+      updated_at: now,
     };
 
-    const { data, error } = await supabaseAdmin
-      .from('companies')
-      .insert([insertRow])
-      .select('*')
-      .single();
+    const insertQuery = `
+      INSERT INTO public.companies (
+        entity_code, name, address_line1, address_line2,
+        contact_no, email_website, cin_no, gstin,
+        bank_name, account_no, ifsc_code, branch_name,
+        default_terms, tax_prefix, tax_sequence,
+        proforma_prefix, proforma_sequence, created_at, updated_at
+      ) VALUES (
+        $1, $2, $3, $4,
+        $5, $6, $7, $8,
+        $9, $10, $11, $12,
+        $13, $14, $15,
+        $16, $17, $18, $19
+      ) RETURNING *;
+    `;
 
-    if (error) {
-      console.error('❌ Supabase insert company error:', error.message);
-      throw new Error(`Database insert failed: ${error.message}`);
-    }
-    return mapRowToCompanyProfile(data);
+    const values = [
+      insertRow.entity_code,
+      insertRow.name,
+      insertRow.address_line1,
+      insertRow.address_line2,
+      insertRow.contact_no,
+      insertRow.email_website,
+      insertRow.cin_no,
+      insertRow.gstin,
+      insertRow.bank_name,
+      insertRow.account_no,
+      insertRow.ifsc_code,
+      insertRow.branch_name,
+      JSON.stringify(insertRow.default_terms),
+      insertRow.tax_prefix,
+      insertRow.tax_sequence,
+      insertRow.proforma_prefix,
+      insertRow.proforma_sequence,
+      insertRow.created_at,
+      insertRow.updated_at,
+    ];
+
+    const res = await pool.query(insertQuery, values);
+    return mapRowToCompanyProfile(res.rows[0]);
   }
 
   /**
@@ -333,36 +318,41 @@ export class CompanyService {
       updateData.proforma_sequence = payload.proforma_sequence;
     }
 
-    const { data, error } = await supabaseAdmin
-      .from('companies')
-      .update(updateData)
-      .eq('id', id)
-      .select('*')
-      .single();
+    const setClauses: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
 
-    if (error) {
-      console.error('❌ Supabase update company error:', error.message);
-      throw new Error(`Database update failed: ${error.message}`);
+    for (const [key, val] of Object.entries(updateData)) {
+      setClauses.push(`${key} = $${idx++}`);
+      values.push(key === 'default_terms' && Array.isArray(val) ? JSON.stringify(val) : val);
     }
-    return mapRowToCompanyProfile(data);
+
+    if (setClauses.length === 0) {
+      const existing = await this.getCompanyById(id);
+      if (!existing) throw new Error('Company not found');
+      return existing;
+    }
+
+    setClauses.push(`updated_at = $${idx++}`);
+    values.push(new Date().toISOString());
+
+    values.push(id);
+    const query = `UPDATE public.companies SET ${setClauses.join(', ')} WHERE id = $${idx} RETURNING *;`;
+    const res = await pool.query(query, values);
+    if (!res.rows?.[0]) throw new Error('Company not found');
+    return mapRowToCompanyProfile(res.rows[0]);
   }
 
   /**
    * Soft delete / Toggle active state
    */
   static async toggleActiveState(id: string, is_active: boolean): Promise<CompanyProfile> {
-    const { data, error } = await supabaseAdmin
-      .from('companies')
-      .update({ is_active, updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .select('*')
-      .single();
-
-    if (error) {
-      console.error('❌ Supabase toggleActiveState error:', error.message);
-      throw new Error(`Database update failed: ${error.message}`);
-    }
-    return mapRowToCompanyProfile(data);
+    const res = await pool.query(
+      'UPDATE public.companies SET is_active = $1, updated_at = NOW() WHERE id = $2 RETURNING *;',
+      [is_active, id]
+    );
+    if (!res.rows?.[0]) throw new Error('Company not found');
+    return mapRowToCompanyProfile(res.rows[0]);
   }
 
   /**
@@ -377,45 +367,18 @@ export class CompanyService {
     const column = isProforma ? 'proforma_sequence' : 'tax_sequence';
     const prefixColumn = isProforma ? 'proforma_prefix' : 'tax_prefix';
 
-    try {
-      const { pool } = await import('../db/pool');
-      const query = `
-        UPDATE public.companies
-        SET ${column} = COALESCE(${column}, 0) + 1
-        WHERE id::text = $1 OR UPPER(entity_code) = UPPER($1)
-        RETURNING ${column} AS sequence, ${prefixColumn} AS prefix, id
-      `;
-      const result = await pool.query(query, [companyIdOrCode.trim()]);
-      if (result.rows && result.rows.length > 0) {
-        const row = result.rows[0];
-        const nextSeq = Number(row.sequence);
-        // Mirror to Supabase
-        await supabaseAdmin
-          .from('companies')
-          .update({ [column]: nextSeq })
-          .eq('id', row.id);
-
-        return { sequence: nextSeq, prefix: row.prefix };
-      }
-    } catch (pgErr) {
-      console.warn('[CompanyService:incrementSequence:pg] Fallback to Supabase:', pgErr);
+    const query = `
+      UPDATE public.companies
+      SET ${column} = COALESCE(${column}, 0) + 1
+      WHERE id::text = $1 OR UPPER(entity_code) = UPPER($1)
+      RETURNING ${column} AS sequence, ${prefixColumn} AS prefix, id
+    `;
+    const result = await pool.query(query, [companyIdOrCode.trim()]);
+    if (result.rows && result.rows.length > 0) {
+      const row = result.rows[0];
+      return { sequence: Number(row.sequence), prefix: row.prefix };
     }
 
-    // Fallback if direct pool query fails
-    const isById = Boolean(companyIdOrCode && companyIdOrCode.length > 10);
-    const company = isById
-      ? await this.getCompanyById(companyIdOrCode)
-      : await this.getCompanyByCode(companyIdOrCode);
-
-    if (company && company.id) {
-      const nextSeq = isProforma ? (company.proforma_sequence || 1) + 1 : (company.tax_sequence || 1) + 1;
-      await supabaseAdmin.from('companies').update({ [column]: nextSeq }).eq('id', company.id);
-      return {
-        sequence: nextSeq,
-        prefix: (isProforma ? company.proforma_prefix : company.tax_prefix) || '',
-      };
-    }
-
-    return { sequence: 1, prefix: '' };
+    throw new Error(`Company not found for sequence increment: ${companyIdOrCode}`);
   }
 }

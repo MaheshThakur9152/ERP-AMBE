@@ -1,21 +1,31 @@
 import { Request, Response, NextFunction } from 'express';
-import { supabaseAdmin } from '../config/supabase';
 import { pool } from '../db/pool';
 import { AuthUser } from '../types/express';
 import { COOKIE_OPTIONS, ACCESS_TOKEN_MAX_AGE, REFRESH_TOKEN_MAX_AGE } from '../config/constants';
 import { NativeAuthService } from '../services/nativeAuthService';
 
 /**
- * Robust user role lookup with retries and loud logging.
- * Queries PostgreSQL connection pool first, falling back to Supabase.
+ * Robust user role lookup.
+ * Queries PostgreSQL connection pool directly (public.app_users, public.user_roles).
  * Enforces strict authorization: never defaults unassigned users to 'admin'.
  */
 export async function fetchUserRole(
   userId: string,
   email?: string
 ): Promise<{ role: 'admin' | 'superadmin' | null; rawDbRole: string | null; companyId?: string | null; error?: any }> {
-  // 1. Query direct PostgreSQL connection pool first
   try {
+    // 1. Check public.app_users table
+    const userRes = await pool.query(
+      'SELECT role, company_id FROM public.app_users WHERE id = $1 LIMIT 1',
+      [userId]
+    );
+    if (userRes.rows && userRes.rows.length > 0) {
+      const row = userRes.rows[0];
+      const parsedRole = String(row.role || '').trim().toLowerCase() === 'superadmin' ? 'superadmin' : 'admin';
+      return { role: parsedRole, rawDbRole: row.role, companyId: row.company_id || null };
+    }
+
+    // 2. Check public.user_roles table
     const pgRes = await pool.query(
       'SELECT role, company_id FROM public.user_roles WHERE user_id = $1 LIMIT 1',
       [userId]
@@ -25,67 +35,19 @@ export async function fetchUserRole(
       const parsedRole = String(row.role || '').trim().toLowerCase() === 'superadmin' ? 'superadmin' : 'admin';
       return { role: parsedRole, rawDbRole: row.role, companyId: row.company_id || null };
     }
+
+    return { role: null, rawDbRole: null, companyId: null };
   } catch (pgErr: any) {
-    console.warn(`[auth:pg:error] user_id=${userId} falling back to Supabase: ${pgErr?.message || pgErr}`);
+    console.error(`[auth:pg:error] user_id=${userId} database query error: ${pgErr?.message || pgErr}`);
+    return { role: null, rawDbRole: null, error: pgErr };
   }
-
-  // 2. Fallback to Supabase with retries
-  const maxRetries = 3;
-  let lastError: any = null;
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      const { data, error } = await supabaseAdmin
-        .from('user_roles')
-        .select('role, company_id')
-        .eq('user_id', userId)
-        .maybeSingle();
-
-      if (error) {
-        lastError = error;
-        console.error(
-          `[auth:db:error] attempt=${attempt}/${maxRetries} user_id=${userId} email=${email || 'unknown'} error=${error.message}`
-        );
-        if (attempt < maxRetries) {
-          await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
-          continue;
-        }
-        break;
-      }
-
-      if (data && data.role) {
-        const parsedRole = data.role.trim().toLowerCase() === 'superadmin' ? 'superadmin' : 'admin';
-        console.warn(
-          `[auth:db:success] user_id=${userId} email=${email || 'unknown'} rawDbRole=${data.role} parsedRole=${parsedRole}`
-        );
-        return { role: parsedRole, rawDbRole: data.role, companyId: data.company_id || null };
-      }
-
-      // Query succeeded cleanly with zero rows -> Strictly NOT an admin (SEC-002 fix)
-      console.warn(
-        `[auth:db:unassigned] user_id=${userId} email=${email || 'unknown'} no row in user_roles`
-      );
-      return { role: null, rawDbRole: null, companyId: null };
-    } catch (err: any) {
-      lastError = err;
-      console.error(
-        `[auth:db:exception] attempt=${attempt}/${maxRetries} user_id=${userId} email=${email || 'unknown'} exception=${err?.message || err}`
-      );
-      if (attempt < maxRetries) {
-        await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
-      }
-    }
-  }
-
-  // All retries failed with an active error
-  return { role: null, rawDbRole: null, error: lastError };
 }
 
 /**
  * Middleware: requireAuth
  * Extracts JWT access token from Authorization header, HTTP-only cookie, or query param.
- * Verifies access token with Supabase and attaches user & fresh role to req.user.
- * If expired/invalid, returns 401 so the frontend client can perform token refresh via /api/auth/refresh.
+ * Verifies access token using NativeAuthService and attaches user to req.user.
+ * If expired/invalid, returns 401.
  */
 export const requireAuth = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -99,66 +61,18 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
       return;
     }
 
-    // 1. Validate Native JWT access token first (Phase 6 native auth)
+    // Validate Native JWT access token
     const nativeUser = NativeAuthService.verifyAccessToken(accessToken);
-    if (nativeUser) {
-      req.user = nativeUser;
-      next();
-      return;
-    }
-
-    // 2. Fallback to Supabase Auth token validation
-    const { data: { user: authUser }, error: authError } = await supabaseAdmin.auth.getUser(accessToken);
-
-    if (authError || !authUser) {
-      console.warn(`[auth:jwt] accessToken validation failed: ${authError?.message || 'Invalid token'}`);
+    if (!nativeUser) {
       res.status(401).json({ error: 'Unauthorized: Access token expired or invalid' });
       return;
     }
 
-    // Query user_roles table for user's assigned role with retry
-    const { role, rawDbRole, companyId, error: roleFetchError } = await fetchUserRole(authUser.id, authUser.email);
-
-    if (roleFetchError) {
-      console.error(
-        `[auth:db:fatal] Failed all retries querying user_roles for user_id=${authUser.id} email=${authUser.email}: ${roleFetchError.message || roleFetchError}`
-      );
-      res.status(503).json({ error: 'Service Unavailable: Role authorization lookup failed, please retry' });
-      return;
-    }
-
-    if (!role) {
-      console.warn(`[auth:forbidden] Access denied: User ${authUser.id} (${authUser.email}) has no assigned role`);
-      res.status(403).json({ error: 'Forbidden: No authorized role assigned to your account' });
-      return;
-    }
-
-    // Resolve tenant company_id context (SEC-003 fix)
-    let resolvedCompanyId = companyId;
-    if (!resolvedCompanyId) {
-      try {
-        const compRes = await pool.query('SELECT id FROM public.companies ORDER BY created_at ASC LIMIT 1');
-        if (compRes.rows?.[0]?.id) {
-          resolvedCompanyId = compRes.rows[0].id;
-        }
-      } catch (cErr) {
-        console.warn('[auth:company_context] Fallback query failed:', cErr);
-      }
-    }
-
-    // Attach user object to request
-    req.user = {
-      id: authUser.id,
-      email: authUser.email,
-      role,
-      company_id: resolvedCompanyId || undefined,
-      companyId: resolvedCompanyId || undefined,
-    };
-
+    req.user = nativeUser;
     next();
   } catch (err: any) {
-    console.error('requireAuth middleware error:', err);
-    res.status(500).json({ error: 'Internal server authentication error' });
+    console.error('requireAuth unexpected exception:', err);
+    res.status(500).json({ error: 'Internal server error validating authorization' });
   }
 };
 
@@ -227,13 +141,18 @@ export const checkLockBouncer = (tableName: string) => {
         return;
       }
 
-      const { data, error } = await supabaseAdmin
-        .from(tableName)
-        .select('is_locked')
-        .eq('id', id)
-        .maybeSingle();
+      const allowedTables = new Set(['invoices', 'payroll_records', 'attendance_records', 'sites', 'bonus_disbursements']);
+      if (!allowedTables.has(tableName)) {
+        res.status(400).json({ error: 'Invalid lock target table' });
+        return;
+      }
 
-      if (!error && data && data.is_locked === true) {
+      const pgRes = await pool.query(
+        `SELECT is_locked FROM public.${tableName} WHERE id = $1 LIMIT 1`,
+        [id]
+      );
+
+      if (pgRes.rows && pgRes.rows.length > 0 && pgRes.rows[0].is_locked === true) {
         res.status(403).json({
           error: 'Forbidden: Record is locked by SuperAdmin',
           is_locked: true,
@@ -244,7 +163,7 @@ export const checkLockBouncer = (tableName: string) => {
       next();
     } catch (err: any) {
       console.error(`checkLockBouncer [${tableName}] error:`, err);
-      res.status(500).json({ error: 'Failed to verify lock status' });
+      res.status(503).json({ error: 'Service Unavailable: Failed to verify lock status' });
     }
   };
 };
@@ -260,53 +179,44 @@ export function isValueFilled(val: any): boolean {
 }
 
 /**
- * Helper to check if two values are meaningfully different
+ * Helper to check if two values are actually different, ignoring formatting differences
  */
-export function areValuesDifferent(oldVal: any, newVal: any): boolean {
-  if (newVal === undefined) return false; // Key not provided in patch
+export function areValuesDifferent(currentVal: any, newVal: any): boolean {
+  if (currentVal === newVal) return false;
+  if (currentVal == null && newVal == null) return false;
+  if (currentVal == null || newVal == null) return true;
 
-  // Normalize null / undefined / empty string
-  const normOld = oldVal === null || oldVal === undefined || oldVal === '' ? null : oldVal;
-  const normNew = newVal === null || newVal === undefined || newVal === '' ? null : newVal;
-  if (normOld === null && normNew === null) return false;
-  if (normOld === null || normNew === null) return true;
-
-  // Numbers / numeric strings comparison
-  if (
-    (typeof normOld === 'number' || typeof normOld === 'string') &&
-    (typeof normNew === 'number' || typeof normNew === 'string') &&
-    !isNaN(Number(normOld)) &&
-    !isNaN(Number(normNew))
-  ) {
-    if (Number(normOld) === Number(normNew)) return false;
+  // Compare arrays
+  if (Array.isArray(currentVal) && Array.isArray(newVal)) {
+    if (currentVal.length !== newVal.length) return true;
+    return JSON.stringify(currentVal) !== JSON.stringify(newVal);
   }
 
-  // Booleans
-  if (typeof normOld === 'boolean' || typeof normNew === 'boolean') {
-    return Boolean(normOld) !== Boolean(normNew);
+  // Compare numbers / strings
+  if (typeof currentVal === 'number' || typeof newVal === 'number') {
+    const n1 = Number(currentVal);
+    const n2 = Number(newVal);
+    if (!isNaN(n1) && !isNaN(n2)) {
+      return n1 !== n2;
+    }
   }
 
-  // Strings (trimmed)
-  if (typeof normOld === 'string' && typeof normNew === 'string') {
-    return normOld.trim() !== normNew.trim();
+  // Compare dates
+  if (typeof currentVal === 'string' && typeof newVal === 'string') {
+    const d1 = Date.parse(currentVal);
+    const d2 = Date.parse(newVal);
+    if (!isNaN(d1) && !isNaN(d2) && (currentVal.includes('T') || currentVal.includes('-'))) {
+      return new Date(d1).toISOString() !== new Date(d2).toISOString();
+    }
+    return currentVal.trim() !== newVal.trim();
   }
 
-  // Objects / Arrays
-  if (typeof normOld === 'object' && typeof normNew === 'object') {
-    return JSON.stringify(normOld) !== JSON.stringify(normNew);
-  }
-
-  return normOld !== normNew;
+  return JSON.stringify(currentVal) !== JSON.stringify(newVal);
 }
 
 /**
  * Middleware: checkFieldLockBouncer
- * Partial field-level lock enforcement for entities like staff and sites.
- *
- * Rules when is_locked === true AND role === 'admin':
- * 1. Existing filled fields (non-null, non-empty) are frozen -> returns 403 if modified.
- * 2. Empty/missing fields (null, "", undefined) can be filled in by admin.
- * 3. SuperAdmin bypasses all locks.
+ * Field-level lock enforcement on update requests.
  */
 export const checkFieldLockBouncer = (tableName: string) => {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
@@ -323,17 +233,18 @@ export const checkFieldLockBouncer = (tableName: string) => {
         return;
       }
 
-      const { data: currentRow, error } = await supabaseAdmin
-        .from(tableName)
-        .select('*')
-        .eq('id', id)
-        .maybeSingle();
-
-      if (error) {
-        console.error(`checkFieldLockBouncer [${tableName}] db error:`, error);
-        res.status(500).json({ error: 'Failed to verify lock status' });
+      const allowedTables = new Set(['invoices', 'payroll_records', 'attendance_records', 'sites', 'bonus_disbursements']);
+      if (!allowedTables.has(tableName)) {
+        res.status(400).json({ error: 'Invalid lock target table' });
         return;
       }
+
+      const pgRes = await pool.query(
+        `SELECT * FROM public.${tableName} WHERE id = $1 LIMIT 1`,
+        [id]
+      );
+
+      const currentRow = pgRes.rows?.[0] || null;
 
       if (!currentRow) {
         next();
@@ -370,7 +281,6 @@ export const checkFieldLockBouncer = (tableName: string) => {
       for (const [key, newVal] of Object.entries(incoming)) {
         if (ignoreKeys.has(key)) continue;
 
-        // Determine current value in database (supporting camelCase / snake_case)
         const snakeKey = key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
         let currentVal = currentRow[key];
         let matchedDbKey = key;
@@ -380,7 +290,6 @@ export const checkFieldLockBouncer = (tableName: string) => {
           matchedDbKey = snakeKey;
         }
 
-        // If field exists in DB and already has data
         const hadExistingValue = isValueFilled(currentVal);
 
         if (hadExistingValue) {
@@ -402,7 +311,7 @@ export const checkFieldLockBouncer = (tableName: string) => {
       next();
     } catch (err: any) {
       console.error(`checkFieldLockBouncer [${tableName}] exception:`, err);
-      res.status(500).json({ error: 'Failed to verify field lock status' });
+      res.status(503).json({ error: 'Service Unavailable: Failed to verify field lock status' });
     }
   };
 };
