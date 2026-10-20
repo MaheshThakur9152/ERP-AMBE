@@ -98,8 +98,8 @@ services:
       MINIO_BUCKET: ${MINIO_BUCKET:-ambeuploads}
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
-      CLIENT_URL: ${CLIENT_URL:-http://localhost:5173}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      CLIENT_URL: ${CLIENT_URL:-http://localhost,http://localhost:5173}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost,http://localhost:5173}
     ports:
       - "5000:5000"
     networks:

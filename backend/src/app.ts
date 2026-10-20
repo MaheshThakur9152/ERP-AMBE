@@ -34,9 +34,16 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'https://admin.ambeservice.com',
   'https://app.ambeservice.com',
   'https://api.ambeservice.com',
+  'http://localhost',
+  'http://localhost:80',
   'http://localhost:5173',
   'http://localhost:3000',
   'http://localhost:5000',
+  'http://127.0.0.1',
+  'http://127.0.0.1:80',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:5000',
 ];
 const envOrigins = `${env.FRONTEND_URL || ''},${env.CLIENT_URL || ''}`
   .split(',')
@@ -48,12 +55,13 @@ const allowedOrigins = Array.from(new Set([...DEFAULT_ALLOWED_ORIGINS, ...envOri
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (server-to-server, curl) or matching allowed list / ambeservice.com domains
+      // Allow requests with no origin (server-to-server, curl) or matching allowed list / ambeservice.com domains / localhost
       if (
         !origin ||
         allowedOrigins.includes(origin) ||
         allowedOrigins.includes(origin.replace(/\/+$/, '')) ||
-        /^https:\/\/([a-z0-9-]+\.)?ambeservice\.com$/.test(origin)
+        /^https:\/\/([a-z0-9-]+\.)?ambeservice\.com$/.test(origin) ||
+        /^http:\/\/(localhost|127\.0\.0\.1)(:[0-9]+)?$/.test(origin)
       ) {
         callback(null, true);
       } else {
