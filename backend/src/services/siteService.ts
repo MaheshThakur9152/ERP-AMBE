@@ -106,17 +106,31 @@ export class SiteService {
   /**
    * Validates tenant ownership of a target site before mutation
    */
-  static async verifySiteOwnership(siteId: string, _user?: AuthUser): Promise<void> {
+  static async verifySiteOwnership(siteId: string, user?: AuthUser): Promise<void> {
     const res = await pool.query('SELECT id, company_id FROM public.sites WHERE id = $1 LIMIT 1', [siteId]);
     if (!res.rows || res.rows.length === 0) {
-      throw new Error('Site not found');
+      const err: any = new Error('Site not found');
+      err.statusCode = 404;
+      throw err;
+    }
+    const site = res.rows[0];
+    const userCompanyId = user?.company_id || user?.companyId;
+    if (user && user.role !== 'superadmin' && userCompanyId && site.company_id && userCompanyId !== site.company_id) {
+      const authErr: any = new Error('Access denied: Unauthorized company access');
+      authErr.statusCode = 403;
+      throw authErr;
     }
   }
 
   /**
-   * Fetch all sites from DB strictly using SELECT * FROM sites ORDER BY created_at DESC
+   * Fetch all sites from DB with company scoping for non-superadmins
    */
-  static async getAllSites(_user?: AuthUser): Promise<Site[]> {
+  static async getAllSites(user?: AuthUser): Promise<Site[]> {
+    const userCompanyId = user?.company_id || user?.companyId;
+    if (user && user.role !== 'superadmin' && userCompanyId) {
+      const res = await pool.query('SELECT * FROM public.sites WHERE company_id = $1 ORDER BY created_at DESC', [userCompanyId]);
+      return (res.rows || []).map(mapRowToSite);
+    }
     const res = await pool.query('SELECT * FROM public.sites ORDER BY created_at DESC');
     return (res.rows || []).map(mapRowToSite);
   }

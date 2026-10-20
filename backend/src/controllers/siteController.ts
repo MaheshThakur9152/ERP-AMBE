@@ -6,7 +6,9 @@ import { RedisCache } from '../config/redis';
 export class SiteController {
   static async list(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const scopeKey = req.user?.company_id || req.user?.id || 'all';
+      const isSuper = req.user?.role === 'superadmin';
+      const userCompanyId = req.user?.company_id || req.user?.companyId;
+      const scopeKey = isSuper ? 'superadmin' : (userCompanyId ? `comp:${userCompanyId}` : `user:${req.user?.id || 'all'}`);
       const cacheKey = `erp:sites:${scopeKey}`;
       const cached = await RedisCache.get<any[]>(cacheKey);
       if (cached) {

@@ -40,4 +40,18 @@ else
   fi
 fi
 
+# GPG Passphrase setup for postgres user WAL archiving
+GPG_PASS_TARGET="/var/lib/postgresql/.gpg_passphrase"
+GPG_SECRET_SOURCE="${GPG_PASSPHRASE_FILE:-/run/secrets/backup_gpg_passphrase}"
+
+if [[ -f "${GPG_SECRET_SOURCE}" ]]; then
+  cp "${GPG_SECRET_SOURCE}" "${GPG_PASS_TARGET}"
+  chown "${PG_UID}:${PG_GID}" "${GPG_PASS_TARGET}"
+  chmod 400 "${GPG_PASS_TARGET}"
+elif [[ -n "${GPG_PASSPHRASE:-}" ]]; then
+  echo -n "${GPG_PASSPHRASE}" > "${GPG_PASS_TARGET}"
+  chown "${PG_UID}:${PG_GID}" "${GPG_PASS_TARGET}"
+  chmod 400 "${GPG_PASS_TARGET}"
+fi
+
 exec /usr/local/bin/docker-entrypoint.sh "$@"

@@ -52,10 +52,19 @@ export class AttendanceService {
   /**
    * Validates tenant ownership of a target attendance sheet before mutation
    */
-  static async verifySheetOwnership(sheetId: string, _user?: AuthUser): Promise<void> {
+  static async verifySheetOwnership(sheetId: string, user?: AuthUser): Promise<void> {
     const res = await pool.query('SELECT id, company_id FROM public.attendance_sheets WHERE id = $1 LIMIT 1', [sheetId]);
     if (!res.rows || res.rows.length === 0) {
-      throw new Error('Attendance sheet not found');
+      const err: any = new Error('Attendance sheet not found');
+      err.statusCode = 404;
+      throw err;
+    }
+    const sheet = res.rows[0];
+    const userCompanyId = user?.company_id || user?.companyId;
+    if (user && user.role !== 'superadmin' && userCompanyId && sheet.company_id && userCompanyId !== sheet.company_id) {
+      const authErr: any = new Error('Access denied: Unauthorized company access');
+      authErr.statusCode = 403;
+      throw authErr;
     }
   }
 
@@ -66,21 +75,26 @@ export class AttendanceService {
     siteId?: string,
     month?: string,
     year?: string,
-    _user?: AuthUser
+    user?: AuthUser
   ): Promise<AttendanceSheet[]> {
     const conditions: string[] = [];
     const values: any[] = [];
     if (siteId) {
       values.push(siteId);
-      conditions.push(`site_id = $${values.length}`);
+      conditions.push(`site_id = ${values.length}`);
     }
     if (month) {
       values.push(month);
-      conditions.push(`month = $${values.length}`);
+      conditions.push(`month = ${values.length}`);
     }
     if (year) {
       values.push(year);
-      conditions.push(`year = $${values.length}`);
+      conditions.push(`year = ${values.length}`);
+    }
+    const userCompanyId = user?.company_id || user?.companyId;
+    if (user && user.role !== 'superadmin' && userCompanyId) {
+      values.push(userCompanyId);
+      conditions.push(`company_id = ${values.length}`);
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';

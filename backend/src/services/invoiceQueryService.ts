@@ -268,9 +268,10 @@ export class InvoiceQueryService {
   /**
    * Fetch all invoices from DB joining sites and companies tables
    */
-  static async getAllInvoices(_user?: AuthUser): Promise<InvoiceRecord[]> {
+  static async getAllInvoices(user?: AuthUser): Promise<InvoiceRecord[]> {
     try {
-      const sql = `
+      const userCompanyId = user?.company_id || user?.companyId;
+      let sql = `
         SELECT 
           i.*,
           row_to_json(s.*) AS sites,
@@ -278,9 +279,14 @@ export class InvoiceQueryService {
         FROM public.invoices i
         LEFT JOIN public.sites s ON s.id = i.site_id
         LEFT JOIN public.companies c ON c.id = i.company_id
-        ORDER BY i.created_at DESC;
       `;
-      const res = await pool.query(sql);
+      const params: any[] = [];
+      if (user && user.role !== 'superadmin' && userCompanyId) {
+        params.push(userCompanyId);
+        sql += ` WHERE i.company_id = $${params.length}`;
+      }
+      sql += ` ORDER BY i.created_at DESC;`;
+      const res = await pool.query(sql, params);
       const mapped = (res.rows || [])
         .map((row: any) => {
           try {
@@ -470,8 +476,17 @@ export class InvoiceQueryService {
         }
       }
 
-      // 4. Resolve tax jurisdiction (state & GSTIN) from site / client master data
+      // 4. Resolve tax jurisdiction (state & GSTIN) from company (supplier) and site/client (recipient) master data
       let isInterstate = false;
+      let supplierState = '';
+      if (companyId) {
+        const compGstinRes = await client.query('SELECT gstin FROM public.companies WHERE id = $1 LIMIT 1;', [companyId]);
+        const compGstin = (compGstinRes.rows?.[0]?.gstin || '').trim();
+        if (/^\d{2}/.test(compGstin)) {
+          supplierState = compGstin.substring(0, 2);
+        }
+      }
+
       if (siteId) {
         const siteRes = await client.query(
           `SELECT s.id, s.gstin, c.gstin as client_gstin
@@ -482,9 +497,14 @@ export class InvoiceQueryService {
         );
         if (siteRes.rows?.[0]) {
           const siteRow = siteRes.rows[0];
-          const gstin = (siteRow.client_gstin || siteRow.gstin || '').trim();
-          if (gstin.length >= 2 && !gstin.startsWith('27')) {
-            isInterstate = true;
+          const recipientGstin = (siteRow.client_gstin || siteRow.gstin || '').trim();
+          if (/^\d{2}/.test(recipientGstin)) {
+            const recipientState = recipientGstin.substring(0, 2);
+            if (supplierState && recipientState !== supplierState) {
+              isInterstate = true;
+            } else if (!supplierState && recipientState !== '27') {
+              isInterstate = true;
+            }
           }
         }
       }
@@ -535,8 +555,13 @@ export class InvoiceQueryService {
       const machineryCharges = Number(payload.machinery_charges ?? payload.machineryCharges ?? 0);
       const materialCharges = Number(payload.material_charges ?? payload.materialCharges ?? 0);
 
+      // Taxable additional charges under Section 15 CGST Act: management fee, machinery, material
+      const additionalTaxablePaisa = Math.round((mgmtFee + machineryCharges + materialCharges) * 100);
+      const additionalTaxPaisa = Math.round((additionalTaxablePaisa * (cgstRate + sgstRate + igstRate)) / 100);
+      const finalTaxTotal = (Math.round(calculatedTaxTotal * 100) + additionalTaxPaisa) / 100;
+
       const finalSubTotal = Math.round((calculatedSubTotal + mgmtFee + machineryCharges + materialCharges) * 100) / 100;
-      const finalGrandTotal = Math.round((finalSubTotal + calculatedTaxTotal) * 100) / 100;
+      const finalGrandTotal = Math.round((finalSubTotal + finalTaxTotal) * 100) / 100;
 
       // 6. Sequence allocation
       const isRevision = Boolean(
@@ -597,7 +622,7 @@ export class InvoiceQueryService {
         billingPeriod,
         JSON.stringify(rawLineItems),
         finalSubTotal,
-        calculatedTaxTotal,
+        finalTaxTotal,
         finalGrandTotal,
         mgmtPercent,
         mgmtPercent,
@@ -698,27 +723,38 @@ export class InvoiceQueryService {
       payload.payload?.site_id ||
       payload.payload?.party?.siteId;
 
-    const invoiceNo = payload.invoice_no || payload.invoiceNo || payload.meta?.invoiceNo;
-    const type = payload.type || payload.payload?.meta?.invoiceType || (payload.payload?.terms?.[0]?.type);
-    const status = payload.status || 'Pending';
-    const invoiceDate = payload.invoice_date || payload.date || payload.meta?.invoiceDate;
-    const billingPeriod = payload.billing_period || payload.billingPeriod || payload.monthYear || payload.meta?.billingPeriod;
-    const lineItems = payload.line_items || payload.items || payload.payload?.items || (payload.payload?.terms?.[0]?.payload?.items);
-    const subTotal = payload.sub_total !== undefined ? Number(payload.sub_total) : (payload.subTotal !== undefined ? Number(payload.subTotal) : undefined);
-    const taxTotal = payload.tax_total !== undefined ? Number(payload.tax_total) : (payload.taxTotal !== undefined ? Number(payload.taxTotal) : undefined);
-    const grandTotal = payload.grand_total !== undefined ? Number(payload.grand_total) : (payload.amount !== undefined ? Number(payload.amount) : (payload.grandTotal !== undefined ? Number(payload.grandTotal) : undefined));
-    const mgmtPercent = Number(payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? payload.payload?.mgmtPercent ?? DEFAULT_MGMT_FEE_PERCENT);
-    const machineryCharges = Number(payload.machinery_charges ?? payload.machineryCharges ?? payload.payload?.machineryCharges ?? 0);
-    const materialCharges = Number(payload.material_charges ?? payload.materialCharges ?? payload.payload?.materialCharges ?? 0);
-    const additionalCharges = payload.additional_charges || payload.additionalCharges || payload.payload?.additionalCharges || payload.payload?.additional_charges || [];
-    const challanNo = payload.challan_no || payload.challanNo || payload.meta?.challanNo || null;
-    const challanDate = payload.challan_date || payload.challanDate || payload.meta?.challanDate || null;
-    const buyerOrderNo = payload.buyer_order_no || payload.buyerOrderNo || payload.meta?.buyerOrderNo || null;
-    const dispatchDocNo = payload.dispatch_doc_no || payload.dispatchDocNo || payload.meta?.dispatchDocNo || null;
-    const dispatchedThrough = payload.dispatched_through || payload.dispatchedThrough || payload.meta?.dispatchedThrough || null;
-    const destination = payload.destination || payload.meta?.destination || null;
-    const termsOfDelivery = payload.terms_of_delivery || payload.termsOfDelivery || payload.meta?.termsOfDelivery || null;
-    const isMaterial = Boolean(payload.is_material ?? payload.isMaterial ?? false);
+    const invoiceNo = payload.invoice_no !== undefined || payload.invoiceNo !== undefined ? (payload.invoice_no || payload.invoiceNo || null) : null;
+    const type = payload.type !== undefined ? payload.type : (payload.payload?.meta?.invoiceType || null);
+    const status = payload.status !== undefined ? payload.status : null;
+    const invoiceDate = payload.invoice_date !== undefined || payload.date !== undefined ? (payload.invoice_date || payload.date || null) : null;
+    const billingPeriod = payload.billing_period !== undefined || payload.billingPeriod !== undefined ? (payload.billing_period || payload.billingPeriod || null) : null;
+    const lineItems = payload.line_items !== undefined || payload.items !== undefined ? (payload.line_items || payload.items || null) : null;
+    const subTotal = payload.sub_total !== undefined ? Number(payload.sub_total) : (payload.subTotal !== undefined ? Number(payload.subTotal) : null);
+    const taxTotal = payload.tax_total !== undefined ? Number(payload.tax_total) : (payload.taxTotal !== undefined ? Number(payload.taxTotal) : null);
+    const grandTotal = payload.grand_total !== undefined ? Number(payload.grand_total) : (payload.amount !== undefined ? Number(payload.amount) : (payload.grandTotal !== undefined ? Number(payload.grandTotal) : null));
+    
+    const hasMgmt = payload.management_fee_percent !== undefined || payload.mgmt_percent !== undefined || payload.mgmtPercent !== undefined;
+    const mgmtPercent = hasMgmt ? Number(payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent) : null;
+
+    const hasMachinery = payload.machinery_charges !== undefined || payload.machineryCharges !== undefined;
+    const machineryCharges = hasMachinery ? Number(payload.machinery_charges ?? payload.machineryCharges) : null;
+
+    const hasMaterial = payload.material_charges !== undefined || payload.materialCharges !== undefined;
+    const materialCharges = hasMaterial ? Number(payload.material_charges ?? payload.materialCharges) : null;
+
+    const hasAdditional = payload.additional_charges !== undefined || payload.additionalCharges !== undefined;
+    const additionalCharges = hasAdditional ? JSON.stringify(payload.additional_charges || payload.additionalCharges || []) : null;
+
+    const challanNo = payload.challan_no !== undefined || payload.challanNo !== undefined ? (payload.challan_no || payload.challanNo || null) : null;
+    const challanDate = payload.challan_date !== undefined || payload.challanDate !== undefined ? (payload.challan_date || payload.challanDate || null) : null;
+    const buyerOrderNo = payload.buyer_order_no !== undefined || payload.buyerOrderNo !== undefined ? (payload.buyer_order_no || payload.buyerOrderNo || null) : null;
+    const dispatchDocNo = payload.dispatch_doc_no !== undefined || payload.dispatchDocNo !== undefined ? (payload.dispatch_doc_no || payload.dispatchDocNo || null) : null;
+    const dispatchedThrough = payload.dispatched_through !== undefined || payload.dispatchedThrough !== undefined ? (payload.dispatched_through || payload.dispatchedThrough || null) : null;
+    const destination = payload.destination !== undefined ? (payload.destination || null) : null;
+    const termsOfDelivery = payload.terms_of_delivery !== undefined || payload.termsOfDelivery !== undefined ? (payload.terms_of_delivery || payload.termsOfDelivery || null) : null;
+
+    const hasIsMaterial = payload.is_material !== undefined || payload.isMaterial !== undefined;
+    const isMaterial = hasIsMaterial ? Boolean(payload.is_material ?? payload.isMaterial) : null;
 
     const updateSql = `
       UPDATE public.invoices SET
@@ -770,7 +806,7 @@ export class InvoiceQueryService {
       mgmtPercent,
       machineryCharges,
       materialCharges,
-      JSON.stringify(additionalCharges),
+      additionalCharges,
       challanNo,
       challanDate,
       buyerOrderNo,
@@ -893,9 +929,28 @@ export class InvoiceQueryService {
       }
       const proforma = proformaRes.rows[0];
 
+      if (proforma.type !== 'Proforma Invoice' && proforma.type !== 'Proforma') {
+        throw new Error(`Only Proforma invoices can be converted to Tax Invoice. Current type: ${proforma.type}`);
+      }
+
       if (proforma.status !== 'Approved') {
         throw new Error(`Only Approved Proforma invoices can be converted to Tax Invoice. Current status: ${proforma.status}`);
       }
+
+      // Concurrency guard: Verify that a Tax Invoice has not already been created for this proforma
+      const existingTaxRes = await client.query(
+        `SELECT id, invoice_no FROM public.invoices WHERE previous_version_id = $1 LIMIT 1;`,
+        [proforma.id]
+      );
+      if (existingTaxRes.rows && existingTaxRes.rows.length > 0) {
+        throw new Error(`A Tax Invoice (${existingTaxRes.rows[0].invoice_no}) has already been generated from this Proforma invoice`);
+      }
+
+      // Mark the proforma invoice as Converted
+      await client.query(
+        `UPDATE public.invoices SET status = 'Converted', updated_at = NOW() WHERE id = $1;`,
+        [proforma.id]
+      );
 
       const companyId = proforma.company_id;
       if (!companyId) {

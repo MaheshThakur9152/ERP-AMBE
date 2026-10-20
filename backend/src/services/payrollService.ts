@@ -173,6 +173,53 @@ export function calculatePayroll(
   };
 }
 
+const MONTH_NAME_MAP: Record<string, number> = {
+  jan: 1, january: 1,
+  feb: 2, february: 2,
+  mar: 3, march: 3,
+  apr: 4, april: 4,
+  may: 5,
+  jun: 6, june: 6,
+  jul: 7, july: 7,
+  aug: 8, august: 8,
+  sep: 9, sept: 9, september: 9,
+  oct: 10, october: 10,
+  nov: 11, november: 11,
+  dec: 12, december: 12,
+};
+
+export function parseMonthYearRange(monthYear: string): { startDate: string; endDate: string } {
+  const trimmed = monthYear.trim();
+  let year: number | null = null;
+  let month: number | null = null;
+
+  if (/^\d{4}-\d{2}$/.test(trimmed)) {
+    const parts = trimmed.split('-');
+    year = parseInt(parts[0], 10);
+    month = parseInt(parts[1], 10);
+  } else {
+    const match = trimmed.match(/^([a-zA-Z]+)\s+(\d{4})$/) || trimmed.match(/^(\d{4})\s+([a-zA-Z]+)$/);
+    if (match) {
+      const monthStr = (match[1].match(/^[a-zA-Z]+$/) ? match[1] : match[2]).toLowerCase();
+      const yearStr = match[1].match(/^\d{4}$/) ? match[1] : match[2];
+      if (MONTH_NAME_MAP[monthStr]) {
+        month = MONTH_NAME_MAP[monthStr];
+        year = parseInt(yearStr, 10);
+      }
+    }
+  }
+
+  if (!year || !month || month < 1 || month > 12) {
+    throw new Error(`Invalid monthYear format: "${monthYear}"`);
+  }
+
+  const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+  const nextMonthDate = new Date(Date.UTC(year, month, 1));
+  const endDate = `${nextMonthDate.getUTCFullYear()}-${String(nextMonthDate.getUTCMonth() + 1).padStart(2, '0')}-01`;
+
+  return { startDate, endDate };
+}
+
 export class PayrollService {
   /**
    * Calculate and transactionally persist site payroll for a given month_year
@@ -182,6 +229,8 @@ export class PayrollService {
     monthYear: string,
     daysInMonth: number = 30
   ): Promise<any[]> {
+    const { startDate, endDate } = parseMonthYearRange(monthYear);
+
     // 1. Fetch site, staff, and assigned rate cards
     const staffRes = await pool.query(
       `SELECT s.*, rc.gross_salary, rc.basic_da, rc.hra, rc.washing_allowance, rc.conveyance_allowance,
@@ -208,8 +257,8 @@ export class PayrollService {
            COUNT(*) FILTER (WHERE status = 'P') as present_days,
            COUNT(*) FILTER (WHERE status IN ('W/O', 'WOP')) as wo_days
          FROM public.attendance_records
-         WHERE staff_id = $1 AND TO_CHAR(record_date, 'Month YYYY') ILIKE $2`,
-        [staff.id, `%${monthYear.trim()}%`]
+         WHERE staff_id = $1 AND record_date >= $2::date AND record_date < $3::date`,
+        [staff.id, startDate, endDate]
       );
 
       const pd = Number(attRes.rows[0]?.present_days || 0);

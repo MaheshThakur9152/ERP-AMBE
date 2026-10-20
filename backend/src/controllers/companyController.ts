@@ -43,6 +43,10 @@ export class CompanyController {
 
   static async create(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
+      if (req.user?.role !== 'superadmin') {
+        res.status(403).json({ error: 'Access denied: Superadmin privileges required to create companies' });
+        return;
+      }
       const company = await CompanyService.createCompany(req.body);
       await RedisCache.del('erp:companies:all');
       const response: ApiResponse = { success: true, data: company };
@@ -56,6 +60,11 @@ export class CompanyController {
   static async update(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const { id } = req.params;
+      const userCompanyId = req.user?.company_id || req.user?.companyId;
+      if (req.user?.role !== 'superadmin' && (!userCompanyId || userCompanyId !== id)) {
+        res.status(403).json({ error: 'Access denied: Unauthorized company access' });
+        return;
+      }
       const company = await CompanyService.updateCompany(id, req.body);
       await RedisCache.del('erp:companies:all');
       const response: ApiResponse = { success: true, data: company };
@@ -69,6 +78,11 @@ export class CompanyController {
   static async toggleStatus(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const { id } = req.params;
+      const userCompanyId = req.user?.company_id || req.user?.companyId;
+      if (req.user?.role !== 'superadmin' && (!userCompanyId || userCompanyId !== id)) {
+        res.status(403).json({ error: 'Access denied: Unauthorized company access' });
+        return;
+      }
       const { is_active } = req.body;
       const company = await CompanyService.toggleActiveState(id, Boolean(is_active));
       await RedisCache.del('erp:companies:all');

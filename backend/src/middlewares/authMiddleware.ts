@@ -122,6 +122,20 @@ export const requireSuperAdmin = (req: Request, res: Response, next: NextFunctio
 };
 
 /**
+ * Canonical allowlist of tables supporting record-level and field-level locking.
+ */
+export const ALLOWED_LOCK_TABLES = new Set([
+  'invoices',
+  'payroll_records',
+  'attendance_records',
+  'attendance_sheets',
+  'sites',
+  'bonus_disbursements',
+  'staff',
+  'companies',
+]);
+
+/**
  * Middleware: checkLockBouncer
  * Checks if target entity (by req.params.id) is locked in database.
  * If is_locked === true AND user role === 'admin', returns 403 Forbidden.
@@ -141,8 +155,7 @@ export const checkLockBouncer = (tableName: string) => {
         return;
       }
 
-      const allowedTables = new Set(['invoices', 'payroll_records', 'attendance_records', 'sites', 'bonus_disbursements']);
-      if (!allowedTables.has(tableName)) {
+      if (!ALLOWED_LOCK_TABLES.has(tableName)) {
         res.status(400).json({ error: 'Invalid lock target table' });
         return;
       }
@@ -233,8 +246,7 @@ export const checkFieldLockBouncer = (tableName: string) => {
         return;
       }
 
-      const allowedTables = new Set(['invoices', 'payroll_records', 'attendance_records', 'sites', 'bonus_disbursements']);
-      if (!allowedTables.has(tableName)) {
+      if (!ALLOWED_LOCK_TABLES.has(tableName)) {
         res.status(400).json({ error: 'Invalid lock target table' });
         return;
       }

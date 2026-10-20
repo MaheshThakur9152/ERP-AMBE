@@ -55,10 +55,15 @@ const DocumentUploadSchema = z
 
 const CompanyDocUploadSchema = z
   .object({
-    entity: z.string().optional().default('Ambe'),
+    company_id: z.string().optional(),
+    companyId: z.string().optional(),
+    document_type: z.string().optional(),
+    documentType: z.string().optional(),
     doc_type: z.string().optional(),
     docType: z.string().optional(),
-    document_type: z.string().optional(),
+    document_label: z.string().optional(),
+    documentLabel: z.string().optional(),
+    entity: z.string().optional().default('Ambe'),
     month: z.string().optional().default('Jan'),
     year: z.string().optional().default('2026'),
     site_name: z.string().optional(),
@@ -67,12 +72,18 @@ const CompanyDocUploadSchema = z
     file_name: z.string().optional(),
   })
   .transform((data) => ({
+    company_id: data.company_id || data.companyId || '',
+    companyId: data.company_id || data.companyId || '',
+    document_type: data.document_type || data.documentType || data.doc_type || data.docType || 'General',
+    doc_type: data.doc_type || data.docType || data.document_type || data.documentType || 'General',
+    document_label: data.document_label || data.documentLabel || '',
+    documentLabel: data.document_label || data.documentLabel || '',
     entity: data.entity || 'Ambe',
-    doc_type: data.doc_type || data.docType || data.document_type || 'Tax Invoice',
     month: data.month || 'Jan',
     year: data.year || '2026',
     site_name: data.site_name || data.siteName || '',
     generatedName: data.generatedName || data.file_name || '',
+    file_name: data.file_name || data.generatedName || '',
   }));
 
 const InvoiceDirectUploadSchema = z
@@ -82,10 +93,22 @@ const InvoiceDirectUploadSchema = z
     invoice_id: z.string().optional(),
     invoiceId: z.string().optional(),
     id: z.string().optional(),
+    invoice_no: z.string().optional(),
+    invoiceNo: z.string().optional(),
+    is_attendance: z.union([z.boolean(), z.string()]).optional(),
+    is_generated: z.union([z.boolean(), z.string()]).optional(),
+    category: z.string().optional(),
+    doc_type: z.string().optional(),
+    docType: z.string().optional(),
   })
   .transform((data) => ({
     file_name: data.file_name || data.fileName || '',
     invoice_id: data.invoice_id || data.invoiceId || data.id || '',
+    invoice_no: data.invoice_no || data.invoiceNo || '',
+    is_attendance: data.is_attendance,
+    is_generated: data.is_generated,
+    category: data.category,
+    doc_type: data.doc_type || data.docType,
   }));
 
 const validateAndNormalizeDocumentUpload = (req: Request, res: Response, next: NextFunction): void => {

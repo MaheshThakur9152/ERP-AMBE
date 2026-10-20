@@ -116,7 +116,7 @@ WHERE s.client_id IS NOT NULL
 ON CONFLICT (wo_number) DO NOTHING;
 
 -- ==============================================================================
--- STEP 3: Extract Work Order Quotas from sites.rate_cards JSONB
+-- STEP 3: Extract Work Order Quotas from sites.rate_cards JSONB (Idempotent & Safe Casts)
 -- ==============================================================================
 INSERT INTO public.work_order_quotas (
   id,
@@ -133,9 +133,19 @@ SELECT
   wo.id AS work_order_id,
   COALESCE(elem->>'roleName', elem->>'post_name', 'General') AS designation,
   COALESCE(elem->>'location', '') AS location,
-  COALESCE((elem->>'persons')::integer, 1) AS contracted_headcount,
-  COALESCE((elem->>'monthlyRate')::numeric, (elem->>'rate')::numeric, 0) AS monthly_billing_rate,
-  COALESCE((elem->>'workingDays')::integer, 31) AS working_days,
+  CASE 
+    WHEN (elem->>'persons') ~ '^[0-9]+$' THEN (elem->>'persons')::integer 
+    ELSE 1 
+  END AS contracted_headcount,
+  CASE 
+    WHEN (elem->>'monthlyRate') ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (elem->>'monthlyRate')::numeric
+    WHEN (elem->>'rate') ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (elem->>'rate')::numeric
+    ELSE 0.0 
+  END AS monthly_billing_rate,
+  CASE 
+    WHEN (elem->>'workingDays') ~ '^[0-9]+$' THEN (elem->>'workingDays')::integer 
+    ELSE 31 
+  END AS working_days,
   COALESCE(elem->>'hsnCode', '9985') AS hsn_code
 FROM public.sites s
 JOIN public.work_orders wo ON wo.site_id = s.id,
@@ -145,10 +155,13 @@ LATERAL jsonb_array_elements(
     ELSE '[]'::jsonb 
   END
 ) AS elem
-WHERE s.rate_cards IS NOT NULL;
+WHERE s.rate_cards IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM public.work_order_quotas woq WHERE woq.work_order_id = wo.id
+  );
 
 -- ==============================================================================
--- STEP 4: Normalize Invoice Line Items from JSONB
+-- STEP 4: Normalize Invoice Line Items from JSONB (Idempotent & Safe Casts)
 -- ==============================================================================
 INSERT INTO public.invoice_items (
   id,
@@ -169,10 +182,23 @@ SELECT
   COALESCE(item->>'description', item->>'roleName', 'Facility Service') AS description,
   COALESCE(item->>'location', '') AS location,
   COALESCE(item->>'hsnCode', '9985') AS hsn_code,
-  COALESCE((item->>'persons')::numeric, 1.0) AS quantity,
-  COALESCE((item->>'workingDays')::numeric, 30.0) AS working_days,
-  COALESCE((item->>'rate')::numeric, (item->>'monthlyRate')::numeric, 0.0) AS unit_rate,
-  COALESCE((item->>'amount')::numeric, 0.0) AS amount,
+  CASE 
+    WHEN (item->>'persons') ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (item->>'persons')::numeric 
+    ELSE 1.0 
+  END AS quantity,
+  CASE 
+    WHEN (item->>'workingDays') ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (item->>'workingDays')::numeric 
+    ELSE 30.0 
+  END AS working_days,
+  CASE 
+    WHEN (item->>'rate') ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (item->>'rate')::numeric
+    WHEN (item->>'monthlyRate') ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (item->>'monthlyRate')::numeric
+    ELSE 0.0 
+  END AS unit_rate,
+  CASE 
+    WHEN (item->>'amount') ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (item->>'amount')::numeric 
+    ELSE 0.0 
+  END AS amount,
   9.00,
   9.00
 FROM public.invoices inv,
@@ -182,4 +208,7 @@ LATERAL jsonb_array_elements(
     ELSE '[]'::jsonb 
   END
 ) AS item
-WHERE inv.line_items IS NOT NULL;
+WHERE inv.line_items IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM public.invoice_items ii WHERE ii.invoice_id = inv.id
+  );

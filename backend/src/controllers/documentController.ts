@@ -13,6 +13,7 @@ import {
   getDocumentViewUrl,
 } from '../utils/documentViewHelper';
 import path from 'path';
+import crypto from 'crypto';
 import { buildInvoiceFileName, sanitizeSegment } from '../utils/fileUtils';
 
 function sanitizeFileName(name?: string): string {
@@ -136,10 +137,19 @@ export const uploadCompanyDocument = async (req: Request, res: Response): Promis
       return;
     }
 
+    const userCompanyId = (req as any).user?.company_id || (req as any).user?.companyId;
+    if ((req as any).user && (req as any).user.role !== 'superadmin' && userCompanyId && userCompanyId !== companyId) {
+      res.status(403).json({ error: 'Access denied: Unauthorized company access' });
+      return;
+    }
+
     const safeOriginalName = sanitizeFileName(file.originalname);
     const compressed = await CompressionService.compressFile(file.buffer, file.mimetype);
 
-    const storageKey = `companies/${companyId}/${sanitizeSegment(documentType)}/${safeOriginalName}`;
+    const safeCompanyId = sanitizeSegment(companyId);
+    const safeDocType = sanitizeSegment(documentType);
+    const uniqueSuffix = crypto.randomBytes(6).toString('hex');
+    const storageKey = `companies/${safeCompanyId}/${safeDocType}/${Date.now()}_${uniqueSuffix}_${safeOriginalName}`;
 
     const storageResult = await OracleStorageService.uploadFile(
       compressed.buffer,
@@ -460,7 +470,71 @@ export const deleteDocument = async (req: Request, res: Response): Promise<void>
       return;
     }
 
-    // Delete MinIO file
+    const user = (req as any).user;
+    const isSuperAdmin = user?.role === 'superadmin';
+    const userCompanyId = user?.company_id || user?.companyId;
+
+    // Direct document lock check
+    if (docRecord.is_locked && !isSuperAdmin) {
+      res.status(423).json({ error: 'Document is locked and cannot be deleted' });
+      return;
+    }
+
+    // Entity-level lock and tenant authorization check
+    if (foundTable === 'employee_documents') {
+      const staffRes = await pool.query(
+        `SELECT s.id, s.is_locked, st.company_id
+         FROM public.staff s
+         LEFT JOIN public.sites st ON st.id = s.site_id
+         WHERE s.id = $1 LIMIT 1;`,
+        [docRecord.staff_id]
+      );
+      if (staffRes.rows?.[0]) {
+        const staff = staffRes.rows[0];
+        if (staff.is_locked && !isSuperAdmin) {
+          res.status(423).json({ error: 'Cannot delete document of locked staff record' });
+          return;
+        }
+        if (!isSuperAdmin && userCompanyId && staff.company_id && userCompanyId !== staff.company_id) {
+          res.status(403).json({ error: 'Access denied: Unauthorized company access' });
+          return;
+        }
+      }
+    } else if (foundTable === 'site_documents') {
+      const siteRes = await pool.query(
+        'SELECT id, is_locked, company_id FROM public.sites WHERE id = $1 LIMIT 1;',
+        [docRecord.site_id]
+      );
+      if (siteRes.rows?.[0]) {
+        const site = siteRes.rows[0];
+        if (site.is_locked && !isSuperAdmin) {
+          res.status(423).json({ error: 'Cannot delete document of locked site record' });
+          return;
+        }
+        if (!isSuperAdmin && userCompanyId && site.company_id && userCompanyId !== site.company_id) {
+          res.status(403).json({ error: 'Access denied: Unauthorized company access' });
+          return;
+        }
+      }
+    } else if (foundTable === 'company_documents') {
+      const compRes = await pool.query(
+        'SELECT id, is_locked FROM public.companies WHERE id = $1 LIMIT 1;',
+        [docRecord.company_id]
+      );
+      if (compRes.rows?.[0]) {
+        const comp = compRes.rows[0];
+        if (comp.is_locked && !isSuperAdmin) {
+          res.status(423).json({ error: 'Cannot delete document of locked company record' });
+          return;
+        }
+        if (!isSuperAdmin && userCompanyId && userCompanyId !== comp.id) {
+          res.status(403).json({ error: 'Access denied: Unauthorized company access' });
+          return;
+        }
+      }
+    }
+
+    // Authorization and lock checks passed: safe to delete MinIO object and DB row
     if (docRecord.storage_provider === 'minio' && docRecord.storage_key) {
       try {
         await OracleStorageService.deleteFile(docRecord.storage_key);

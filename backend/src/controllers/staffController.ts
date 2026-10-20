@@ -74,18 +74,39 @@ export const StaffController = {
   /**
    * GET /api/staff
    */
-  async list(_req: Request, res: Response): Promise<void> {
+  async list(req: Request, res: Response): Promise<void> {
     try {
+      const siteId = (req.query.site_id || req.query.siteId) as string | undefined;
+      const user = req.user;
+      const isSuperAdmin = user?.role === 'superadmin';
+      const userCompanyId = user?.company_id || user?.companyId;
+
+      const conditions: string[] = [];
+      const values: any[] = [];
+
+      if (siteId && siteId.trim()) {
+        values.push(siteId.trim());
+        conditions.push(`s.site_id = $${values.length}`);
+      }
+
+      if (!isSuperAdmin && userCompanyId) {
+        values.push(userCompanyId);
+        conditions.push(`st.company_id = $${values.length}`);
+      }
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
       const query = `
         SELECT s.*,
                row_to_json(rc.*) AS rate_cards,
-               json_build_object('id', st.id, 'site_name', st.site_name, 'code_name', st.code_name) AS sites
+               json_build_object('id', st.id, 'site_name', st.site_name, 'code_name', st.code_name, 'company_id', st.company_id) AS sites
         FROM public.staff s
         LEFT JOIN public.rate_cards rc ON rc.id = s.rate_card_id
         LEFT JOIN public.sites st ON st.id = s.site_id
+        ${whereClause}
         ORDER BY s.employee_name;
       `;
-      const result = await pool.query(query);
+      const result = await pool.query(query, values);
       res.status(200).json({ success: true, data: result.rows || [] });
     } catch (err: any) {
       console.error('[StaffController:list] Error:', err.message);

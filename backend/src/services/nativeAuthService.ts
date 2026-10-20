@@ -3,8 +3,18 @@ import bcrypt from 'bcryptjs';
 import { pool } from '../db/pool';
 import { AuthUser } from '../types/express';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback_erp_super_secret_jwt_key_2026';
 const ACCESS_TOKEN_EXPIRY = '15m';
+export const JWT_ISSUER = 'erp-ambe-native-auth';
+
+function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret || secret.trim().length < 32) {
+    throw new Error(
+      'FATAL: JWT_SECRET environment variable is missing, empty, or too short (minimum 32 characters required). Application cannot safely sign or verify tokens.'
+    );
+  }
+  return secret.trim();
+}
 
 export interface AppUserRow {
   id: string;
@@ -57,9 +67,10 @@ export class NativeAuthService {
   }
 
   /**
-   * Generates a native signed JWT access token
+   * Generates a native signed JWT access token using explicit HS256 algorithm and required issuer
    */
   static generateAccessToken(user: AuthUser): string {
+    const secret = getJwtSecret();
     return jwt.sign(
       {
         sub: user.id,
@@ -67,19 +78,26 @@ export class NativeAuthService {
         email: user.email,
         role: user.role,
         company_id: user.company_id,
-        iss: 'erp-ambe-native-auth',
+        iss: JWT_ISSUER,
       },
-      JWT_SECRET,
-      { expiresIn: ACCESS_TOKEN_EXPIRY }
+      secret,
+      {
+        algorithm: 'HS256',
+        expiresIn: ACCESS_TOKEN_EXPIRY,
+      }
     );
   }
 
   /**
-   * Verifies a native signed JWT access token
+   * Verifies a native signed JWT access token enforcing HS256 algorithm and expected issuer
    */
   static verifyAccessToken(token: string): AuthUser | null {
     try {
-      const decoded = jwt.verify(token, JWT_SECRET) as any;
+      const secret = getJwtSecret();
+      const decoded = jwt.verify(token, secret, {
+        algorithms: ['HS256'],
+        issuer: JWT_ISSUER,
+      }) as any;
       if (!decoded || !decoded.id) {
         return null;
       }

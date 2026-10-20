@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { TokenService } from '../services/tokenService';
 import { NativeAuthService } from '../services/nativeAuthService';
+import { NotificationService } from '../services/notificationService';
 import { pool } from '../db/pool';
 import { AuthUser } from '../types/express';
 
@@ -112,7 +113,7 @@ export class AuthController {
       const targetUserId = validation.userId;
       const newRawRefreshToken = validation.newRawToken;
 
-      if (!targetUserId || !newRawRefreshToken) {
+      if (!targetUserId) {
         res.clearCookie('refresh_token', getCookieOptions(req));
         res.clearCookie('access_token', getCookieOptions(req));
         res.status(401).json({ error: 'Invalid session state, please log in again' });
@@ -137,16 +138,19 @@ export class AuthController {
       };
       const newAccessToken = NativeAuthService.generateAccessToken(user);
 
-      res.cookie('refresh_token', newRawRefreshToken, {
-        ...getCookieOptions(req),
-        maxAge: REFRESH_TOKEN_MAX_AGE,
-      });
+      // Only set a replacement refresh cookie if a new token was actually issued (not in concurrent grace window)
+      if (newRawRefreshToken) {
+        res.cookie('refresh_token', newRawRefreshToken, {
+          ...getCookieOptions(req),
+          maxAge: REFRESH_TOKEN_MAX_AGE,
+        });
+      }
 
       res.status(200).json({
         success: true,
         token: newAccessToken,
         access_token: newAccessToken,
-        refresh_token: newRawRefreshToken,
+        ...(newRawRefreshToken && { refresh_token: newRawRefreshToken }),
         user: {
           id: user.id,
           email: user.email,
@@ -404,31 +408,36 @@ export class AuthController {
       const email = rawEmail.trim().toLowerCase();
       const userRes = await pool.query('SELECT id, email FROM public.app_users WHERE LOWER(email) = $1 LIMIT 1;', [email]);
 
-      if (userRes.rows.length === 0) {
-        res.status(200).json({ success: true, message: 'If an account exists, a reset link has been generated.' });
-        return;
+      if (userRes.rows.length > 0) {
+        const userId = userRes.rows[0].id;
+        const rawToken = crypto.randomBytes(32).toString('hex');
+        const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+        const expiresAt = new Date(Date.now() + 1 * 60 * 60 * 1000); // 1 hour
+
+        // Invalidate any existing unused reset tokens for this user
+        await pool.query(
+          `UPDATE public.user_invitations SET used_at = NOW() WHERE user_id = $1 AND type = 'reset' AND used_at IS NULL;`,
+          [userId]
+        );
+
+        await pool.query(
+          `INSERT INTO public.user_invitations (user_id, token_hash, type, expires_at)
+           VALUES ($1, $2, 'reset', $3);`,
+          [userId, tokenHash, expiresAt]
+        );
+
+        // Out-of-band delivery via notification service (never exposed in HTTP response or logs)
+        await NotificationService.sendPasswordResetNotification(email, rawToken, expiresAt);
       }
 
-      const userId = userRes.rows[0].id;
-      const rawToken = crypto.randomBytes(32).toString('hex');
-      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
-      const expiresAt = new Date(Date.now() + 1 * 60 * 60 * 1000); // 1 hour
-
-      await pool.query(
-        `INSERT INTO public.user_invitations (user_id, token_hash, type, expires_at)
-         VALUES ($1, $2, 'reset', $3);`,
-        [userId, tokenHash, expiresAt]
-      );
-
+      // Consistent generic response for both existing and non-existent accounts
       res.status(200).json({
         success: true,
-        message: 'Password reset link generated.',
-        resetToken: rawToken,
-        expiresAt,
+        message: 'If an account exists with this email, a password reset link has been sent.',
       });
     } catch (err: any) {
       console.error('[auth:forgotPassword:error]', err.message);
-      res.status(500).json({ error: 'Failed to process forgot password request', details: err.message });
+      res.status(500).json({ error: 'Failed to process forgot password request' });
     }
   }
 

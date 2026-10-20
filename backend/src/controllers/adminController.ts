@@ -44,9 +44,17 @@ async function fetchEntityPendingLocks(config: EntityLockConfig): Promise<Pendin
       sql = `SELECT * FROM public.${config.table} WHERE (is_locked = false OR is_locked IS NULL)`;
     }
 
+    let qualifiedTimeCol = timeCol;
+    if (config.table === 'invoices') qualifiedTimeCol = 'i.created_at';
+    else if (config.table === 'attendance_sheets') qualifiedTimeCol = 'a.created_at';
+    else if (config.table === 'payroll_records') qualifiedTimeCol = 'p.created_at';
+    else if (config.table === 'staff') qualifiedTimeCol = 's.created_at';
+    else if (config.table === 'sites') qualifiedTimeCol = 'public.sites.created_at';
+    else if (config.table === 'companies') qualifiedTimeCol = 'public.companies.created_at';
+
     if (config.useCutoff !== false) {
       params.push(cutoffTime);
-      sql += ` AND ${timeCol} < $${params.length}`;
+      sql += ` AND ${qualifiedTimeCol} < $${params.length}`;
     }
 
     const res = await pool.query(sql, params);

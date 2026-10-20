@@ -35,6 +35,17 @@ const MONTHS = [
 
 const YEARS = [2026, 2025, 2024];
 
+function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 function numberToWordsINR(num: number): string {
   if (isNaN(num) || num <= 0) return 'Zero';
   const units = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
@@ -414,7 +425,7 @@ export const PayslipHub: React.FC = () => {
       if (existingStaff) {
         staffId = existingStaff.id;
       } else {
-        const newStaffId = crypto.randomUUID();
+        const newStaffId = generateUUID();
         const newStaffObj = {
           id: newStaffId,
           employee_name: editEmpName || 'Ad-Hoc Staff',
@@ -434,14 +445,16 @@ export const PayslipHub: React.FC = () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(newStaffObj),
           });
-          if (createStaffRes.ok) {
-            const createStaffJson = await createStaffRes.json();
-            staffId = createStaffJson.data?.id || newStaffId;
-          } else {
-            staffId = newStaffId;
+          if (!createStaffRes.ok) {
+            const errBody = await createStaffRes.text();
+            throw new Error(`Failed to create ad-hoc staff: ${errBody || createStaffRes.statusText}`);
           }
-        } catch {
-          staffId = newStaffId;
+          const createStaffJson = await createStaffRes.json();
+          staffId = createStaffJson.data?.id || newStaffId;
+        } catch (err: any) {
+          console.error('Error creating ad-hoc staff:', err);
+          alert(`Error saving staff record: ${err?.message || 'Failed to create staff'}`);
+          return;
         }
       }
     }
@@ -450,22 +463,31 @@ export const PayslipHub: React.FC = () => {
     delete recordToSave.isNew;
     delete recordToSave.staff;
 
-    const saveRes = await fetchWithRetry('/api/payroll/records', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify([recordToSave]),
-    });
+    let saveRes;
+    try {
+      saveRes = await fetchWithRetry('/api/payroll/records', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([recordToSave]),
+      });
+      if (!saveRes.ok) {
+        const errBody = await saveRes.text();
+        throw new Error(`Failed to save payroll record: ${errBody || saveRes.statusText}`);
+      }
+    } catch (err: any) {
+      console.error('Error saving payroll record:', err);
+      alert(`Error saving payslip: ${err?.message || 'Failed to save record'}`);
+      return;
+    }
 
+    const saveJson = await saveRes.json();
     let finalSavedRecord = {
       ...recordToSave,
-      id: recordToSave.id || `rec-${Date.now()}`,
+      id: recordToSave.id || generateUUID(),
     };
 
-    if (saveRes.ok) {
-      const saveJson = await saveRes.json();
-      if (saveJson.data?.[0]) {
-        finalSavedRecord = saveJson.data[0];
-      }
+    if (saveJson.data?.[0]) {
+      finalSavedRecord = saveJson.data[0];
     }
 
     setRecords((prev) => {

@@ -11,15 +11,16 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-erp_facility}
       POSTGRES_USER: ${POSTGRES_USER:-erp_admin}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_in_production}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be configured in environment}
       PGDATA: /var/lib/postgresql/data/pgdata
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
       DR_S3_BUCKET: ${DR_S3_BUCKET:-erp-backups}
       DR_S3_PREFIX: ${DR_S3_PREFIX:-wal}
       ENABLE_WAL_ARCHIVING: ${ENABLE_WAL_ARCHIVING:-true}
       AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY:-minioadmin}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:-minioadmin123}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be configured in environment}
       AWS_DEFAULT_REGION: us-east-1
+      GPG_PASSPHRASE: ${GPG_PASSPHRASE:-}
     volumes:
       - postgres_data_v16:/var/lib/postgresql/data
       - ./backend/src/db/migrations:/docker-entrypoint-initdb.d:ro
@@ -44,7 +45,7 @@ services:
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin123}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be configured in environment}
     volumes:
       - minio_data:/data
     ports:
@@ -90,11 +91,11 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 5000
-      DATABASE_URL: postgresql://${POSTGRES_USER:-erp_admin}:${POSTGRES_PASSWORD:-change_me_in_production}@postgres:5432/${POSTGRES_DB:-erp_facility}
-      JWT_SECRET: ${JWT_SECRET:-erp-super-secret-jwt-key-2026-secure}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-erp_admin}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be configured in environment}@postgres:5432/${POSTGRES_DB:-erp_facility}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be configured in environment}
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-https://storage.ambeservice.com}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin123}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be configured in environment}
       MINIO_BUCKET: ${MINIO_BUCKET:-ambeuploads}
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
@@ -151,15 +152,15 @@ services:
       PGPORT: 5432
       PGDATABASE: ${POSTGRES_DB:-erp_facility}
       PGUSER: ${POSTGRES_USER:-erp_admin}
-      PGPASSWORD: ${POSTGRES_PASSWORD:-change_me_in_production}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be configured in environment}
       REPLICATION_USER: ${REPLICATION_USER:-erp_replication}
-      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:-change_me_in_production}
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD:?REPLICATION_PASSWORD must be configured in environment}
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
       DR_S3_BUCKET: ${DR_S3_BUCKET:-erp-backups}
       AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY:-minioadmin}
-      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:-minioadmin123}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be configured in environment}
       AWS_DEFAULT_REGION: us-east-1
-      GPG_PASSPHRASE: ${GPG_PASSPHRASE:-erp-backup-gpg-secret-passphrase}
+      GPG_PASSPHRASE: ${GPG_PASSPHRASE:?GPG_PASSPHRASE must be configured in environment}
     volumes:
       - backups_data:/backups
     networks:

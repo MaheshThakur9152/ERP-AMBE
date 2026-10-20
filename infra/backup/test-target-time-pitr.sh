@@ -40,11 +40,33 @@ echo "INFO: [pitr-drill] Target timestamp for recovery: ${TARGET_TIME}"
 # Step 4: Insert row that should NOT be restored (post-target event)
 sleep 2
 echo "INFO: [pitr-drill] Inserting post-target event (CANARY_POST_DISASTER)..."
-su-exec postgres psql -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -d "${PGDATABASE}" -c "
+SWITCHED_WAL=$(su-exec postgres psql -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -d "${PGDATABASE}" -t -A -c "
   INSERT INTO public.pitr_canary (id, marker) VALUES (3, 'CANARY_POST_DISASTER');
-  SELECT pg_switch_wal();
-"
-sleep 2
+  SELECT pg_walfile_name(pg_switch_wal());
+")
+echo "INFO: [pitr-drill] Switched WAL segment: ${SWITCHED_WAL}"
+
+# Poll S3 until the switched WAL segment appears (either .gpg or unencrypted)
+echo "INFO: [pitr-drill] Waiting for WAL segment ${SWITCHED_WAL} to be archived to S3..."
+MAX_ATTEMPTS=30
+ATTEMPT=0
+ARCHIVED=false
+
+while [[ ${ATTEMPT} -lt ${MAX_ATTEMPTS} ]]; do
+  if aws --endpoint-url="${S3_ENDPOINT_URL}" s3 ls "s3://${DR_S3_BUCKET}/${DR_S3_PREFIX}/${SWITCHED_WAL}.gpg" >/dev/null 2>&1 || \
+     aws --endpoint-url="${S3_ENDPOINT_URL}" s3 ls "s3://${DR_S3_BUCKET}/${DR_S3_PREFIX}/${SWITCHED_WAL}" >/dev/null 2>&1; then
+    ARCHIVED=true
+    break
+  fi
+  ATTEMPT=$((ATTEMPT + 1))
+  sleep 1
+done
+
+if [[ "${ARCHIVED}" != "true" ]]; then
+  echo "FATAL: [pitr-drill] Timed out waiting for WAL segment ${SWITCHED_WAL} to appear in S3 archive!" >&2
+  exit 1
+fi
+echo "INFO: [pitr-drill] Confirmed WAL segment ${SWITCHED_WAL} present in S3 archive."
 
 # Step 5: Prepare isolated recovery cluster
 SCRATCH_DIR="$(mktemp -d /tmp/pitr_drill_XXXXXX)"

@@ -37,3 +37,17 @@ export function validateMinioEnv(): void {
     );
   }
 }
+
+export function validateJwtConfig(customSecret?: string): string {
+  const secret = customSecret !== undefined ? customSecret : process.env.JWT_SECRET;
+  if (!secret || secret.trim().length < 32) {
+    throw new Error(
+      'FATAL: JWT_SECRET environment variable is missing, empty, or too short (minimum 32 characters required). Application cannot safely sign or verify tokens.'
+    );
+  }
+  if (secret.includes('default-insecure-jwt-secret')) {
+    throw new Error('FATAL: JWT_SECRET cannot be the insecure default placeholder.');
+  }
+  return secret;
+}
+

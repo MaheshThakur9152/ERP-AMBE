@@ -1,5 +1,8 @@
 import app from './app';
-import { env } from './config/env';
+import { env, validateJwtConfig } from './config/env';
+
+// Fail-closed validation for required JWT secret
+validateJwtConfig();
 import { pool, checkDbHealth } from './db/pool';
 import { OracleStorageService } from './services/oracleStorageService';
 import { withTimeout } from './utils/timeoutHelper';
