@@ -7,12 +7,17 @@ async function runTests() {
   let failures = 0;
 
   // Fetch real test companies
-  const compRes = await pool.query('SELECT id, name, tax_prefix, proforma_prefix FROM public.companies ORDER BY name;');
+  const compRes = await pool.query('SELECT id, name, tax_prefix, proforma_prefix, tax_sequence, proforma_sequence FROM public.companies ORDER BY name;');
   if (!compRes.rows || compRes.rows.length < 2) {
     throw new Error('Test requires at least 2 companies in database');
   }
   const compA = compRes.rows[0];
   const compB = compRes.rows[1];
+  const compAInitTax = compA.tax_sequence;
+  const compAInitProf = compA.proforma_sequence;
+  const compBInitTax = compB.tax_sequence;
+  const compBInitProf = compB.proforma_sequence;
+  const createdInvoiceIds: string[] = [];
 
   // Fetch test site
   const siteRes = await pool.query('SELECT id, company_id FROM public.sites LIMIT 1;');
@@ -58,6 +63,7 @@ async function runTests() {
 
   try {
     const inv1 = await InvoiceQueryService.createInvoice(testPayload);
+    if (inv1?.id) createdInvoiceIds.push(inv1.id);
     const inv2 = await InvoiceQueryService.createInvoice(testPayload);
 
     if (inv1.id === inv2.id && inv1.invoiceNo === inv2.invoiceNo) {
@@ -137,6 +143,10 @@ async function runTests() {
     ];
 
     const results = await Promise.all(concurrentRequests);
+    for (const r of results) {
+      const rid = (r as any).id;
+      if (rid) createdInvoiceIds.push(rid);
+    }
     const invoiceNos = results.map((r: any) => `${r.companyId || r.company_id}:${r.type}:${r.invoiceNo || r.invoice_no}`);
     const uniqueNos = new Set(invoiceNos);
 
@@ -188,6 +198,18 @@ async function runTests() {
   } catch (err) {
     console.error('FAIL: Rollback test error:', err);
     failures++;
+  }
+
+  // TEST DATA CLEANUP: Always purge test invoices and restore company sequence counters
+  if (createdInvoiceIds.length > 0) {
+    try {
+      await pool.query('DELETE FROM public.invoices WHERE id = ANY($1::uuid[])', [createdInvoiceIds]);
+      await pool.query('UPDATE public.companies SET tax_sequence = $1, proforma_sequence = $2 WHERE id = $3', [compAInitTax, compAInitProf, compA.id]);
+      await pool.query('UPDATE public.companies SET tax_sequence = $1, proforma_sequence = $2 WHERE id = $3', [compBInitTax, compBInitProf, compB.id]);
+      console.log(`PASS: Test data cleaned up (${createdInvoiceIds.length} invoices deleted) and sequence counters restored.`);
+    } catch (cErr: any) {
+      console.error('Cleanup warning:', cErr.message);
+    }
   }
 
   // Final summary
