@@ -65,7 +65,7 @@ export function calculatePayroll(
 ): PayrollCalculationResult | null {
   if (!rateCard) return null;
 
-  const payableDays = pd + wo;
+  const payableDays = (Number(pd) || 0) + (Number(wo) || 0);
   const factor = daysInMonth > 0 ? payableDays / daysInMonth : 0;
   
   const basic_da = Number(rateCard.basic_da) || 0;

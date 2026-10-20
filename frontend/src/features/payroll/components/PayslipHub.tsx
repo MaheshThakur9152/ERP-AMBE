@@ -768,7 +768,7 @@ export const PayslipHub: React.FC = () => {
             </div>
             <div className="flex justify-between">
               <span className="font-sans font-bold">TOTAL PAYABLE:</span> 
-              <span>{record.payable_days ?? ((record.pd || 0) + (record.wo || 0))}</span>
+              <span>{record.payable_days ?? ((Number(record.pd) || 0) + (Number(record.wo) || 0))}</span>
             </div>
             <div className="flex justify-between">
               <span className="font-sans font-bold">DAYS IN MONTH:</span> 

@@ -239,8 +239,8 @@ export const PayrollHub: React.FC = () => {
           payrollRecordsMap.get(`${emp.biometric_code}_${targetSiteId}`) ||
           (!isSplit ? (payrollRecordsMap.get(emp.id) || payrollRecordsMap.get(emp.biometric_code) || payrollRecordsMap.get(emp.biometricCode)) : null);
 
-        const pd = saved?.pd ?? saved?.present_days ?? defaultPd;
-        const wo = saved?.wo ?? saved?.weekly_offs ?? 4;
+        const pd = Number(saved?.pd ?? saved?.present_days ?? defaultPd) || 0;
+        const wo = Number(saved?.wo ?? saved?.weekly_offs ?? 4) || 0;
 
         // Itemized Advance & Uniform Ledger Mapping
         const adv_amt = Number(saved?.adv_amt || 0);
