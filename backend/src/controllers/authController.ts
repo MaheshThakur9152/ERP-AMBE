@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { COOKIE_OPTIONS, REFRESH_TOKEN_MAX_AGE } from '../config/constants';
+import { getCookieOptions, REFRESH_TOKEN_MAX_AGE } from '../config/constants';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { TokenService } from '../services/tokenService';
@@ -47,7 +47,7 @@ export class AuthController {
       }
 
       res.cookie('refresh_token', rawRefreshToken, {
-        ...COOKIE_OPTIONS,
+        ...getCookieOptions(req),
         maxAge: REFRESH_TOKEN_MAX_AGE,
       });
 
@@ -93,8 +93,8 @@ export class AuthController {
 
       if (!validation.valid) {
         console.warn(`[auth:refresh] Token validation failed: ${validation.error}`);
-        res.clearCookie('refresh_token', COOKIE_OPTIONS);
-        res.clearCookie('access_token', COOKIE_OPTIONS);
+        res.clearCookie('refresh_token', getCookieOptions(req));
+        res.clearCookie('access_token', getCookieOptions(req));
 
         if (validation.theftDetected) {
           console.error(`🚨 [auth:theft] Token family revoked for user_id=${validation.userId}`);
@@ -113,16 +113,16 @@ export class AuthController {
       const newRawRefreshToken = validation.newRawToken;
 
       if (!targetUserId || !newRawRefreshToken) {
-        res.clearCookie('refresh_token', COOKIE_OPTIONS);
-        res.clearCookie('access_token', COOKIE_OPTIONS);
+        res.clearCookie('refresh_token', getCookieOptions(req));
+        res.clearCookie('access_token', getCookieOptions(req));
         res.status(401).json({ error: 'Invalid session state, please log in again' });
         return;
       }
 
       const appUserRes = await pool.query('SELECT * FROM public.app_users WHERE id = $1 LIMIT 1;', [targetUserId]);
       if (!appUserRes.rows || appUserRes.rows.length === 0) {
-        res.clearCookie('refresh_token', COOKIE_OPTIONS);
-        res.clearCookie('access_token', COOKIE_OPTIONS);
+        res.clearCookie('refresh_token', getCookieOptions(req));
+        res.clearCookie('access_token', getCookieOptions(req));
         res.status(401).json({ error: 'User account not found or deactivated' });
         return;
       }
@@ -138,7 +138,7 @@ export class AuthController {
       const newAccessToken = NativeAuthService.generateAccessToken(user);
 
       res.cookie('refresh_token', newRawRefreshToken, {
-        ...COOKIE_OPTIONS,
+        ...getCookieOptions(req),
         maxAge: REFRESH_TOKEN_MAX_AGE,
       });
 
@@ -155,8 +155,8 @@ export class AuthController {
       });
     } catch (err: any) {
       console.error('[auth:refresh] Unexpected error during refresh:', err);
-      res.clearCookie('refresh_token', COOKIE_OPTIONS);
-      res.clearCookie('access_token', COOKIE_OPTIONS);
+      res.clearCookie('refresh_token', getCookieOptions(req));
+      res.clearCookie('access_token', getCookieOptions(req));
       res.status(500).json({ error: 'Internal server error during session refresh' });
     }
   }
@@ -177,13 +177,13 @@ export class AuthController {
         });
       }
 
-      res.clearCookie('access_token', COOKIE_OPTIONS);
-      res.clearCookie('refresh_token', COOKIE_OPTIONS);
+      res.clearCookie('access_token', getCookieOptions(req));
+      res.clearCookie('refresh_token', getCookieOptions(req));
       res.status(200).json({ success: true, message: 'Logged out successfully' });
     } catch (err: any) {
       console.error('Logout error:', err);
-      res.clearCookie('access_token', COOKIE_OPTIONS);
-      res.clearCookie('refresh_token', COOKIE_OPTIONS);
+      res.clearCookie('access_token', getCookieOptions(req));
+      res.clearCookie('refresh_token', getCookieOptions(req));
       res.status(200).json({ success: true, message: 'Logged out' });
     }
   }
@@ -375,7 +375,7 @@ export class AuthController {
       const { rawToken: rawRefreshToken } = await TokenService.createRefreshToken(invitation.user_id);
 
       res.cookie('refresh_token', rawRefreshToken, {
-        ...COOKIE_OPTIONS,
+        ...getCookieOptions(req),
         maxAge: REFRESH_TOKEN_MAX_AGE,
       });
 
@@ -489,7 +489,7 @@ export class AuthController {
       const { rawToken: rawRefreshToken } = await TokenService.createRefreshToken(invitation.user_id);
 
       res.cookie('refresh_token', rawRefreshToken, {
-        ...COOKIE_OPTIONS,
+        ...getCookieOptions(req),
         maxAge: REFRESH_TOKEN_MAX_AGE,
       });
 
