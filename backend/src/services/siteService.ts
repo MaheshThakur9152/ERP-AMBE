@@ -107,6 +107,11 @@ export class SiteService {
    * Validates tenant ownership of a target site before mutation
    */
   static async verifySiteOwnership(siteId: string, user?: AuthUser): Promise<void> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(siteId)) {
+      const err: any = new Error('Site not found');
+      err.statusCode = 404;
+      throw err;
+    }
     const res = await pool.query('SELECT id, company_id FROM public.sites WHERE id = $1 LIMIT 1', [siteId]);
     if (!res.rows || res.rows.length === 0) {
       const err: any = new Error('Site not found');
@@ -197,7 +202,42 @@ export class SiteService {
    * Update site in DB with strict schema mapping
    */
   static async updateSite(id: string, payload: any, user?: AuthUser): Promise<Site> {
+    const userCompanyId = user?.company_id || user?.companyId;
+    const targetCompanyId = payload.company_id !== undefined ? payload.company_id : payload.companyId;
+
+    if (user && user.role !== 'superadmin') {
+      if (!userCompanyId) {
+        const err: any = new Error('Access denied: User has no authorized company scope');
+        err.statusCode = 403;
+        throw err;
+      }
+      if (targetCompanyId !== undefined && targetCompanyId !== null && targetCompanyId !== userCompanyId) {
+        const err: any = new Error('Unauthorized company reassignment');
+        err.statusCode = 403;
+        throw err;
+      }
+    }
+
+    const parseCharge = (snakeVal: any, camelVal: any, fieldName: string): number | null => {
+      if (snakeVal !== undefined && camelVal !== undefined && snakeVal !== camelVal) {
+        throw new Error(`Conflicting values for ${fieldName} (snake_case vs camelCase)`);
+      }
+      const val = snakeVal !== undefined ? snakeVal : camelVal;
+      if (val === undefined || val === null) return null;
+      const num = Number(val);
+      if (isNaN(num)) {
+        throw new Error(`Invalid numeric amount for ${fieldName}: ${val}`);
+      }
+      return num;
+    };
+
+    const machineryCharges = parseCharge(payload.default_machinery_charges, payload.defaultMachineryCharges, 'default_machinery_charges');
+    const materialCharges = parseCharge(payload.default_material_charges, payload.defaultMaterialCharges, 'default_material_charges');
+
     await this.verifySiteOwnership(id, user);
+
+    // Only superadmin can change company_id
+    const resolvedCompanyId = (!user || user.role === 'superadmin') ? (targetCompanyId ?? null) : null;
 
     const updateSql = `
       UPDATE public.sites SET
@@ -223,7 +263,7 @@ export class SiteService {
     `;
 
     const res = await pool.query(updateSql, [
-      payload.company_id || payload.companyId || null,
+      resolvedCompanyId,
       payload.siteName || payload.site_name || null,
       payload.codeName || payload.code_name || null,
       payload.clientName || payload.client_name || null,
@@ -231,8 +271,8 @@ export class SiteService {
       payload.workOrderRefNo || payload.work_order_ref || null,
       payload.workOrderPeriod || payload.work_order_period || null,
       payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? null,
-      payload.default_machinery_charges !== undefined ? Number(payload.default_machinery_charges ?? payload.defaultMachineryCharges ?? 0) : null,
-      payload.default_material_charges !== undefined ? Number(payload.default_material_charges ?? payload.defaultMaterialCharges ?? 0) : null,
+      machineryCharges,
+      materialCharges,
       (payload.additional_charges || payload.default_additional_charges || payload.defaultAdditionalCharges || payload.additionalCharges) ? JSON.stringify(payload.additional_charges || payload.default_additional_charges || payload.defaultAdditionalCharges || payload.additionalCharges) : null,
       payload.address !== undefined ? payload.address : null,
       payload.contactNo || payload.contact_no || null,
@@ -296,10 +336,19 @@ export class SiteService {
     // 1. Run file compression unchanged before storage call
     const compressed = await CompressionService.compressFile(file.buffer, file.mimetype);
 
-    // 2. Build consistent file name
+    // 2. Resolve company entity code
+    let entityCode = 'AMBE';
+    if (site.companyId) {
+      const compRes = await pool.query('SELECT entity_code, code FROM public.companies WHERE id = $1 LIMIT 1;', [site.companyId]);
+      if (compRes.rows?.[0]) {
+        entityCode = compRes.rows[0].entity_code || compRes.rows[0].code || 'AMBE';
+      }
+    }
+
+    // 3. Build consistent file name
     const fileName = buildFileName({
       type: 'site_doc',
-      entityCode: 'AMBE',
+      entityCode,
       siteCodeName: site.codeName || site.siteName,
       documentType: documentType || 'Document',
       originalName: file.originalname,

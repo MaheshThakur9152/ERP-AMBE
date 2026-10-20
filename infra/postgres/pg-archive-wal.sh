@@ -39,35 +39,53 @@ if [[ -r "${CRED_FILE}" ]]; then
   export AWS_SHARED_CREDENTIALS_FILE="${CRED_FILE}"
 fi
 
+TEMP_PASSPHRASE=""
+TEMP_ENCRYPTED=""
+
+cleanup() {
+  if [[ -n "${TEMP_PASSPHRASE}" && -f "${TEMP_PASSPHRASE}" ]]; then
+    rm -f "${TEMP_PASSPHRASE}"
+  fi
+  if [[ -n "${TEMP_ENCRYPTED}" && -f "${TEMP_ENCRYPTED}" ]]; then
+    rm -f "${TEMP_ENCRYPTED}"
+  fi
+}
+trap cleanup EXIT HUP INT QUIT TERM
+
 # GPG AES256 symmetric encryption setup
 GPG_PASSPHRASE_FILE="${GPG_PASSPHRASE_FILE:-/run/secrets/backup_gpg_passphrase}"
 if [[ ! -f "${GPG_PASSPHRASE_FILE}" ]]; then
   if [[ -f "/var/lib/postgresql/.gpg_passphrase" ]]; then
     GPG_PASSPHRASE_FILE="/var/lib/postgresql/.gpg_passphrase"
   elif [[ -n "${GPG_PASSPHRASE:-}" ]]; then
-    GPG_PASSPHRASE_FILE="/tmp/.gpg_passphrase.$$"
-    echo -n "${GPG_PASSPHRASE}" > "${GPG_PASSPHRASE_FILE}"
-    chmod 0400 "${GPG_PASSPHRASE_FILE}"
-    trap 'rm -f "${GPG_PASSPHRASE_FILE}"' EXIT
+    TEMP_PASSPHRASE="/tmp/.gpg_passphrase.$$"
+    echo -n "${GPG_PASSPHRASE}" > "${TEMP_PASSPHRASE}"
+    chmod 0400 "${TEMP_PASSPHRASE}"
+    GPG_PASSPHRASE_FILE="${TEMP_PASSPHRASE}"
   fi
 fi
 
 if [[ -n "${GPG_PASSPHRASE_FILE:-}" && -r "${GPG_PASSPHRASE_FILE}" ]]; then
   TEMP_ENCRYPTED="/tmp/${WAL_FILE}.gpg.$$"
-  trap 'rm -f "${TEMP_ENCRYPTED}"' EXIT
-  gpg --batch --yes --symmetric --cipher-algo AES256 --passphrase-file "${GPG_PASSPHRASE_FILE}" -o "${TEMP_ENCRYPTED}" "${SOURCE_PATH}"
+  if ! gpg --batch --yes --symmetric --cipher-algo AES256 --passphrase-file "${GPG_PASSPHRASE_FILE}" -o "${TEMP_ENCRYPTED}" "${SOURCE_PATH}"; then
+    echo "ERROR: [pg-archive-wal] Failed to encrypt WAL segment ${WAL_FILE}" >&2
+    exit 1
+  fi
   TARGET_URI="s3://${DR_S3_BUCKET}/${DR_S3_PREFIX}/${WAL_FILE}.gpg"
-  aws --endpoint-url="${S3_ENDPOINT_URL}" s3 cp "${TEMP_ENCRYPTED}" "${TARGET_URI}" --only-show-errors
-  EXIT_CODE=$?
-  rm -f "${TEMP_ENCRYPTED}"
-else
+  if ! aws --endpoint-url="${S3_ENDPOINT_URL}" s3 cp "${TEMP_ENCRYPTED}" "${TARGET_URI}" --only-show-errors; then
+    echo "ERROR: [pg-archive-wal] Failed to upload encrypted WAL ${WAL_FILE}.gpg to ${TARGET_URI}" >&2
+    exit 1
+  fi
+elif [[ "${ALLOW_UNENCRYPTED_WAL_DEV_ONLY:-false}" == "true" ]]; then
+  echo "WARNING: [pg-archive-wal] Archiving unencrypted WAL segment in dev mode (ALLOW_UNENCRYPTED_WAL_DEV_ONLY=true)" >&2
   TARGET_URI="s3://${DR_S3_BUCKET}/${DR_S3_PREFIX}/${WAL_FILE}"
-  aws --endpoint-url="${S3_ENDPOINT_URL}" s3 cp "${SOURCE_PATH}" "${TARGET_URI}" --only-show-errors
-  EXIT_CODE=$?
-fi
-if [[ ${EXIT_CODE} -ne 0 ]]; then
-  echo "ERROR: [pg-archive-wal] Failed to archive ${WAL_FILE} to ${TARGET_URI} (exit code: ${EXIT_CODE})" >&2
-  exit ${EXIT_CODE}
+  if ! aws --endpoint-url="${S3_ENDPOINT_URL}" s3 cp "${SOURCE_PATH}" "${TARGET_URI}" --only-show-errors; then
+    echo "ERROR: [pg-archive-wal] Failed to archive unencrypted ${WAL_FILE} to ${TARGET_URI}" >&2
+    exit 1
+  fi
+else
+  echo "ERROR: [pg-archive-wal] Encryption passphrase is not available at '${GPG_PASSPHRASE_FILE}'. Refusing unencrypted WAL archive." >&2
+  exit 1
 fi
 
 exit 0

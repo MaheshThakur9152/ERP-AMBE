@@ -347,6 +347,9 @@ export class PayrollService {
             pt = EXCLUDED.pt,
             earned_part_bonus = EXCLUDED.earned_part_bonus,
             remaining_part_bonus = EXCLUDED.remaining_part_bonus,
+            bonus_amount_snapshot = EXCLUDED.bonus_amount_snapshot,
+            part_bonus_amount_snapshot = EXCLUDED.part_bonus_amount_snapshot,
+            rate_card_remark_snapshot = EXCLUDED.rate_card_remark_snapshot,
             updated_at = now();
         `;
         await client.query(query, [
@@ -355,7 +358,7 @@ export class PayrollService {
           rec.epf_deduction, rec.esic_deduction, rec.pt_deduction, rec.net_salary, rec.total_net_salary,
           rec.pd, rec.wo, rec.earned_conveyance, rec.earned_incentive, rec.earned_bonus,
           rec.epf, rec.esic, rec.pt, rec.earned_part_bonus, rec.remaining_part_bonus,
-          rec.bonus_amount_snapshot, rec.part_bonus_amount_snapshot, rec.rateCardRemarkSnapshot,
+          rec.bonus_amount_snapshot, rec.part_bonus_amount_snapshot, (rec.rate_card_remark_snapshot ?? rec.rateCardRemarkSnapshot ?? null),
           rec.designation, rec.employee_name, rec.bank_account_no, rec.bank_ifsc_code, rec.days_in_month,
         ]);
       }

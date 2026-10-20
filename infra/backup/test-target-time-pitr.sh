@@ -40,8 +40,12 @@ echo "INFO: [pitr-drill] Target timestamp for recovery: ${TARGET_TIME}"
 # Step 4: Insert row that should NOT be restored (post-target event)
 sleep 2
 echo "INFO: [pitr-drill] Inserting post-target event (CANARY_POST_DISASTER)..."
-SWITCHED_WAL=$(su-exec postgres psql -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -d "${PGDATABASE}" -t -A -c "
+su-exec postgres psql -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -d "${PGDATABASE}" -c "
   INSERT INTO public.pitr_canary (id, marker) VALUES (3, 'CANARY_POST_DISASTER');
+"
+
+echo "INFO: [pitr-drill] Switching WAL segment after post-target commit..."
+SWITCHED_WAL=$(su-exec postgres psql -h "${PGHOST}" -p "${PGPORT}" -U "${PGUSER}" -d "${PGDATABASE}" -t -A -c "
   SELECT pg_walfile_name(pg_switch_wal());
 ")
 echo "INFO: [pitr-drill] Switched WAL segment: ${SWITCHED_WAL}"

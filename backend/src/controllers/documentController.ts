@@ -14,6 +14,7 @@ import {
 } from '../utils/documentViewHelper';
 import path from 'path';
 import crypto from 'crypto';
+import { pipeline } from 'stream/promises';
 import { buildInvoiceFileName, sanitizeSegment } from '../utils/fileUtils';
 
 function sanitizeFileName(name?: string): string {
@@ -41,6 +42,32 @@ export const uploadDocument = async (req: Request, res: Response): Promise<void>
     if (!staffId) {
       res.status(400).json({ error: 'staff_id is required' });
       return;
+    }
+
+    const user = (req as any).user;
+    const isSuperAdmin = user?.role === 'superadmin';
+    const userCompanyId = user?.company_id || user?.companyId;
+
+    if (!isSuperAdmin) {
+      if (!userCompanyId) {
+        res.status(403).json({ error: 'Access denied: User has no authorized company scope' });
+        return;
+      }
+      const staffOwnership = await pool.query(
+        `SELECT s.id, s.is_locked, st.company_id
+         FROM public.staff s
+         LEFT JOIN public.sites st ON st.id = s.site_id
+         WHERE s.id = $1 LIMIT 1;`,
+        [staffId]
+      );
+      if (!staffOwnership.rows?.[0] || staffOwnership.rows[0].company_id !== userCompanyId) {
+        res.status(403).json({ error: 'Access denied: Unauthorized staff document upload' });
+        return;
+      }
+      if (staffOwnership.rows[0].is_locked) {
+        res.status(423).json({ error: 'Cannot upload document to locked staff record' });
+        return;
+      }
     }
 
     const safeOriginalName = sanitizeFileName(file.originalname);
@@ -137,10 +164,24 @@ export const uploadCompanyDocument = async (req: Request, res: Response): Promis
       return;
     }
 
-    const userCompanyId = (req as any).user?.company_id || (req as any).user?.companyId;
-    if ((req as any).user && (req as any).user.role !== 'superadmin' && userCompanyId && userCompanyId !== companyId) {
-      res.status(403).json({ error: 'Access denied: Unauthorized company access' });
-      return;
+    const user = (req as any).user;
+    const isSuperAdmin = user?.role === 'superadmin';
+    const userCompanyId = user?.company_id || user?.companyId;
+
+    if (!isSuperAdmin) {
+      if (!userCompanyId) {
+        res.status(403).json({ error: 'Access denied: User has no authorized company scope' });
+        return;
+      }
+      if (userCompanyId !== companyId) {
+        res.status(403).json({ error: 'Access denied: Unauthorized company access' });
+        return;
+      }
+      const compCheck = await pool.query('SELECT is_locked FROM public.companies WHERE id = $1 LIMIT 1;', [companyId]);
+      if (compCheck.rows?.[0]?.is_locked) {
+        res.status(423).json({ error: 'Cannot upload document to locked company record' });
+        return;
+      }
     }
 
     const safeOriginalName = sanitizeFileName(file.originalname);
@@ -214,6 +255,26 @@ export const uploadInvoiceAttachment = async (req: Request, res: Response): Prom
       req.body.doc_type === 'generated' ||
       req.body.docType === 'generated';
 
+    const user = (req as any).user;
+    const isSuperAdmin = user?.role === 'superadmin';
+    const userCompanyId = user?.company_id || user?.companyId;
+
+    if (!isSuperAdmin && invoiceId) {
+      if (!userCompanyId) {
+        res.status(403).json({ error: 'Access denied: User has no authorized company scope' });
+        return;
+      }
+      const invCheck = await pool.query('SELECT company_id, is_locked FROM public.invoices WHERE id = $1 LIMIT 1;', [invoiceId]);
+      if (!invCheck.rows?.[0] || invCheck.rows[0].company_id !== userCompanyId) {
+        res.status(403).json({ error: 'Access denied: Unauthorized invoice document upload' });
+        return;
+      }
+      if (invCheck.rows[0].is_locked) {
+        res.status(423).json({ error: 'Cannot upload document to locked invoice' });
+        return;
+      }
+    }
+
     if (!invoiceNo && invoiceId) {
       try {
         const invRes = await pool.query('SELECT invoice_no FROM public.invoices WHERE id = $1', [invoiceId]);
@@ -286,6 +347,10 @@ export const getAllSiteDocuments = async (req: Request, res: Response): Promise<
   try {
     const { site_id, document_type, search } = req.query;
 
+    const user = (req as any).user;
+    const isSuperAdmin = user?.role === 'superadmin';
+    const userCompanyId = user?.company_id || user?.companyId;
+
     let query = `
       SELECT sd.*, json_build_object('id', s.id, 'site_name', s.site_name, 'code_name', s.code_name, 'client_name', s.client_name, 'company_id', s.company_id) AS sites
       FROM public.site_documents sd
@@ -293,6 +358,15 @@ export const getAllSiteDocuments = async (req: Request, res: Response): Promise<
       WHERE 1=1
     `;
     const params: any[] = [];
+
+    if (!isSuperAdmin) {
+      if (!userCompanyId) {
+        res.status(200).json({ success: true, data: [] });
+        return;
+      }
+      params.push(userCompanyId);
+      query += ` AND s.company_id = $${params.length}`;
+    }
 
     if (site_id && typeof site_id === 'string' && site_id.trim()) {
       params.push(site_id.trim());
@@ -340,13 +414,28 @@ export const getAllSiteDocuments = async (req: Request, res: Response): Promise<
 export const getEmployeeDocuments = async (req: Request, res: Response): Promise<void> => {
   try {
     const { staff_id } = req.query;
+
+    const user = (req as any).user;
+    const isSuperAdmin = user?.role === 'superadmin';
+    const userCompanyId = user?.company_id || user?.companyId;
+
     let query = `
       SELECT ed.*, json_build_object('id', s.id, 'employee_name', s.employee_name, 'biometric_code', s.biometric_code, 'designation', s.designation) AS staff
       FROM public.employee_documents ed
       LEFT JOIN public.staff s ON s.id = ed.staff_id
+      LEFT JOIN public.sites st ON st.id = s.site_id
       WHERE 1=1
     `;
     const params: any[] = [];
+
+    if (!isSuperAdmin) {
+      if (!userCompanyId) {
+        res.status(200).json({ success: true, data: [] });
+        return;
+      }
+      params.push(userCompanyId);
+      query += ` AND st.company_id = $${params.length}`;
+    }
 
     if (staff_id && typeof staff_id === 'string' && staff_id.trim()) {
       params.push(staff_id.trim());
@@ -367,6 +456,11 @@ export const getEmployeeDocuments = async (req: Request, res: Response): Promise
 export const getCompanyDocuments = async (req: Request, res: Response): Promise<void> => {
   try {
     const { company_id, document_type } = req.query;
+
+    const user = (req as any).user;
+    const isSuperAdmin = user?.role === 'superadmin';
+    const userCompanyId = user?.company_id || user?.companyId;
+
     let query = `
       SELECT cd.*, json_build_object('id', c.id, 'name', c.name, 'entity_code', c.entity_code) AS company
       FROM public.company_documents cd
@@ -374,10 +468,19 @@ export const getCompanyDocuments = async (req: Request, res: Response): Promise<
       WHERE 1=1
     `;
     const params: any[] = [];
-    if (company_id && typeof company_id === 'string' && company_id.trim()) {
+
+    if (!isSuperAdmin) {
+      if (!userCompanyId) {
+        res.status(200).json({ success: true, data: [] });
+        return;
+      }
+      params.push(userCompanyId);
+      query += ` AND cd.company_id = $${params.length}`;
+    } else if (company_id && typeof company_id === 'string' && company_id.trim()) {
       params.push(company_id.trim());
       query += ` AND cd.company_id = $${params.length}`;
     }
+
     if (document_type && typeof document_type === 'string' && document_type.trim() && document_type !== 'All') {
       params.push(document_type.trim());
       query += ` AND cd.document_type = $${params.length}`;
@@ -495,10 +598,15 @@ export const deleteDocument = async (req: Request, res: Response): Promise<void>
           res.status(423).json({ error: 'Cannot delete document of locked staff record' });
           return;
         }
-        if (!isSuperAdmin && userCompanyId && staff.company_id && userCompanyId !== staff.company_id) {
-          res.status(403).json({ error: 'Access denied: Unauthorized company access' });
-          return;
+        if (!isSuperAdmin) {
+          if (!userCompanyId || !staff.company_id || userCompanyId !== staff.company_id) {
+            res.status(403).json({ error: 'Access denied: Unauthorized company access' });
+            return;
+          }
         }
+      } else if (!isSuperAdmin) {
+        res.status(403).json({ error: 'Access denied: Target staff record not found' });
+        return;
       }
     } else if (foundTable === 'site_documents') {
       const siteRes = await pool.query(
@@ -511,10 +619,15 @@ export const deleteDocument = async (req: Request, res: Response): Promise<void>
           res.status(423).json({ error: 'Cannot delete document of locked site record' });
           return;
         }
-        if (!isSuperAdmin && userCompanyId && site.company_id && userCompanyId !== site.company_id) {
-          res.status(403).json({ error: 'Access denied: Unauthorized company access' });
-          return;
+        if (!isSuperAdmin) {
+          if (!userCompanyId || !site.company_id || userCompanyId !== site.company_id) {
+            res.status(403).json({ error: 'Access denied: Unauthorized company access' });
+            return;
+          }
         }
+      } else if (!isSuperAdmin) {
+        res.status(403).json({ error: 'Access denied: Target site record not found' });
+        return;
       }
     } else if (foundTable === 'company_documents') {
       const compRes = await pool.query(
@@ -527,10 +640,15 @@ export const deleteDocument = async (req: Request, res: Response): Promise<void>
           res.status(423).json({ error: 'Cannot delete document of locked company record' });
           return;
         }
-        if (!isSuperAdmin && userCompanyId && userCompanyId !== comp.id) {
-          res.status(403).json({ error: 'Access denied: Unauthorized company access' });
-          return;
+        if (!isSuperAdmin) {
+          if (!userCompanyId || userCompanyId !== comp.id) {
+            res.status(403).json({ error: 'Access denied: Unauthorized company access' });
+            return;
+          }
         }
+      } else if (!isSuperAdmin) {
+        res.status(403).json({ error: 'Access denied: Target company record not found' });
+        return;
       }
     }
 
@@ -577,9 +695,12 @@ export const viewDocumentProxy = async (req: Request, res: Response): Promise<vo
     let gcpFileUrl: string | null = null;
     let fileName: string = 'document.pdf';
 
+    let foundTable: string | null = null;
+
     // 1. Check employee_documents
     const empRes = await pool.query('SELECT * FROM public.employee_documents WHERE id = $1', [documentId]);
     if (empRes.rows?.[0]) {
+      foundTable = 'employee_documents';
       docRecord = empRes.rows[0];
       storageKey = docRecord.storage_key;
       storageProvider = docRecord.storage_provider || 'minio';
@@ -591,6 +712,7 @@ export const viewDocumentProxy = async (req: Request, res: Response): Promise<vo
     if (!docRecord) {
       const siteRes = await pool.query('SELECT * FROM public.site_documents WHERE id = $1', [documentId]);
       if (siteRes.rows?.[0]) {
+        foundTable = 'site_documents';
         docRecord = siteRes.rows[0];
         storageKey = docRecord.storage_key;
         storageProvider = docRecord.storage_provider || 'minio';
@@ -603,6 +725,7 @@ export const viewDocumentProxy = async (req: Request, res: Response): Promise<vo
     if (!docRecord) {
       const compRes = await pool.query('SELECT * FROM public.company_documents WHERE id = $1', [documentId]);
       if (compRes.rows?.[0]) {
+        foundTable = 'company_documents';
         docRecord = compRes.rows[0];
         storageKey = docRecord.storage_key;
         storageProvider = docRecord.storage_provider || 'minio';
@@ -615,6 +738,7 @@ export const viewDocumentProxy = async (req: Request, res: Response): Promise<vo
     if (!docRecord) {
       const invRes = await pool.query('SELECT * FROM public.invoices WHERE id = $1', [documentId]);
       if (invRes.rows?.[0]) {
+        foundTable = 'invoices';
         docRecord = invRes.rows[0];
         storageProvider = docRecord.invoice_storage_provider || docRecord.storage_provider || 'minio';
 
@@ -639,6 +763,40 @@ export const viewDocumentProxy = async (req: Request, res: Response): Promise<vo
       return;
     }
 
+    const user = (req as any).user;
+    const isSuperAdmin = user?.role === 'superadmin';
+    const userCompanyId = user?.company_id || user?.companyId;
+
+    if (!isSuperAdmin) {
+      if (!userCompanyId) {
+        res.status(403).json({ error: 'Access denied: User has no authorized company scope' });
+        return;
+      }
+      let docCompanyId: string | null = null;
+      if (foundTable === 'employee_documents') {
+        const staffRes = await pool.query(
+          'SELECT st.company_id FROM public.staff s LEFT JOIN public.sites st ON st.id = s.site_id WHERE s.id = $1 LIMIT 1;',
+          [docRecord.staff_id]
+        );
+        docCompanyId = staffRes.rows?.[0]?.company_id || null;
+      } else if (foundTable === 'site_documents') {
+        const siteRes = await pool.query(
+          'SELECT company_id FROM public.sites WHERE id = $1 LIMIT 1;',
+          [docRecord.site_id]
+        );
+        docCompanyId = siteRes.rows?.[0]?.company_id || null;
+      } else if (foundTable === 'company_documents') {
+        docCompanyId = docRecord.company_id;
+      } else if (foundTable === 'invoices') {
+        docCompanyId = docRecord.company_id;
+      }
+
+      if (!docCompanyId || docCompanyId !== userCompanyId) {
+        res.status(403).json({ error: 'Access denied: Unauthorized document access' });
+        return;
+      }
+    }
+
     const download = req.query.download === 'true';
 
     if (storageProvider === 'minio' && storageKey) {
@@ -658,14 +816,21 @@ export const viewDocumentProxy = async (req: Request, res: Response): Promise<vo
           res.setHeader('Content-Length', obj.contentLength);
         }
         res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(fileName)}"`);
-        obj.body.pipe(res);
+        await pipeline(obj.body, res);
         return;
       } catch (storageErr: any) {
-        if (storageErr?.name === 'NoSuchKey' || storageErr?.Code === 'NoSuchKey') {
-          res.status(404).json({ error: 'File not found in object storage', key: storageKey });
+        if (res.headersSent) {
+          if (!res.writableEnded) {
+            res.destroy(storageErr);
+          }
           return;
         }
-        throw storageErr;
+        if (storageErr?.name === 'NoSuchKey' || storageErr?.Code === 'NoSuchKey') {
+          res.status(404).json({ error: 'File not found in object storage' });
+          return;
+        }
+        res.status(502).json({ error: 'Storage streaming error' });
+        return;
       }
     }
 

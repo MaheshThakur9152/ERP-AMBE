@@ -23,6 +23,11 @@ export class NotificationService {
 
     if (webhookUrl) {
       try {
+        const timeoutMs = parseInt(process.env.NOTIFICATION_TIMEOUT_MS || '10000', 10);
+        const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+          ? AbortSignal.timeout(timeoutMs)
+          : undefined;
+
         const response = await fetch(webhookUrl, {
           method: 'POST',
           headers: {
@@ -38,6 +43,7 @@ export class NotificationService {
               expiresAt: expiresAt.toISOString(),
             },
           }),
+          signal,
         });
 
         if (!response.ok) {

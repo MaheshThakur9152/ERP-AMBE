@@ -53,6 +53,11 @@ export class AttendanceService {
    * Validates tenant ownership of a target attendance sheet before mutation
    */
   static async verifySheetOwnership(sheetId: string, user?: AuthUser): Promise<void> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sheetId)) {
+      const err: any = new Error('Attendance sheet not found');
+      err.statusCode = 404;
+      throw err;
+    }
     const res = await pool.query('SELECT id, company_id FROM public.attendance_sheets WHERE id = $1 LIMIT 1', [sheetId]);
     if (!res.rows || res.rows.length === 0) {
       const err: any = new Error('Attendance sheet not found');
@@ -81,20 +86,23 @@ export class AttendanceService {
     const values: any[] = [];
     if (siteId) {
       values.push(siteId);
-      conditions.push(`site_id = ${values.length}`);
+      conditions.push(`site_id = $${values.length}`);
     }
     if (month) {
       values.push(month);
-      conditions.push(`month = ${values.length}`);
+      conditions.push(`month = $${values.length}`);
     }
     if (year) {
       values.push(year);
-      conditions.push(`year = ${values.length}`);
+      conditions.push(`year = $${values.length}`);
     }
     const userCompanyId = user?.company_id || user?.companyId;
-    if (user && user.role !== 'superadmin' && userCompanyId) {
+    if (user && user.role !== 'superadmin') {
+      if (!userCompanyId) {
+        return [];
+      }
       values.push(userCompanyId);
-      conditions.push(`company_id = ${values.length}`);
+      conditions.push(`company_id = $${values.length}`);
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -121,12 +129,31 @@ export class AttendanceService {
    * Save / Create attendance sheet with tenant scoping & month lock check
    */
   static async createSheet(payload: any, user?: AuthUser): Promise<AttendanceSheet> {
+    const userCompanyId = user?.company_id || user?.companyId;
     let companyId = payload.company_id || payload.companyId || '';
-    if (user && user.role !== 'superadmin' && user.company_id) {
-      companyId = user.company_id;
+    if (user && user.role !== 'superadmin') {
+      if (!userCompanyId) {
+        const err: any = new Error('Access denied: User has no authorized company scope');
+        err.statusCode = 403;
+        throw err;
+      }
+      if (companyId && companyId !== userCompanyId) {
+        const err: any = new Error('Unauthorized company reassignment');
+        err.statusCode = 403;
+        throw err;
+      }
+      companyId = userCompanyId;
     }
 
     const siteId = payload.site_id || payload.siteId || '';
+    if (siteId && user && user.role !== 'superadmin') {
+      const siteCheck = await pool.query('SELECT company_id FROM public.sites WHERE id = $1 LIMIT 1;', [siteId]);
+      if (!siteCheck.rows?.[0] || siteCheck.rows[0].company_id !== userCompanyId) {
+        const err: any = new Error('Unauthorized site reference: site does not belong to authorized company');
+        err.statusCode = 403;
+        throw err;
+      }
+    }
     const month = payload.month || '';
     const year = payload.year || '';
 
@@ -172,6 +199,22 @@ export class AttendanceService {
    * Update attendance sheet with tenant verification & month lock check
    */
   static async updateSheet(id: string, payload: any, user?: AuthUser): Promise<AttendanceSheet> {
+    const userCompanyId = user?.company_id || user?.companyId;
+    const targetCompanyId = payload.company_id !== undefined ? payload.company_id : payload.companyId;
+
+    if (user && user.role !== 'superadmin') {
+      if (!userCompanyId) {
+        const err: any = new Error('Access denied: User has no authorized company scope');
+        err.statusCode = 403;
+        throw err;
+      }
+      if (targetCompanyId !== undefined && targetCompanyId !== userCompanyId) {
+        const err: any = new Error('Unauthorized company reassignment');
+        err.statusCode = 403;
+        throw err;
+      }
+    }
+
     await this.verifySheetOwnership(id, user);
 
     return await withTransaction(async (client) => {
@@ -189,6 +232,16 @@ export class AttendanceService {
         throw lockErr;
       }
 
+      const newSiteId = payload.site_id !== undefined ? payload.site_id : payload.siteId;
+      if (newSiteId !== undefined && newSiteId !== null && user && user.role !== 'superadmin') {
+        const siteCheck = await client.query('SELECT company_id FROM public.sites WHERE id = $1 LIMIT 1;', [newSiteId]);
+        if (!siteCheck.rows?.[0] || siteCheck.rows[0].company_id !== userCompanyId) {
+          const err: any = new Error('Unauthorized site reference: site does not belong to authorized company');
+          err.statusCode = 403;
+          throw err;
+        }
+      }
+
       const updates: string[] = ['updated_at = NOW()'];
       const values: any[] = [id];
 
@@ -196,8 +249,8 @@ export class AttendanceService {
         values.push(payload.site_id || payload.siteId);
         updates.push(`site_id = $${values.length}`);
       }
-      if (payload.company_id !== undefined || payload.companyId !== undefined) {
-        values.push(payload.company_id || payload.companyId);
+      if (targetCompanyId !== undefined && (!user || user.role === 'superadmin')) {
+        values.push(targetCompanyId);
         updates.push(`company_id = $${values.length}`);
       }
       if (payload.site_name !== undefined || payload.siteName !== undefined) {

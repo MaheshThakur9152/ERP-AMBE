@@ -29,16 +29,33 @@ if [[ -r "${CRED_FILE}" ]]; then
   export AWS_SHARED_CREDENTIALS_FILE="${CRED_FILE}"
 fi
 
+TEMP_PASSPHRASE=""
+TEMP_ENCRYPTED=""
+TEMP_DEST=""
+
+cleanup() {
+  if [[ -n "${TEMP_PASSPHRASE}" && -f "${TEMP_PASSPHRASE}" ]]; then
+    rm -f "${TEMP_PASSPHRASE}"
+  fi
+  if [[ -n "${TEMP_ENCRYPTED}" && -f "${TEMP_ENCRYPTED}" ]]; then
+    rm -f "${TEMP_ENCRYPTED}"
+  fi
+  if [[ -n "${TEMP_DEST}" && -f "${TEMP_DEST}" ]]; then
+    rm -f "${TEMP_DEST}"
+  fi
+}
+trap cleanup EXIT HUP INT QUIT TERM
+
 # GPG AES256 symmetric decryption setup
 GPG_PASSPHRASE_FILE="${GPG_PASSPHRASE_FILE:-/run/secrets/backup_gpg_passphrase}"
 if [[ ! -f "${GPG_PASSPHRASE_FILE}" ]]; then
   if [[ -f "/var/lib/postgresql/.gpg_passphrase" ]]; then
     GPG_PASSPHRASE_FILE="/var/lib/postgresql/.gpg_passphrase"
   elif [[ -n "${GPG_PASSPHRASE:-}" ]]; then
-    GPG_PASSPHRASE_FILE="/tmp/.gpg_passphrase.$$"
-    echo -n "${GPG_PASSPHRASE}" > "${GPG_PASSPHRASE_FILE}"
-    chmod 0400 "${GPG_PASSPHRASE_FILE}"
-    trap 'rm -f "${GPG_PASSPHRASE_FILE}"' EXIT
+    TEMP_PASSPHRASE="/tmp/.gpg_passphrase.$$"
+    echo -n "${GPG_PASSPHRASE}" > "${TEMP_PASSPHRASE}"
+    chmod 0400 "${TEMP_PASSPHRASE}"
+    GPG_PASSPHRASE_FILE="${TEMP_PASSPHRASE}"
   fi
 fi
 
@@ -51,16 +68,15 @@ TEMP_ENCRYPTED="/tmp/${WAL_FILE}.gpg.$$"
 if aws --endpoint-url="${S3_ENDPOINT_URL}" s3 cp "${SOURCE_URI_GPG}" "${TEMP_ENCRYPTED}" --only-show-errors 2>/dev/null; then
   if [[ ! -r "${GPG_PASSPHRASE_FILE}" ]]; then
     echo "ERROR: [pg-restore-wal] Encrypted WAL found at ${SOURCE_URI_GPG} but passphrase is not available" >&2
-    rm -f "${TEMP_ENCRYPTED}"
     exit 1
   fi
-  gpg --batch --yes --decrypt --passphrase-file "${GPG_PASSPHRASE_FILE}" -o "${DEST_PATH}" "${TEMP_ENCRYPTED}"
-  DECRYPT_CODE=$?
-  rm -f "${TEMP_ENCRYPTED}"
-  if [[ ${DECRYPT_CODE} -ne 0 ]]; then
-    echo "ERROR: [pg-restore-wal] Failed to decrypt ${WAL_FILE}.gpg (exit code: ${DECRYPT_CODE})" >&2
+  TEMP_DEST="${DEST_PATH}.tmp.$$"
+  if ! gpg --batch --yes --decrypt --passphrase-file "${GPG_PASSPHRASE_FILE}" -o "${TEMP_DEST}" "${TEMP_ENCRYPTED}"; then
+    echo "ERROR: [pg-restore-wal] Failed to decrypt ${WAL_FILE}.gpg" >&2
     exit 1
   fi
+  mv -f "${TEMP_DEST}" "${DEST_PATH}"
+  TEMP_DEST=""
   exit 0
 elif aws --endpoint-url="${S3_ENDPOINT_URL}" s3 cp "${SOURCE_URI_PLAIN}" "${DEST_PATH}" --only-show-errors 2>/dev/null; then
   # Download plain WAL segment
