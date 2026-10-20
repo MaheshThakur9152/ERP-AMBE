@@ -34,6 +34,3 @@ backups/
 
 # Ignored folders
 old frontend/
-
-# Documentation & notes (stored in separate docs branch)
-*.md
