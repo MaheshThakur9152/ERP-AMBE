@@ -568,11 +568,31 @@ export const viewDocumentProxy = async (req: Request, res: Response): Promise<vo
     const download = req.query.download === 'true';
 
     if (storageProvider === 'minio' && storageKey) {
-      const stream = await OracleStorageService.getFileStream(storageKey);
-      const disposition = download ? 'attachment' : 'inline';
-      res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(fileName)}"`);
-      stream.pipe(res);
-      return;
+      try {
+        const obj = await OracleStorageService.getObject(storageKey);
+        const disposition = download ? 'attachment' : 'inline';
+        if (obj.contentType) {
+          res.setHeader('Content-Type', obj.contentType);
+        } else if (fileName.endsWith('.pdf')) {
+          res.setHeader('Content-Type', 'application/pdf');
+        } else if (fileName.endsWith('.jpg') || fileName.endsWith('.jpeg')) {
+          res.setHeader('Content-Type', 'image/jpeg');
+        } else if (fileName.endsWith('.png')) {
+          res.setHeader('Content-Type', 'image/png');
+        }
+        if (obj.contentLength) {
+          res.setHeader('Content-Length', obj.contentLength);
+        }
+        res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(fileName)}"`);
+        obj.body.pipe(res);
+        return;
+      } catch (storageErr: any) {
+        if (storageErr?.name === 'NoSuchKey' || storageErr?.Code === 'NoSuchKey') {
+          res.status(404).json({ error: 'File not found in object storage', key: storageKey });
+          return;
+        }
+        throw storageErr;
+      }
     }
 
     if (gcpFileUrl) {
