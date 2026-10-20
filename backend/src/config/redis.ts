@@ -3,6 +3,7 @@ import { env } from './env';
 
 const REDIS_HOST = process.env.REDIS_HOST || '127.0.0.1';
 const REDIS_PORT = Number(process.env.REDIS_PORT || 6379);
+const REDIS_PASSWORD = process.env.REDIS_PASSWORD || undefined;
 const REDIS_TIMEOUT_MS = 250; // Strict fail-open timeout (GATE-12)
 
 let redisClient: Redis | null = null;
@@ -12,14 +13,13 @@ try {
   const options: RedisOptions = {
     host: REDIS_HOST,
     port: REDIS_PORT,
+    ...(REDIS_PASSWORD ? { password: REDIS_PASSWORD } : {}),
     connectTimeout: REDIS_TIMEOUT_MS,
     commandTimeout: REDIS_TIMEOUT_MS,
     maxRetriesPerRequest: 1,
     retryStrategy: (times) => {
-      if (times > 3) {
-        return null; // Stop retrying and fail open
-      }
-      return Math.min(times * 100, 1000);
+      // Reconnect with bounded backoff up to 5000ms
+      return Math.min(times * 200, 5000);
     },
     lazyConnect: true,
     enableOfflineQueue: false, // Fail open immediately if offline
@@ -98,21 +98,35 @@ export const RedisCache = {
 
   async invalidatePrefix(prefix: string): Promise<void> {
     if (!this.isAvailable() || !redisClient) return;
-    try {
-      const stream = redisClient.scanStream({
-        match: `${prefix}*`,
-        count: 50,
-      });
-      stream.on('data', async (keys: string[]) => {
-        if (keys.length > 0) {
-          const pipeline = redisClient!.pipeline();
-          keys.forEach((k) => pipeline.del(k));
-          await pipeline.exec().catch(() => {});
-        }
-      });
-    } catch {
-      // Fail-open
-    }
+    return new Promise<void>((resolve) => {
+      try {
+        const stream = redisClient!.scanStream({
+          match: `${prefix}*`,
+          count: 50,
+        });
+        const deletionPromises: Promise<any>[] = [];
+
+        stream.on('data', (keys: string[]) => {
+          if (keys.length > 0) {
+            const pipeline = redisClient!.pipeline();
+            keys.forEach((k) => pipeline.del(k));
+            deletionPromises.push(pipeline.exec().catch(() => null));
+          }
+        });
+
+        stream.on('end', async () => {
+          await Promise.all(deletionPromises).catch(() => {});
+          resolve();
+        });
+
+        stream.on('error', (err) => {
+          console.warn(`[Redis:invalidatePrefix] Scan stream error: ${err.message}`);
+          resolve();
+        });
+      } catch {
+        resolve(); // Fail-open
+      }
+    });
   },
 
   getClient(): Redis | null {

@@ -168,7 +168,10 @@ export class InvoiceController {
         }
 
         res.setHeader('Content-Type', contentType);
-        res.setHeader('Content-Disposition', `inline; filename="${path.basename(fileName)}"`);
+        const baseName = path.basename(fileName);
+        const asciiFallback = baseName.replace(/[\x00-\x1f\x7f"\\;]/g, '_').replace(/[^\x20-\x7e]/g, '_');
+        const utf8Encoded = encodeURIComponent(baseName).replace(/['()]/g, escape).replace(/\*/g, '%2A');
+        res.setHeader('Content-Disposition', `inline; filename="${asciiFallback}"; filename*=UTF-8''${utf8Encoded}`);
         res.setHeader('Content-Length', buffer.length);
         res.setHeader('Accept-Ranges', 'bytes');
         res.end(buffer);

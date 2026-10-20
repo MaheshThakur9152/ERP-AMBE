@@ -24,7 +24,10 @@ $IsTemp = $false
 if ($BackupFile.EndsWith(".gz")) {
   if (Get-Command "gzip" -ErrorAction SilentlyContinue) {
     $TargetSql = [System.IO.Path]::ChangeExtension($BackupFile, $null)
-    & gzip -dc $BackupFile | Out-File -FilePath $TargetSql -Encoding utf8
+    $proc = Start-Process -FilePath "gzip" -ArgumentList "-dc", "`"$BackupFile`"" -NoNewWindow -Wait -PassThru -RedirectStandardOutput $TargetSql
+    if ($proc.ExitCode -ne 0) {
+      throw "gzip decompression failed with exit code $($proc.ExitCode)"
+    }
     $IsTemp = $true
   } else {
     Write-Error "gzip utility not found. Please decompress $BackupFile first."
@@ -34,7 +37,7 @@ if ($BackupFile.EndsWith(".gz")) {
 
 try {
   if ($DbUrl) {
-    & psql $DbUrl -f $TargetSql
+    & psql --set ON_ERROR_STOP=1 $DbUrl -f $TargetSql
   } else {
     $env:PGHOST = if ($env:POSTGRES_HOST) { $env:POSTGRES_HOST } else { "localhost" }
     $env:PGPORT = if ($env:POSTGRES_PORT) { $env:POSTGRES_PORT } else { "5432" }
@@ -42,7 +45,10 @@ try {
     $env:PGUSER = if ($env:POSTGRES_USER) { $env:POSTGRES_USER } else { "erp_admin" }
     if ($env:POSTGRES_PASSWORD) { $env:PGPASSWORD = $env:POSTGRES_PASSWORD } else { $env:PGPASSWORD = "postgres" }
 
-    & psql -f $TargetSql
+    & psql --set ON_ERROR_STOP=1 -f $TargetSql
+  }
+  if ($LASTEXITCODE -ne 0) {
+    throw "psql restore failed with exit code $LASTEXITCODE"
   }
   Write-Host "✅ Database restore completed successfully." -ForegroundColor Green
 } finally {

@@ -129,6 +129,13 @@ export class AuthController {
       }
 
       const row = appUserRes.rows[0];
+      if (row.is_active === false) {
+        res.clearCookie('refresh_token', getCookieOptions(req));
+        res.clearCookie('access_token', getCookieOptions(req));
+        res.status(401).json({ error: 'User account deactivated' });
+        return;
+      }
+
       const user: AuthUser = {
         id: row.id,
         email: row.email,
@@ -150,7 +157,6 @@ export class AuthController {
         success: true,
         token: newAccessToken,
         access_token: newAccessToken,
-        ...(newRawRefreshToken && { refresh_token: newRawRefreshToken }),
         user: {
           id: user.id,
           email: user.email,

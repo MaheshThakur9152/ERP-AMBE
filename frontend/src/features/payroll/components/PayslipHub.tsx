@@ -337,7 +337,29 @@ export const PayslipHub: React.FC = () => {
       ],
     };
 
+    const originalValues = activeEditPayslipRecord.manual_override_data?.original_values || {
+      pd: activeEditPayslipRecord.pd,
+      wo: activeEditPayslipRecord.wo,
+      payable_days: activeEditPayslipRecord.payable_days,
+      earned_basic: activeEditPayslipRecord.earned_basic,
+      earned_hra: activeEditPayslipRecord.earned_hra,
+      earned_other: activeEditPayslipRecord.earned_other,
+      earned_conveyance: activeEditPayslipRecord.earned_conveyance,
+      earned_incentive: activeEditPayslipRecord.earned_incentive,
+      earned_gross: activeEditPayslipRecord.earned_gross,
+      epf_deduction: activeEditPayslipRecord.epf_deduction,
+      esic_deduction: activeEditPayslipRecord.esic_deduction,
+      pt_deduction: activeEditPayslipRecord.pt_deduction,
+      epf: activeEditPayslipRecord.epf,
+      esic: activeEditPayslipRecord.esic,
+      pt: activeEditPayslipRecord.pt,
+      advances: activeEditPayslipRecord.advances,
+      net_salary: activeEditPayslipRecord.net_salary,
+      total_net_salary: activeEditPayslipRecord.total_net_salary,
+    };
+
     const manualOverrideData = {
+      original_values: originalValues,
       employee_name: editEmpName,
       emp_id: editEmpId,
       designation: editDesignation,
@@ -513,8 +535,9 @@ export const PayslipHub: React.FC = () => {
     if (!activeEditPayslipRecord) return;
     const staff = activeEditPayslipRecord.staff || {};
 
-    const defaultPd = Number(activeEditPayslipRecord.original_pd ?? activeEditPayslipRecord.pd ?? 0);
-    const defaultWo = Number(activeEditPayslipRecord.original_wo ?? activeEditPayslipRecord.wo ?? 4);
+    const orig = activeEditPayslipRecord.manual_override_data?.original_values || {};
+    const defaultPd = Number(orig.pd ?? activeEditPayslipRecord.original_pd ?? activeEditPayslipRecord.pd ?? 0);
+    const defaultWo = Number(orig.wo ?? activeEditPayslipRecord.original_wo ?? activeEditPayslipRecord.wo ?? 4);
 
     const recordToSave: any = {
       ...activeEditPayslipRecord,
@@ -528,8 +551,26 @@ export const PayslipHub: React.FC = () => {
 
       pd: defaultPd,
       wo: defaultWo,
-      payable_days: defaultPd + defaultWo,
+      payable_days: Number(orig.payable_days ?? (defaultPd + defaultWo)),
       days_in_month: new Date(selectedYear, MONTHS.indexOf(selectedMonth) + 1, 0).getDate(),
+
+      earned_basic: orig.earned_basic ?? activeEditPayslipRecord.earned_basic ?? 0,
+      earned_hra: orig.earned_hra ?? activeEditPayslipRecord.earned_hra ?? 0,
+      earned_other: orig.earned_other ?? activeEditPayslipRecord.earned_other ?? 0,
+      earned_conveyance: orig.earned_conveyance ?? activeEditPayslipRecord.earned_conveyance ?? 0,
+      earned_incentive: orig.earned_incentive ?? activeEditPayslipRecord.earned_incentive ?? 0,
+      earned_gross: orig.earned_gross ?? activeEditPayslipRecord.earned_gross ?? 0,
+
+      epf_deduction: orig.epf_deduction ?? activeEditPayslipRecord.epf_deduction ?? 0,
+      esic_deduction: orig.esic_deduction ?? activeEditPayslipRecord.esic_deduction ?? 0,
+      pt_deduction: orig.pt_deduction ?? activeEditPayslipRecord.pt_deduction ?? 0,
+      epf: orig.epf ?? activeEditPayslipRecord.epf ?? 0,
+      esic: orig.esic ?? activeEditPayslipRecord.esic ?? 0,
+      pt: orig.pt ?? activeEditPayslipRecord.pt ?? 0,
+      advances: orig.advances ?? activeEditPayslipRecord.advances ?? 0,
+
+      net_salary: orig.net_salary ?? activeEditPayslipRecord.net_salary ?? 0,
+      total_net_salary: orig.total_net_salary ?? activeEditPayslipRecord.total_net_salary ?? 0,
 
       custom_earnings: [],
       custom_deductions: [],
@@ -541,16 +582,27 @@ export const PayslipHub: React.FC = () => {
     };
     delete recordToSave.staff;
 
-    await fetchWithRetry('/api/payroll/records', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify([recordToSave]),
-    }).catch((err) => console.warn('Failed to reset manual override:', err));
+    try {
+      const res = await fetchWithRetry('/api/payroll/records', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([recordToSave]),
+      });
+      if (!res.ok) {
+        const errBody = await res.text();
+        throw new Error(`Failed to reset payroll record: ${errBody || res.statusText}`);
+      }
+      const json = await res.json();
+      const savedRecord = json.data?.[0] || recordToSave;
 
-    setRecords((prev) =>
-      prev.map((r) => (r.id === activeEditPayslipRecord.id ? { ...r, ...recordToSave } : r))
-    );
-    setActiveEditPayslipRecord(null);
+      setRecords((prev) =>
+        prev.map((r) => (r.id === activeEditPayslipRecord.id ? { ...r, ...savedRecord } : r))
+      );
+      setActiveEditPayslipRecord(null);
+    } catch (err: any) {
+      console.error('Failed to reset manual override:', err);
+      alert(`Error resetting payslip: ${err?.message || 'Failed to reset record'}`);
+    }
   };
 
   // Sync filter changes to localStorage

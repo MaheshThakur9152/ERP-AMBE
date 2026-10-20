@@ -22,9 +22,9 @@ echo "Source: ${BACKUP_FILE}"
 
 if [ -n "${DATABASE_URL:-}" ]; then
   if [[ "${BACKUP_FILE}" == *.gz ]]; then
-    gzip -dc "${BACKUP_FILE}" | psql "${DATABASE_URL}"
+    gzip -dc "${BACKUP_FILE}" | psql "${DATABASE_URL}" --set ON_ERROR_STOP=1
   else
-    psql "${DATABASE_URL}" -f "${BACKUP_FILE}"
+    psql "${DATABASE_URL}" --set ON_ERROR_STOP=1 -f "${BACKUP_FILE}"
   fi
 else
   export PGHOST="${POSTGRES_HOST:-localhost}"
@@ -34,9 +34,9 @@ else
   export PGPASSWORD="${POSTGRES_PASSWORD:-postgres}"
 
   if [[ "${BACKUP_FILE}" == *.gz ]]; then
-    gzip -dc "${BACKUP_FILE}" | psql
+    gzip -dc "${BACKUP_FILE}" | psql --set ON_ERROR_STOP=1
   else
-    psql -f "${BACKUP_FILE}"
+    psql --set ON_ERROR_STOP=1 -f "${BACKUP_FILE}"
   fi
 fi
 

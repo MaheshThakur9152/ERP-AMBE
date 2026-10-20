@@ -58,9 +58,9 @@ export class NotificationService {
       }
     }
 
-    // Fail closed: Do NOT log the token or reset URL
+    // Fail closed: Do NOT log the token, reset URL, or recipient email (PII)
     console.warn(
-      `[NotificationService] No delivery provider configured (NOTIFICATION_WEBHOOK_URL). Password reset token generated for ${recipientEmail} but out-of-band delivery not available.`
+      '[NotificationService] No delivery provider configured (NOTIFICATION_WEBHOOK_URL). Password reset notification could not be delivered out-of-band.'
     );
     return false;
   }

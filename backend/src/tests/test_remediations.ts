@@ -44,4 +44,15 @@ assert.ok(ALLOWED_LOCK_TABLES.has('companies'), 'companies should be in ALLOWED_
 assert.ok(ALLOWED_LOCK_TABLES.has('invoices'), 'invoices should be in ALLOWED_LOCK_TABLES');
 console.log('✓ MAJ-06: ALLOWED_LOCK_TABLES membership passed.');
 
+// 4. RFC 6266 Content-Disposition header formatting
+console.log('Testing RFC 6266 filename encoding...');
+const testFilename = 'invoice"test;2026/10/file åäö [draft].pdf';
+const asciiFallback = testFilename.replace(/[\x00-\x1f\x7f"\\;]/g, '_').replace(/[^\x20-\x7e]/g, '_');
+const utf8Encoded = encodeURIComponent(testFilename).replace(/['()]/g, escape).replace(/\*/g, '%2A');
+const dispositionHeader = `attachment; filename="${asciiFallback}"; filename*=UTF-8''${utf8Encoded}`;
+assert.ok(!asciiFallback.includes('"'), 'ASCII fallback must not contain unescaped quotes');
+assert.ok(!asciiFallback.includes(';'), 'ASCII fallback must not contain unescaped semicolons');
+assert.ok(dispositionHeader.includes("filename*=UTF-8''"), 'Must include RFC 6266 UTF-8 parameter');
+console.log('✓ RFC 6266 Content-Disposition encoding passed.');
+
 console.log('All remediation unit tests passed successfully.');

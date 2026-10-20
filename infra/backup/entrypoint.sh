@@ -64,7 +64,9 @@ fi
 PGPASS_ROOT="/root/.pgpass"
 PGPASS_PG="/var/lib/postgresql/.pgpass"
 
-touch "${PGPASS_ROOT}" "${PGPASS_PG}"
+# Truncate on initialization to prevent duplicate or stale credentials
+: > "${PGPASS_ROOT}"
+: > "${PGPASS_PG}"
 chmod 0600 "${PGPASS_ROOT}" "${PGPASS_PG}"
 
 # Add entries if credentials are provided

@@ -71,12 +71,26 @@ fi
 
 # 3. Restore database dump
 echo "INFO: [provision] Restoring ${BACKUP_FILE} into target database..."
-gunzip -c "${BACKUP_FILE}" | psql "${TARGET_URL}" --set ON_ERROR_STOP=1 -q
+if [[ "${BACKUP_FILE}" == *.gpg ]]; then
+  if [[ -n "${GPG_PASSPHRASE:-}" ]]; then
+    gpg --batch --yes --passphrase "${GPG_PASSPHRASE}" --decrypt "${BACKUP_FILE}" \
+      | gunzip -c \
+      | psql "${TARGET_URL}" --set ON_ERROR_STOP=1 -q
+  else
+    gpg --batch --yes --decrypt "${BACKUP_FILE}" \
+      | gunzip -c \
+      | psql "${TARGET_URL}" --set ON_ERROR_STOP=1 -q
+  fi
+elif [[ "${BACKUP_FILE}" == *.gz ]]; then
+  gunzip -c "${BACKUP_FILE}" | psql "${TARGET_URL}" --set ON_ERROR_STOP=1 -q
+else
+  psql "${TARGET_URL}" --set ON_ERROR_STOP=1 -q -f "${BACKUP_FILE}"
+fi
 
 # 4. Catalog Re-indexing & Analysis
 echo "INFO: [provision] Re-indexing and analyzing database catalog..."
-psql "${TARGET_URL}" -c "REINDEX DATABASE erp_facility;" 2>/dev/null || true
-psql "${TARGET_URL}" -c "ANALYZE VERBOSE;" 2>/dev/null || true
+psql "${TARGET_URL}" --set ON_ERROR_STOP=1 -c "REINDEX SCHEMA public;" 2>/dev/null || true
+psql "${TARGET_URL}" --set ON_ERROR_STOP=1 -c "ANALYZE VERBOSE;" 2>/dev/null || true
 
 # 5. Post-restore verification & provision.log audit
 OPERATOR="$(whoami 2>/dev/null || echo 'operator')"

@@ -815,7 +815,12 @@ export const viewDocumentProxy = async (req: Request, res: Response): Promise<vo
         if (obj.contentLength) {
           res.setHeader('Content-Length', obj.contentLength);
         }
-        res.setHeader('Content-Disposition', `${disposition}; filename="${encodeURIComponent(fileName)}"`);
+        const asciiFallback = fileName.replace(/[\x00-\x1f\x7f"\\;]/g, '_').replace(/[^\x20-\x7e]/g, '_');
+        const utf8Encoded = encodeURIComponent(fileName).replace(/['()]/g, escape).replace(/\*/g, '%2A');
+        res.setHeader(
+          'Content-Disposition',
+          `${disposition}; filename="${asciiFallback}"; filename*=UTF-8''${utf8Encoded}`
+        );
         await pipeline(obj.body, res);
         return;
       } catch (storageErr: any) {

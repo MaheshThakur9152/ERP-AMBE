@@ -22,6 +22,7 @@ export interface AppUserRow {
   password_hash: string;
   role: 'admin' | 'superadmin';
   company_id: string | null;
+  is_active?: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -46,6 +47,10 @@ export class NativeAuthService {
       }
 
       const row: AppUserRow = res.rows[0];
+      if (row.is_active === false) {
+        return null;
+      }
+
       const isMatch = await bcrypt.compare(password, row.password_hash);
       if (!isMatch) {
         return null;

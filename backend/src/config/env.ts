@@ -23,6 +23,9 @@ export const env = {
   MINIO_ACCESS_KEY: process.env.MINIO_ACCESS_KEY || '',
   MINIO_SECRET_KEY: process.env.MINIO_SECRET_KEY || '',
   MINIO_BUCKET: process.env.MINIO_BUCKET || 'ambeuploads',
+  REDIS_HOST: process.env.REDIS_HOST || '127.0.0.1',
+  REDIS_PORT: process.env.REDIS_PORT || '6379',
+  REDIS_PASSWORD: process.env.REDIS_PASSWORD || '',
 };
 
 export function validateMinioEnv(): void {

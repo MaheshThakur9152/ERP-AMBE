@@ -89,7 +89,7 @@ for tbl in "${REQUIRED_TABLES[@]}"; do
 done
 
 # Invariant: Invoice subtotal variance = 0 (accounting for optional management fee)
-VARIANCE_COUNT=$(su-exec postgres psql -h "${SOCKET_DIR}" -p "${TEST_PORT}" -U "${PGUSER}" -d "${PGDATABASE}" -t -A -c \
+VARIANCE_COUNT=$(su-exec postgres psql -h "${SOCKET_DIR}" -p "${TEST_PORT}" -U "${PGUSER}" -d "${PGDATABASE}" --set ON_ERROR_STOP=1 -t -A -c \
   "SELECT count(*) FROM (
      SELECT i.id, i.sub_total
      FROM public.invoices i
@@ -97,7 +97,7 @@ VARIANCE_COUNT=$(su-exec postgres psql -h "${SOCKET_DIR}" -p "${TEST_PORT}" -U "
      GROUP BY i.id, i.sub_total, i.management_fee_percent, i.mgmt_percent
      HAVING ROUND(ABS(i.sub_total - COALESCE(SUM(ii.amount), 0)), 2) > 1.00
         AND ROUND(ABS(i.sub_total - (COALESCE(SUM(ii.amount), 0) * (1 + COALESCE(i.management_fee_percent, i.mgmt_percent, 0) / 100.0))), 2) > 1.00
-   ) v;" 2>/dev/null || echo "0")
+   ) v;")
 
 if [[ "${VARIANCE_COUNT}" -gt 0 ]]; then
   echo "FATAL: [weekly-logical-drill] Subtotal variance violation detected in restored invoices: ${VARIANCE_COUNT} rows!" >&2
