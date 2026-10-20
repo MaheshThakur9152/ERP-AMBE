@@ -171,10 +171,10 @@ export const BonusHub: React.FC = () => {
   const totals = useMemo(() => {
     return filteredRecords.reduce(
       (acc, r) => {
-        acc.accrued += r.accrued_this_fy;
-        acc.disbursed += r.disbursed_this_fy;
-        acc.balance += r.balance_outstanding;
-        if (r.accrued_this_fy > 0) acc.staffWithAccrual += 1;
+        acc.accrued += Number(r.accrued_this_fy) || 0;
+        acc.disbursed += Number(r.disbursed_this_fy) || 0;
+        acc.balance += Number(r.balance_outstanding) || 0;
+        if ((Number(r.accrued_this_fy) || 0) > 0) acc.staffWithAccrual += 1;
         return acc;
       },
       { accrued: 0, disbursed: 0, balance: 0, staffWithAccrual: 0 }
@@ -388,7 +388,7 @@ export const BonusHub: React.FC = () => {
       totalsRowData.push(totals.balance === 0 ? 'All Settled' : 'Pending');
 
       fyMonths.forEach((m) => {
-        const mTotal = filteredRecords.reduce((sum, r) => sum + (r.monthly_breakdown[m] || 0), 0);
+        const mTotal = filteredRecords.reduce((sum, r) => sum + (Number(r.monthly_breakdown?.[m]) || 0), 0);
         totalsRowData.push(mTotal);
       });
 

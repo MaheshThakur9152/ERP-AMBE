@@ -240,10 +240,16 @@ export const AdvancesHub: React.FC = () => {
   const totals = useMemo(() => {
     return filteredRecords.reduce(
       (acc, r) => {
-        const itemSum = (r.adv_amt || 0) + (r.shirt || 0) + (r.pant || 0) + (r.shoes || 0) + (r.id_card || 0) + (r.other_amt || 0);
-        const tot = r.adv_total || (itemSum > 0 ? itemSum : (r.advances || 0));
-        const inThis = r.in_this_mth ?? r.advances ?? 0;
-        const inNext = r.in_next_mth ?? Math.max(0, tot - inThis);
+        const itemSum =
+          (Number(r.adv_amt) || 0) +
+          (Number(r.shirt) || 0) +
+          (Number(r.pant) || 0) +
+          (Number(r.shoes) || 0) +
+          (Number(r.id_card) || 0) +
+          (Number(r.other_amt) || 0);
+        const tot = Number(r.adv_total) || (itemSum > 0 ? itemSum : (Number(r.advances) || 0));
+        const inThis = Number(r.in_this_mth ?? r.advances ?? 0);
+        const inNext = Number(r.in_next_mth ?? Math.max(0, tot - inThis));
 
         acc.totalAdv += tot;
         acc.deductedThis += inThis;
@@ -410,10 +416,16 @@ export const AdvancesHub: React.FC = () => {
               <tbody className="divide-y divide-gray-100 font-mono text-[11px]">
                 {filteredRecords.map((r) => {
                   const staff = r.staff || {};
-                  const itemSum = (r.adv_amt || 0) + (r.shirt || 0) + (r.pant || 0) + (r.shoes || 0) + (r.id_card || 0) + (r.other_amt || 0);
-                  const advTotal = r.adv_total || (itemSum > 0 ? itemSum : (r.advances || 0));
-                  const inThis = r.in_this_mth ?? r.advances ?? 0;
-                  const inNext = r.in_next_mth ?? Math.max(0, advTotal - inThis);
+                  const itemSum =
+                    (Number(r.adv_amt) || 0) +
+                    (Number(r.shirt) || 0) +
+                    (Number(r.pant) || 0) +
+                    (Number(r.shoes) || 0) +
+                    (Number(r.id_card) || 0) +
+                    (Number(r.other_amt) || 0);
+                  const advTotal = Number(r.adv_total) || (itemSum > 0 ? itemSum : (Number(r.advances) || 0));
+                  const inThis = Number(r.in_this_mth ?? r.advances ?? 0);
+                  const inNext = Number(r.in_next_mth ?? Math.max(0, advTotal - inThis));
 
                   return (
                     <tr key={r.id} className="hover:bg-slate-50/80 transition-colors">
@@ -441,32 +453,32 @@ export const AdvancesHub: React.FC = () => {
 
                       <td className="p-3 font-sans">
                         <div className="flex flex-wrap gap-1">
-                          {(r.adv_amt || 0) > 0 && (
+                          {(Number(r.adv_amt) || 0) > 0 && (
                             <span className="px-1.5 py-0.5 rounded text-[9.5px] font-bold bg-amber-100 text-amber-900 border border-amber-200">
                               Cash: ₹{r.adv_amt}
                             </span>
                           )}
-                          {(r.shirt || 0) > 0 && (
+                          {(Number(r.shirt) || 0) > 0 && (
                             <span className="px-1.5 py-0.5 rounded text-[9.5px] font-bold bg-blue-100 text-blue-900 border border-blue-200">
                               Shirt: ₹{r.shirt}
                             </span>
                           )}
-                          {(r.pant || 0) > 0 && (
+                          {(Number(r.pant) || 0) > 0 && (
                             <span className="px-1.5 py-0.5 rounded text-[9.5px] font-bold bg-blue-100 text-blue-900 border border-blue-200">
                               Pant: ₹{r.pant}
                             </span>
                           )}
-                          {(r.shoes || 0) > 0 && (
+                          {(Number(r.shoes) || 0) > 0 && (
                             <span className="px-1.5 py-0.5 rounded text-[9.5px] font-bold bg-indigo-100 text-indigo-900 border border-indigo-200">
                               Shoes: ₹{r.shoes}
                             </span>
                           )}
-                          {(r.id_card || 0) > 0 && (
+                          {(Number(r.id_card) || 0) > 0 && (
                             <span className="px-1.5 py-0.5 rounded text-[9.5px] font-bold bg-purple-100 text-purple-900 border border-purple-200">
                               ID: ₹{r.id_card}
                             </span>
                           )}
-                          {(r.other_amt || 0) > 0 && (
+                          {(Number(r.other_amt) || 0) > 0 && (
                             <span className="px-1.5 py-0.5 rounded text-[9.5px] font-bold bg-slate-100 text-slate-800 border border-slate-200">
                               Other: ₹{r.other_amt}
                             </span>
