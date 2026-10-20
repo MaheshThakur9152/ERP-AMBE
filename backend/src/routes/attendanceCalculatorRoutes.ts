@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { AttendanceCalculatorController } from '../controllers/attendanceCalculatorController';
+import { requireAuth, requireAdmin } from '../middlewares/authMiddleware';
 
 const router = Router();
 
@@ -24,7 +25,7 @@ const upload = multer({
   },
 });
 
-router.post('/preview', upload.single('file'), AttendanceCalculatorController.preview);
-router.post('/save', AttendanceCalculatorController.save);
+router.post('/preview', requireAuth, requireAdmin, upload.single('file'), AttendanceCalculatorController.preview);
+router.post('/save', requireAuth, requireAdmin, AttendanceCalculatorController.save);
 
 export default router;

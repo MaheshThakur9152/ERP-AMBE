@@ -1,4 +1,3 @@
-import { supabase } from './supabase';
 import { toast } from '@/components/ui/toast';
 
 export interface FetchRetryOptions extends RequestInit {
@@ -194,17 +193,8 @@ export async function fetchWithRetry(
   // Attach Authorization header from in-memory token ONLY for internal API requests
   const headers = new Headers(fetchOptions.headers || {});
   if (!isPresignedOrExternalStorage && !headers.has('Authorization')) {
-    let token = inMemoryAccessToken;
-    if (!token) {
-      try {
-        const { data } = await supabase.auth.getSession();
-        token = data?.session?.access_token || null;
-      } catch {
-        // Ignore fallback error
-      }
-    }
-    if (token) {
-      headers.set('Authorization', `Bearer ${token}`);
+    if (inMemoryAccessToken) {
+      headers.set('Authorization', `Bearer ${inMemoryAccessToken}`);
     }
   }
   fetchOptions.headers = headers;

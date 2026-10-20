@@ -14,7 +14,7 @@ import {
   RotateCcw,
   AlertCircle,
 } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+import { fetchWithRetry } from '@/lib/apiClient';
 
 export interface SiteOption {
   id: string;
@@ -391,22 +391,24 @@ export const PayslipHub: React.FC = () => {
     if (!staffId || activeEditPayslipRecord.isNew) {
       let existingStaff: any = null;
 
-      if (editEmpId && editEmpId.trim()) {
-        const { data: matchedById } = await supabase
-          .from('staff')
-          .select('id')
-          .eq('biometric_code', editEmpId.trim())
-          .maybeSingle();
-        if (matchedById) existingStaff = matchedById;
-      }
-
-      if (!existingStaff && editEmpName && editEmpName.trim()) {
-        const { data: matchedByName } = await supabase
-          .from('staff')
-          .select('id')
-          .ilike('employee_name', editEmpName.trim())
-          .maybeSingle();
-        if (matchedByName) existingStaff = matchedByName;
+      try {
+        const staffRes = await fetchWithRetry('/api/staff');
+        if (staffRes.ok) {
+          const staffJson = await staffRes.json();
+          const allStaff = staffJson.data || [];
+          if (editEmpId && editEmpId.trim()) {
+            existingStaff = allStaff.find(
+              (s: any) => (s.biometric_code || '').trim() === editEmpId.trim()
+            );
+          }
+          if (!existingStaff && editEmpName && editEmpName.trim()) {
+            existingStaff = allStaff.find(
+              (s: any) => (s.employee_name || '').toLowerCase().trim() === editEmpName.toLowerCase().trim()
+            );
+          }
+        }
+      } catch (e) {
+        console.warn('Error querying staff for payslip edit:', e);
       }
 
       if (existingStaff) {
@@ -426,54 +428,43 @@ export const PayslipHub: React.FC = () => {
           status: 'Active',
         };
 
-        const { data: insertedStaff, error: staffErr } = await supabase
-          .from('staff')
-          .insert([newStaffObj])
-          .select();
-
-        if (staffErr) {
-          console.error('Error inserting ad-hoc staff:', staffErr);
+        try {
+          const createStaffRes = await fetchWithRetry('/api/staff', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newStaffObj),
+          });
+          if (createStaffRes.ok) {
+            const createStaffJson = await createStaffRes.json();
+            staffId = createStaffJson.data?.id || newStaffId;
+          } else {
+            staffId = newStaffId;
+          }
+        } catch {
           staffId = newStaffId;
-        } else {
-          staffId = insertedStaff?.[0]?.id || newStaffId;
         }
       }
     }
 
     recordToSave.staff_id = staffId;
     delete recordToSave.isNew;
+    delete recordToSave.staff;
 
-    const { data: savedData, error: fullError } = await supabase
-      .from('payroll_records')
-      .upsert([recordToSave], { onConflict: 'staff_id,month_year' })
-      .select('*, staff(*)');
+    const saveRes = await fetchWithRetry('/api/payroll/records', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify([recordToSave]),
+    });
 
-    let finalSavedRecord = savedData?.[0] || {
+    let finalSavedRecord = {
       ...recordToSave,
       id: recordToSave.id || `rec-${Date.now()}`,
     };
 
-    if (fullError) {
-      console.warn('Fallback save for payslip record:', fullError.message);
-      const fallbackRecord = { ...recordToSave };
-      delete fallbackRecord.designation;
-      delete fallbackRecord.pf_no;
-      delete fallbackRecord.esic_no;
-      delete fallbackRecord.bank_account_no;
-      delete fallbackRecord.bank_ifsc_code;
-      delete fallbackRecord.days_in_month;
-      delete fallbackRecord.custom_earnings;
-      delete fallbackRecord.custom_deductions;
-      delete fallbackRecord.is_manually_edited;
-      delete fallbackRecord.manual_override_data;
-
-      const { data: fallbackSaved } = await supabase
-        .from('payroll_records')
-        .upsert([fallbackRecord], { onConflict: 'staff_id,month_year' })
-        .select('*, staff(*)');
-
-      if (fallbackSaved?.[0]) {
-        finalSavedRecord = fallbackSaved[0];
+    if (saveRes.ok) {
+      const saveJson = await saveRes.json();
+      if (saveJson.data?.[0]) {
+        finalSavedRecord = saveJson.data[0];
       }
     }
 
@@ -528,9 +519,11 @@ export const PayslipHub: React.FC = () => {
     };
     delete recordToSave.staff;
 
-    await supabase
-      .from('payroll_records')
-      .upsert([recordToSave], { onConflict: 'staff_id,month_year' });
+    await fetchWithRetry('/api/payroll/records', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify([recordToSave]),
+    }).catch((err) => console.warn('Failed to reset manual override:', err));
 
     setRecords((prev) =>
       prev.map((r) => (r.id === activeEditPayslipRecord.id ? { ...r, ...recordToSave } : r))
@@ -549,8 +542,16 @@ export const PayslipHub: React.FC = () => {
   useEffect(() => {
     const fetchSites = async () => {
       try {
-        const { data } = await supabase.from('sites').select('id, site_name, code_name').order('site_name');
-        if (data) setSites(data);
+        const res = await fetchWithRetry('/api/sites');
+        if (res.ok) {
+          const json = await res.json();
+          const data = Array.isArray(json.data) ? json.data : (Array.isArray(json) ? json : []);
+          setSites(data.map((s: any) => ({
+            id: s.id,
+            site_name: s.site_name || s.name || '',
+            code_name: s.code_name || s.codeName || '',
+          })));
+        }
       } catch (err) {
         console.error('Error fetching sites:', err);
       }
@@ -563,19 +564,19 @@ export const PayslipHub: React.FC = () => {
     setIsLoading(true);
     try {
       const monthYearStr = `${selectedMonth} ${selectedYear}`;
-      let query = supabase.from('payroll_records').select('*, staff(*)').eq('month_year', monthYearStr);
-
+      let url = `/api/payroll?month_year=${encodeURIComponent(monthYearStr)}`;
       if (selectedSiteId !== 'all') {
-        query = query.eq('site_id', selectedSiteId);
+        url += `&site_id=${encodeURIComponent(selectedSiteId)}`;
       }
 
-      const { data, error } = await query;
-      if (error) {
-        console.error('Error fetching payslips:', error);
-      } else {
-        const fetchedData = data || [];
+      const res = await fetchWithRetry(url);
+      if (res.ok) {
+        const json = await res.json();
+        const fetchedData = json.data || [];
         setRecords(fetchedData);
         setSelectedRecordIds(new Set(fetchedData.map((r: any) => r.id)));
+      } else {
+        setRecords([]);
       }
     } catch (err) {
       console.error('Failed to load payslips:', err);

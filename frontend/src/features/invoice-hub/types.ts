@@ -1,6 +1,7 @@
 export interface InvoiceRecord {
   id: string;
   invoiceNo: string;
+  invoice_no?: string;
   companyId?: string;
   siteId?: string;
   company_id?: string;

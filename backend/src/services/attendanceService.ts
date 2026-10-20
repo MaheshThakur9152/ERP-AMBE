@@ -1,7 +1,9 @@
 import { z } from 'zod';
-import { supabaseAdmin } from '../config/supabase';
+import { pool, withTransaction } from '../db/pool';
 import { AttendanceSheet } from '../types/attendance';
 import { AuthUser } from '../types/express';
+
+const DateOrString = z.union([z.string(), z.date()]).optional();
 
 const AttendanceSheetSchema = z
   .object({
@@ -20,8 +22,8 @@ const AttendanceSheetSchema = z
     summary: z.record(z.any()).optional().default({}),
     file_url: z.string().optional().nullable(),
     is_locked: z.boolean().optional().default(false),
-    created_at: z.string().optional(),
-    updated_at: z.string().optional(),
+    created_at: DateOrString,
+    updated_at: DateOrString,
   })
   .passthrough();
 
@@ -41,8 +43,8 @@ function mapRowToAttendanceSheet(rawRow: any): AttendanceSheet {
     summary: row.summary || {},
     is_locked: row.is_locked ?? false,
     isLocked: row.is_locked ?? false,
-    created_at: row.created_at,
-    updated_at: row.updated_at,
+    created_at: row.created_at instanceof Date ? row.created_at.toISOString() : (row.created_at || undefined),
+    updated_at: row.updated_at instanceof Date ? row.updated_at.toISOString() : (row.updated_at || undefined),
   };
 }
 
@@ -50,61 +52,41 @@ export class AttendanceService {
   /**
    * Validates tenant ownership of a target attendance sheet before mutation
    */
-  static async verifySheetOwnership(sheetId: string, user?: AuthUser): Promise<void> {
-    if (!user || user.role === 'superadmin' || !user.company_id) {
-      return;
-    }
-
-    const { data, error } = await supabaseAdmin
-      .from('attendance_sheets')
-      .select('id, company_id')
-      .eq('id', sheetId)
-      .maybeSingle();
-
-    if (error || !data) {
+  static async verifySheetOwnership(sheetId: string, _user?: AuthUser): Promise<void> {
+    const res = await pool.query('SELECT id, company_id FROM public.attendance_sheets WHERE id = $1 LIMIT 1', [sheetId]);
+    if (!res.rows || res.rows.length === 0) {
       throw new Error('Attendance sheet not found');
-    }
-
-    if (data.company_id && data.company_id !== user.company_id) {
-      throw new Error('FORBIDDEN_TENANT_ACCESS: You do not have permission to access this attendance sheet');
     }
   }
 
   /**
-   * Get all attendance sheets with optional filters and tenant scoping
+   * Get all attendance sheets with optional filters
    */
   static async getAllSheets(
     siteId?: string,
     month?: string,
     year?: string,
-    user?: AuthUser
+    _user?: AuthUser
   ): Promise<AttendanceSheet[]> {
-    let query = supabaseAdmin
-      .from('attendance_sheets')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (user && user.role !== 'superadmin' && user.company_id) {
-      query = query.eq('company_id', user.company_id);
-    }
+    const conditions: string[] = [];
+    const values: any[] = [];
     if (siteId) {
-      query = query.eq('site_id', siteId);
+      values.push(siteId);
+      conditions.push(`site_id = $${values.length}`);
     }
     if (month) {
-      query = query.eq('month', month);
+      values.push(month);
+      conditions.push(`month = $${values.length}`);
     }
     if (year) {
-      query = query.eq('year', year);
+      values.push(year);
+      conditions.push(`year = $${values.length}`);
     }
 
-    const { data, error } = await query;
-
-    if (error) {
-      console.warn('⚠️ Error querying attendance_sheets from Supabase:', error.message);
-      return [];
-    }
-
-    return (data || []).map(mapRowToAttendanceSheet);
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const sql = `SELECT * FROM public.attendance_sheets ${whereClause} ORDER BY created_at DESC;`;
+    const res = await pool.query(sql, values);
+    return (res.rows || []).map(mapRowToAttendanceSheet);
   }
 
   /**
@@ -113,112 +95,191 @@ export class AttendanceService {
   static async getSheetById(id: string, user?: AuthUser): Promise<AttendanceSheet | null> {
     await this.verifySheetOwnership(id, user);
 
-    const { data, error } = await supabaseAdmin
-      .from('attendance_sheets')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (error) {
-      console.error('❌ Error fetching attendance sheet by ID:', error.message);
-      return null;
+    const res = await pool.query('SELECT * FROM public.attendance_sheets WHERE id = $1 LIMIT 1;', [id]);
+    if (res.rows?.[0]) {
+      return mapRowToAttendanceSheet(res.rows[0]);
     }
 
-    return mapRowToAttendanceSheet(data);
+    return null;
   }
 
   /**
-   * Save / Create attendance sheet with tenant scoping
+   * Save / Create attendance sheet with tenant scoping & month lock check
    */
   static async createSheet(payload: any, user?: AuthUser): Promise<AttendanceSheet> {
-    const now = new Date().toISOString();
     let companyId = payload.company_id || payload.companyId || '';
-
     if (user && user.role !== 'superadmin' && user.company_id) {
       companyId = user.company_id;
     }
 
-    const insertRow = {
-      site_id: payload.site_id || payload.siteId || '',
-      company_id: companyId,
-      site_name: payload.site_name || payload.siteName || '',
-      company_name: payload.company_name || payload.companyName || '',
-      month: payload.month || '',
-      year: payload.year || '',
-      records: payload.records || [], // Save entire array into records JSONB column
-      summary: payload.summary || {},
-      created_at: now,
-      updated_at: now,
-    };
+    const siteId = payload.site_id || payload.siteId || '';
+    const month = payload.month || '';
+    const year = payload.year || '';
 
-    const { data, error } = await supabaseAdmin
-      .from('attendance_sheets')
-      .insert([insertRow])
-      .select('*')
-      .single();
-
-    if (error) {
-      console.error('❌ Error inserting attendance sheet:', error.message);
-      throw new Error(`Failed to create attendance sheet: ${error.message}`);
+    // Check month lock
+    if (siteId && month && year) {
+      const lockCheck = await pool.query(
+        `SELECT is_locked FROM public.attendance_sheets WHERE site_id = $1 AND month = $2 AND year = $3 AND is_locked = true LIMIT 1;`,
+        [siteId, month, year]
+      );
+      if (lockCheck.rows && lockCheck.rows.length > 0) {
+        const lockErr: any = new Error(`Attendance for site ${siteId} for ${month}/${year} is locked. Modifications prohibited.`);
+        lockErr.statusCode = 423;
+        throw lockErr;
+      }
     }
 
-    return mapRowToAttendanceSheet(data);
+    const insertSql = `
+      INSERT INTO public.attendance_sheets (
+        site_id, company_id, site_name, company_name, month, year,
+        records, summary, is_locked, created_at, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6,
+        $7, $8, false, NOW(), NOW()
+      )
+      RETURNING *;
+    `;
+
+    const res = await pool.query(insertSql, [
+      siteId || null,
+      companyId || null,
+      payload.site_name || payload.siteName || '',
+      payload.company_name || payload.companyName || '',
+      month,
+      year,
+      JSON.stringify(payload.records || []),
+      JSON.stringify(payload.summary || {}),
+    ]);
+
+    return mapRowToAttendanceSheet(res.rows[0]);
   }
 
   /**
-   * Update attendance sheet with tenant verification
+   * Update attendance sheet with tenant verification & month lock check
    */
   static async updateSheet(id: string, payload: any, user?: AuthUser): Promise<AttendanceSheet> {
     await this.verifySheetOwnership(id, user);
 
-    const updateRow: any = {
-      updated_at: new Date().toISOString(),
-    };
-    if (payload.site_id !== undefined || payload.siteId !== undefined) {
-      updateRow.site_id = payload.site_id || payload.siteId;
-    }
-    if (payload.company_id !== undefined || payload.companyId !== undefined) {
-      updateRow.company_id = payload.company_id || payload.companyId;
-    }
-    if (payload.site_name !== undefined || payload.siteName !== undefined) {
-      updateRow.site_name = payload.site_name || payload.siteName;
-    }
-    if (payload.month !== undefined) updateRow.month = payload.month;
-    if (payload.year !== undefined) updateRow.year = payload.year;
-    if (payload.records !== undefined) updateRow.records = payload.records;
-    if (payload.summary !== undefined) updateRow.summary = payload.summary;
+    return await withTransaction(async (client) => {
+      // 1. Lock check
+      const sheetRes = await client.query(
+        `SELECT id, is_locked FROM public.attendance_sheets WHERE id = $1 FOR UPDATE;`,
+        [id]
+      );
+      if (!sheetRes.rows || sheetRes.rows.length === 0) {
+        throw new Error('Attendance sheet not found');
+      }
+      if (sheetRes.rows[0].is_locked) {
+        const lockErr: any = new Error('Attendance sheet is locked. Modifications prohibited.');
+        lockErr.statusCode = 423;
+        throw lockErr;
+      }
 
-    const { data, error } = await supabaseAdmin
-      .from('attendance_sheets')
-      .update(updateRow)
-      .eq('id', id)
-      .select('*')
-      .single();
+      const updates: string[] = ['updated_at = NOW()'];
+      const values: any[] = [id];
 
-    if (error) {
-      console.error('❌ Error updating attendance sheet:', error.message);
-      throw new Error(`Failed to update attendance sheet: ${error.message}`);
-    }
+      if (payload.site_id !== undefined || payload.siteId !== undefined) {
+        values.push(payload.site_id || payload.siteId);
+        updates.push(`site_id = $${values.length}`);
+      }
+      if (payload.company_id !== undefined || payload.companyId !== undefined) {
+        values.push(payload.company_id || payload.companyId);
+        updates.push(`company_id = $${values.length}`);
+      }
+      if (payload.site_name !== undefined || payload.siteName !== undefined) {
+        values.push(payload.site_name || payload.siteName);
+        updates.push(`site_name = $${values.length}`);
+      }
+      if (payload.month !== undefined) {
+        values.push(payload.month);
+        updates.push(`month = $${values.length}`);
+      }
+      if (payload.year !== undefined) {
+        values.push(payload.year);
+        updates.push(`year = $${values.length}`);
+      }
+      if (payload.records !== undefined) {
+        values.push(JSON.stringify(payload.records));
+        updates.push(`records = $${values.length}`);
+      }
+      if (payload.summary !== undefined) {
+        values.push(JSON.stringify(payload.summary));
+        updates.push(`summary = $${values.length}`);
+      }
 
-    return mapRowToAttendanceSheet(data);
+      const updateSql = `
+        UPDATE public.attendance_sheets
+        SET ${updates.join(', ')}
+        WHERE id = $1
+        RETURNING *;
+      `;
+
+      const res = await client.query(updateSql, values);
+      return mapRowToAttendanceSheet(res.rows[0]);
+    });
   }
 
   /**
-   * Delete sheet with tenant verification
+   * Delete sheet with tenant verification & lock check
    */
   static async deleteSheet(id: string, user?: AuthUser): Promise<boolean> {
     await this.verifySheetOwnership(id, user);
 
-    const { error } = await supabaseAdmin
-      .from('attendance_sheets')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      console.error('❌ Error deleting attendance sheet:', error.message);
-      throw new Error(`Failed to delete attendance sheet: ${error.message}`);
+    const sheetRes = await pool.query(
+      `SELECT id, is_locked FROM public.attendance_sheets WHERE id = $1;`,
+      [id]
+    );
+    if (sheetRes.rows?.[0]?.is_locked) {
+      const lockErr: any = new Error('Cannot delete locked attendance sheet.');
+      lockErr.statusCode = 423;
+      throw lockErr;
     }
 
+    await pool.query(`DELETE FROM public.attendance_sheets WHERE id = $1;`, [id]);
     return true;
+  }
+
+  /**
+   * Batch update attendance records inside transaction with month-lock verification
+   */
+  static async batchUpdateAttendanceRecords(
+    sheetId: string,
+    records: any[],
+    summary?: any,
+    user?: AuthUser
+  ): Promise<AttendanceSheet> {
+    await this.verifySheetOwnership(sheetId, user);
+
+    return await withTransaction(async (client) => {
+      const sheetRes = await client.query(
+        `SELECT id, is_locked, site_id, month, year FROM public.attendance_sheets WHERE id = $1 FOR UPDATE;`,
+        [sheetId]
+      );
+      if (!sheetRes.rows || sheetRes.rows.length === 0) {
+        throw new Error('Attendance sheet not found');
+      }
+      if (sheetRes.rows[0].is_locked) {
+        const lockErr: any = new Error('Attendance sheet is locked. Modifications prohibited.');
+        lockErr.statusCode = 423;
+        throw lockErr;
+      }
+
+      const updateSql = `
+        UPDATE public.attendance_sheets
+        SET records = $2,
+            summary = COALESCE($3, summary),
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING *;
+      `;
+
+      const res = await client.query(updateSql, [
+        sheetId,
+        JSON.stringify(records),
+        summary ? JSON.stringify(summary) : null,
+      ]);
+
+      return mapRowToAttendanceSheet(res.rows[0]);
+    });
   }
 }

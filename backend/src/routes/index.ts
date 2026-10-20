@@ -11,36 +11,23 @@ import attendanceRoutes from './attendanceRoutes';
 import staffRoutes from './staffRoutes';
 import bonusRoutes from './bonusRoutes';
 import attendanceCalculatorRoutes from './attendanceCalculatorRoutes';
-import { supabaseAdmin } from '../config/supabase';
 import { OracleStorageService } from '../services/oracleStorageService';
-import { withTimeout } from '../utils/timeoutHelper';
+import { RedisCacheService } from '../config/redis';
+import { checkDbHealth } from '../db/pool';
 
 const router = Router();
 
 /**
  * Deep Health Check Endpoint
- * Actively pings DB (companies count query) and MinIO Storage (bucket existence check)
- * with 4s timeouts to catch hung connections immediately.
+ * Actively pings native PostgreSQL Pool, MinIO Storage, and Redis cache.
  */
 router.get('/health', async (_req, res) => {
   const start = Date.now();
-  let dbOk = false;
   let storageOk = false;
-  let dbError: string | null = null;
   let storageError: string | null = null;
 
-  // 1. Check Database (4s timeout)
-  try {
-    const dbQuery = supabaseAdmin.from('companies').select('id').limit(1);
-    const { error } = await withTimeout(dbQuery, 4000, 'HealthCheck:Database');
-    if (error) {
-      dbError = error.message;
-    } else {
-      dbOk = true;
-    }
-  } catch (err: any) {
-    dbError = err.message || 'Database check timed out';
-  }
+  // 1. Check PostgreSQL Pool
+  const pgHealth = await checkDbHealth();
 
   // 2. Check MinIO Storage (4s timeout)
   try {
@@ -52,27 +39,38 @@ router.get('/health', async (_req, res) => {
     storageError = err.message || 'Storage check timed out';
   }
 
+  // 3. Check Redis Cache
+  const redisOk = RedisCacheService.isAvailable();
+
   const durationMs = Date.now() - start;
-  const isHealthy = dbOk && storageOk;
+  const isHealthy = pgHealth.ok && storageOk;
 
   const payload = {
-    status: isHealthy ? 'healthy' : dbOk || storageOk ? 'degraded' : 'unhealthy',
+    status: isHealthy ? 'healthy' : (pgHealth.ok || storageOk) ? 'degraded' : 'unhealthy',
     timestamp: new Date().toISOString(),
     durationMs,
     services: {
-      database: {
-        status: dbOk ? 'up' : 'down',
-        error: dbError,
+      postgres: {
+        status: pgHealth.ok ? 'up' : 'down',
+        latencyMs: pgHealth.latencyMs,
+        error: pgHealth.error || null,
       },
       storage: {
         status: storageOk ? 'up' : 'down',
         error: storageError,
+      },
+      redis: {
+        status: redisOk ? 'up' : 'down',
       },
     },
   };
 
   res.status(isHealthy ? 200 : 503).json(payload);
 });
+
+import rateCardRoutes from './rateCardRoutes';
+import deploymentRoutes from './deploymentRoutes';
+import payrollRoutes from './payrollRoutes';
 
 router.use('/auth', authRoutes);
 router.use('/admin', adminRoutes);
@@ -84,6 +82,9 @@ router.use('/materials', materialRoutes);
 router.use('/documents', documentRoutes);
 router.use('/attendance', attendanceRoutes);
 router.use('/staff', staffRoutes);
+router.use('/rate-cards', rateCardRoutes);
+router.use('/deployments', deploymentRoutes);
+router.use('/payroll', payrollRoutes);
 router.use('/bonus', bonusRoutes);
 router.use('/attendance-calculator', attendanceCalculatorRoutes);
 

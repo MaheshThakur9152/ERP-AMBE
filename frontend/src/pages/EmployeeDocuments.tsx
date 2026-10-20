@@ -14,7 +14,6 @@ import {
   CloudUpload,
   Eye,
 } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
 import { DocumentViewerModal } from '@/components/DocumentViewerModal';
 import { useAuth } from '@/features/auth/context/AuthContext';
 
@@ -76,13 +75,10 @@ export const EmployeeDocuments: React.FC = () => {
 
   const fetchStaff = async () => {
     try {
-      const { data, error } = await supabase
-        .from('staff')
-        .select('id, employee_name, biometric_code, designation, site_id, sites:site_id(site_name)');
-
-      if (error) {
-        console.error('Failed to fetch staff list:', error);
-      } else if (data) {
+      const res = await fetchWithRetry('/api/staff');
+      if (res.ok) {
+        const json = await res.json();
+        const data = json.data || json || [];
         const mapped: StaffOption[] = (data as any[])
           .map((item) => ({
             id: item.id,
@@ -112,18 +108,6 @@ export const EmployeeDocuments: React.FC = () => {
           setDocuments(json.data as EmployeeDocument[]);
           return;
         }
-      }
-
-      // Fallback to Supabase direct query
-      const { data, error } = await supabase
-        .from('employee_documents')
-        .select('*, staff:staff_id(employee_name, designation)')
-        .order('uploaded_at', { ascending: false });
-
-      if (error) {
-        console.error('Error fetching employee documents:', error);
-      } else if (data) {
-        setDocuments(data as EmployeeDocument[]);
       }
     } catch (err) {
       console.error('Unexpected error fetching documents:', err);

@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
-import { supabase } from '@/lib/supabase';
+import { fetchWithRetry } from '@/lib/apiClient';
 import { toast, ToastContainer } from '@/components/ui/toast';
 
 export interface SiteOption {
@@ -108,8 +108,16 @@ export const BonusHub: React.FC = () => {
   useEffect(() => {
     const fetchSites = async () => {
       try {
-        const { data } = await supabase.from('sites').select('id, site_name, code_name').order('site_name');
-        if (data) setSites(data);
+        const res = await fetchWithRetry('/api/sites');
+        if (res.ok) {
+          const json = await res.json();
+          const data = Array.isArray(json.data) ? json.data : (Array.isArray(json) ? json : []);
+          setSites(data.map((s: any) => ({
+            id: s.id,
+            site_name: s.site_name || s.name || '',
+            code_name: s.code_name || s.codeName || '',
+          })));
+        }
       } catch (err) {
         console.error('Failed to load sites:', err);
       }
@@ -122,18 +130,8 @@ export const BonusHub: React.FC = () => {
     setIsLoading(true);
     setStatusMessage(null);
     try {
-      // 1. Try Backend API first
-      const token = localStorage.getItem('token') || localStorage.getItem('auth_token');
-      const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
-      
-      const response = await fetch(
-        `${apiBase}/bonus/summary?financial_year=${encodeURIComponent(selectedFY)}&site_id=${encodeURIComponent(selectedSiteId)}`,
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-        }
+      const response = await fetchWithRetry(
+        `/api/bonus/summary?financial_year=${encodeURIComponent(selectedFY)}&site_id=${encodeURIComponent(selectedSiteId)}`
       );
 
       if (response.ok) {
@@ -143,91 +141,7 @@ export const BonusHub: React.FC = () => {
           return;
         }
       }
-
-      // 2. Direct Supabase Fallback if API fails/unavailable
-      console.warn('[BonusHub] Falling back to direct Supabase queries for bonus summary');
-      const fyMonths = getFYMonths(selectedFY);
-
-      let staffQuery = supabase
-        .from('staff')
-        .select('id, employee_name, biometric_code, designation, status, site_id, sites(site_name, code_name)')
-        .order('employee_name', { ascending: true });
-
-      if (selectedSiteId !== 'all') {
-        staffQuery = staffQuery.eq('site_id', selectedSiteId);
-      }
-
-      const { data: staffData, error: staffErr } = await staffQuery;
-      if (staffErr) throw staffErr;
-
-      const staffList = staffData || [];
-      const staffIds = staffList.map((s: any) => s.id);
-
-      if (staffIds.length === 0) {
-        setRecords([]);
-        return;
-      }
-
-      // Query payroll_records for FY
-      const { data: payrollData } = await supabase
-        .from('payroll_records')
-        .select('staff_id, month_year, remaining_part_bonus')
-        .in('month_year', fyMonths)
-        .in('staff_id', staffIds);
-
-      // Query bonus_disbursements for FY
-      const { data: disbData } = await supabase
-        .from('bonus_disbursements')
-        .select('*')
-        .eq('financial_year', selectedFY)
-        .in('staff_id', staffIds)
-        .order('disbursed_date', { ascending: false });
-
-      const payrollMap = new Map<string, { totalAccrued: number; months: Record<string, number> }>();
-      (payrollData || []).forEach((pr: any) => {
-        const sid = pr.staff_id;
-        if (!payrollMap.has(sid)) payrollMap.set(sid, { totalAccrued: 0, months: {} });
-        const entry = payrollMap.get(sid)!;
-        const val = Number(pr.remaining_part_bonus) || 0;
-        entry.totalAccrued += val;
-        entry.months[pr.month_year] = val;
-      });
-
-      const disbMap = new Map<string, { totalDisbursed: number; list: any[] }>();
-      (disbData || []).forEach((d: any) => {
-        const sid = d.staff_id;
-        if (!disbMap.has(sid)) disbMap.set(sid, { totalDisbursed: 0, list: [] });
-        const entry = disbMap.get(sid)!;
-        const amt = Number(d.amount) || 0;
-        entry.totalDisbursed += amt;
-        entry.list.push(d);
-      });
-
-      const mapped: BonusRecord[] = staffList.map((s: any) => {
-        const pInfo = payrollMap.get(s.id) || { totalAccrued: 0, months: {} };
-        const dInfo = disbMap.get(s.id) || { totalDisbursed: 0, list: [] };
-        const accrued = Math.round(pInfo.totalAccrued);
-        const disbursed = Math.round(dInfo.totalDisbursed);
-        const balance = Math.max(0, accrued - disbursed);
-        const siteObj = Array.isArray(s.sites) ? s.sites[0] : s.sites;
-
-        return {
-          staff_id: s.id,
-          employee_name: s.employee_name,
-          biometric_code: s.biometric_code,
-          designation: s.designation,
-          status: s.status,
-          site_id: s.site_id,
-          site_name: siteObj?.site_name || siteObj?.code_name || 'Unassigned',
-          accrued_this_fy: accrued,
-          disbursed_this_fy: disbursed,
-          balance_outstanding: balance,
-          monthly_breakdown: pInfo.months,
-          disbursements: dInfo.list,
-        };
-      });
-
-      setRecords(mapped);
+      setRecords([]);
     } catch (err: any) {
       console.error('Failed to load bonus reconciliation data:', err);
       setStatusMessage({ type: 'error', text: err.message || 'Failed to load bonus reconciliation data' });
@@ -304,29 +218,15 @@ export const BonusHub: React.FC = () => {
         remark: payoutRemark,
       };
 
-      let savedOk = false;
+      const response = await fetchWithRetry('/api/bonus/disburse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
 
-      // Try Backend API
-      try {
-        const response = await fetch(`${apiBase}/bonus/disburse`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify(payload),
-        });
-        if (response.ok) {
-          savedOk = true;
-        }
-      } catch (e) {
-        console.warn('Backend /bonus/disburse endpoint note:', e);
-      }
-
-      // Supabase direct fallback if needed
-      if (!savedOk) {
-        const { error } = await supabase.from('bonus_disbursements').insert([payload]);
-        if (error) throw error;
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || `Failed to record payout: status ${response.status}`);
       }
 
       toast.success(`Bonus payout of ₹${amt.toLocaleString('en-IN')} recorded for ${payoutModalStaff.employee_name}!`);

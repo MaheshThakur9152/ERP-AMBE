@@ -1,4 +1,4 @@
-import { supabaseAdmin } from '../config/supabase';
+import { pool } from '../db/pool';
 import { MaterialItem, CreateMaterialDTO, UpdateMaterialDTO } from '../types/material';
 
 export class MaterialService {
@@ -6,54 +6,44 @@ export class MaterialService {
    * Get all materials
    */
   static async getAllMaterials(): Promise<MaterialItem[]> {
-    const { data, error } = await supabaseAdmin
-      .from('materials')
-      .select('*')
-      .order('item_name', { ascending: true });
-
-    if (error) {
-      console.warn('⚠️ Error querying materials table from Supabase:', error.message);
+    try {
+      const res = await pool.query('SELECT * FROM public.materials ORDER BY item_name ASC;');
+      return (res.rows || []).map((row: any) => ({
+        id: row.id,
+        item_name: row.item_name || '',
+        hsn_code: row.hsn_code || '',
+        gst_rate: Number(row.gst_rate ?? 18),
+        default_rate: Number(row.default_rate ?? 0),
+        unit: row.unit || 'Nos',
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+      }));
+    } catch (error: any) {
+      console.warn('⚠️ Error querying materials table from PostgreSQL:', error.message);
       return [];
     }
-
-    return (data || []).map((row: any) => ({
-      id: row.id,
-      item_name: row.item_name || row.itemName || '',
-      hsn_code: row.hsn_code || row.hsnCode || '',
-      gst_rate: Number(row.gst_rate ?? row.gstRate ?? 18),
-      default_rate: Number(row.default_rate ?? row.defaultRate ?? row.rate ?? 0),
-      unit: row.unit || 'Nos',
-      created_at: row.created_at,
-      updated_at: row.updated_at,
-    }));
   }
 
   /**
    * Create material
    */
   static async createMaterial(payload: CreateMaterialDTO): Promise<MaterialItem> {
-    const now = new Date().toISOString();
-    const insertRow = {
-      item_name: payload.item_name,
-      hsn_code: payload.hsn_code || '',
-      gst_rate: Number(payload.gst_rate ?? 18),
-      default_rate: Number(payload.default_rate ?? 0),
-      unit: payload.unit || 'Nos',
-      created_at: now,
-      updated_at: now,
-    };
+    const insertSql = `
+      INSERT INTO public.materials (
+        item_name, hsn_code, gst_rate, default_rate, unit, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+      RETURNING *;
+    `;
 
-    const { data, error } = await supabaseAdmin
-      .from('materials')
-      .insert([insertRow])
-      .select('*')
-      .single();
+    const res = await pool.query(insertSql, [
+      payload.item_name,
+      payload.hsn_code || '',
+      Number(payload.gst_rate ?? 18),
+      Number(payload.default_rate ?? 0),
+      payload.unit || 'Nos',
+    ]);
 
-    if (error) {
-      console.error('❌ Supabase insert material error:', error.message);
-      throw new Error(`Failed to create material: ${error.message}`);
-    }
-
+    const data = res.rows[0];
     return {
       id: data.id,
       item_name: data.item_name,
@@ -70,27 +60,32 @@ export class MaterialService {
    * Update material
    */
   static async updateMaterial(id: string, payload: UpdateMaterialDTO): Promise<MaterialItem> {
-    const updateRow: any = {
-      updated_at: new Date().toISOString(),
-    };
-    if (payload.item_name !== undefined) updateRow.item_name = payload.item_name;
-    if (payload.hsn_code !== undefined) updateRow.hsn_code = payload.hsn_code;
-    if (payload.gst_rate !== undefined) updateRow.gst_rate = Number(payload.gst_rate);
-    if (payload.default_rate !== undefined) updateRow.default_rate = Number(payload.default_rate);
-    if (payload.unit !== undefined) updateRow.unit = payload.unit;
+    const updateSql = `
+      UPDATE public.materials SET
+        item_name = COALESCE($1, item_name),
+        hsn_code = COALESCE($2, hsn_code),
+        gst_rate = COALESCE($3, gst_rate),
+        default_rate = COALESCE($4, default_rate),
+        unit = COALESCE($5, unit),
+        updated_at = NOW()
+      WHERE id = $6
+      RETURNING *;
+    `;
 
-    const { data, error } = await supabaseAdmin
-      .from('materials')
-      .update(updateRow)
-      .eq('id', id)
-      .select('*')
-      .single();
+    const res = await pool.query(updateSql, [
+      payload.item_name ?? null,
+      payload.hsn_code ?? null,
+      payload.gst_rate !== undefined ? Number(payload.gst_rate) : null,
+      payload.default_rate !== undefined ? Number(payload.default_rate) : null,
+      payload.unit ?? null,
+      id,
+    ]);
 
-    if (error) {
-      console.error('❌ Supabase update material error:', error.message);
-      throw new Error(`Failed to update material: ${error.message}`);
+    if (!res.rows || res.rows.length === 0) {
+      throw new Error(`Material not found: ${id}`);
     }
 
+    const data = res.rows[0];
     return {
       id: data.id,
       item_name: data.item_name,
@@ -107,16 +102,10 @@ export class MaterialService {
    * Delete material
    */
   static async deleteMaterial(id: string): Promise<boolean> {
-    const { error } = await supabaseAdmin
-      .from('materials')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      console.error('❌ Supabase delete material error:', error.message);
-      throw new Error(`Failed to delete material: ${error.message}`);
+    const res = await pool.query('DELETE FROM public.materials WHERE id = $1', [id]);
+    if ((res.rowCount ?? 0) === 0) {
+      throw new Error(`Failed to delete material: not found`);
     }
-
     return true;
   }
 }

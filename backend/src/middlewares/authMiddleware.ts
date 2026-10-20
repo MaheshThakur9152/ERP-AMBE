@@ -1,16 +1,35 @@
 import { Request, Response, NextFunction } from 'express';
 import { supabaseAdmin } from '../config/supabase';
+import { pool } from '../db/pool';
 import { AuthUser } from '../types/express';
 import { COOKIE_OPTIONS, ACCESS_TOKEN_MAX_AGE, REFRESH_TOKEN_MAX_AGE } from '../config/constants';
+import { NativeAuthService } from '../services/nativeAuthService';
 
 /**
  * Robust user role lookup with retries and loud logging.
- * Prevents cold-start DB connection drops from silently downgrading privileges.
+ * Queries PostgreSQL connection pool first, falling back to Supabase.
+ * Enforces strict authorization: never defaults unassigned users to 'admin'.
  */
 export async function fetchUserRole(
   userId: string,
   email?: string
-): Promise<{ role: 'admin' | 'superadmin'; rawDbRole: string | null; error?: any }> {
+): Promise<{ role: 'admin' | 'superadmin' | null; rawDbRole: string | null; companyId?: string | null; error?: any }> {
+  // 1. Query direct PostgreSQL connection pool first
+  try {
+    const pgRes = await pool.query(
+      'SELECT role, company_id FROM public.user_roles WHERE user_id = $1 LIMIT 1',
+      [userId]
+    );
+    if (pgRes.rows && pgRes.rows.length > 0) {
+      const row = pgRes.rows[0];
+      const parsedRole = String(row.role || '').trim().toLowerCase() === 'superadmin' ? 'superadmin' : 'admin';
+      return { role: parsedRole, rawDbRole: row.role, companyId: row.company_id || null };
+    }
+  } catch (pgErr: any) {
+    console.warn(`[auth:pg:error] user_id=${userId} falling back to Supabase: ${pgErr?.message || pgErr}`);
+  }
+
+  // 2. Fallback to Supabase with retries
   const maxRetries = 3;
   let lastError: any = null;
 
@@ -18,7 +37,7 @@ export async function fetchUserRole(
     try {
       const { data, error } = await supabaseAdmin
         .from('user_roles')
-        .select('role')
+        .select('role, company_id')
         .eq('user_id', userId)
         .maybeSingle();
 
@@ -39,14 +58,14 @@ export async function fetchUserRole(
         console.warn(
           `[auth:db:success] user_id=${userId} email=${email || 'unknown'} rawDbRole=${data.role} parsedRole=${parsedRole}`
         );
-        return { role: parsedRole, rawDbRole: data.role };
+        return { role: parsedRole, rawDbRole: data.role, companyId: data.company_id || null };
       }
 
-      // Query succeeded cleanly with zero rows
+      // Query succeeded cleanly with zero rows -> Strictly NOT an admin (SEC-002 fix)
       console.warn(
-        `[auth:db:empty] user_id=${userId} email=${email || 'unknown'} no row in user_roles -> default admin`
+        `[auth:db:unassigned] user_id=${userId} email=${email || 'unknown'} no row in user_roles`
       );
-      return { role: 'admin', rawDbRole: null };
+      return { role: null, rawDbRole: null, companyId: null };
     } catch (err: any) {
       lastError = err;
       console.error(
@@ -59,7 +78,7 @@ export async function fetchUserRole(
   }
 
   // All retries failed with an active error
-  return { role: 'admin', rawDbRole: null, error: lastError };
+  return { role: null, rawDbRole: null, error: lastError };
 }
 
 /**
@@ -80,7 +99,15 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
       return;
     }
 
-    // Validate Access Token with Supabase
+    // 1. Validate Native JWT access token first (Phase 6 native auth)
+    const nativeUser = NativeAuthService.verifyAccessToken(accessToken);
+    if (nativeUser) {
+      req.user = nativeUser;
+      next();
+      return;
+    }
+
+    // 2. Fallback to Supabase Auth token validation
     const { data: { user: authUser }, error: authError } = await supabaseAdmin.auth.getUser(accessToken);
 
     if (authError || !authUser) {
@@ -90,7 +117,7 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
     }
 
     // Query user_roles table for user's assigned role with retry
-    const { role, rawDbRole, error: roleFetchError } = await fetchUserRole(authUser.id, authUser.email);
+    const { role, rawDbRole, companyId, error: roleFetchError } = await fetchUserRole(authUser.id, authUser.email);
 
     if (roleFetchError) {
       console.error(
@@ -100,11 +127,32 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
       return;
     }
 
+    if (!role) {
+      console.warn(`[auth:forbidden] Access denied: User ${authUser.id} (${authUser.email}) has no assigned role`);
+      res.status(403).json({ error: 'Forbidden: No authorized role assigned to your account' });
+      return;
+    }
+
+    // Resolve tenant company_id context (SEC-003 fix)
+    let resolvedCompanyId = companyId;
+    if (!resolvedCompanyId) {
+      try {
+        const compRes = await pool.query('SELECT id FROM public.companies ORDER BY created_at ASC LIMIT 1');
+        if (compRes.rows?.[0]?.id) {
+          resolvedCompanyId = compRes.rows[0].id;
+        }
+      } catch (cErr) {
+        console.warn('[auth:company_context] Fallback query failed:', cErr);
+      }
+    }
+
     // Attach user object to request
     req.user = {
       id: authUser.id,
       email: authUser.email,
       role,
+      company_id: resolvedCompanyId || undefined,
+      companyId: resolvedCompanyId || undefined,
     };
 
     next();

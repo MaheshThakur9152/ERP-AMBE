@@ -1,6 +1,21 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/lib/supabase';
+export interface User {
+  id: string;
+  email?: string;
+  user_metadata?: Record<string, any>;
+  app_metadata?: Record<string, any>;
+  aud?: string;
+  created_at?: string;
+  updated_at?: string;
+  phone?: string;
+  role?: string;
+}
+
+export interface Session {
+  access_token: string;
+  refresh_token?: string;
+  user: User;
+}
 import { setInMemoryToken } from '@/lib/apiClient';
 import { UserProfile, UserRole } from '../types';
 import { loginApi, logoutApi, refreshTokenApi, fetchMeApi, fetchUserProfile } from '../api/authApi';
@@ -88,40 +103,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           return;
         }
 
-        // 3. Fallback to Supabase client session if available
-        const { data } = await supabase.auth.getSession();
-        if (data?.session?.user) {
-          const sessionUser = data.session.user;
-          setSession(data.session);
-          setUser(sessionUser);
-          if (data.session.access_token) {
-            setInMemoryToken(data.session.access_token);
-          }
-          try {
-            const prof = await fetchUserProfile(sessionUser.id);
-            if (prof) {
-              setProfile(prof);
-              setRole(prof.role);
-            } else {
-              setProfile({
-                id: sessionUser.id,
-                email: sessionUser.email || '',
-                full_name: sessionUser.email ? sessionUser.email.split('@')[0] : 'User',
-                role: 'admin',
-                phone: null,
-                avatar_url: null,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              });
-              setRole('admin');
-            }
-          } catch {
-            setRole('admin');
-          }
-          return;
-        }
-
-        // 4. No active credentials -> unauthenticated
+        // 3. No active credentials -> unauthenticated
         setUser(null);
         setProfile(null);
         setSession(null);
@@ -196,7 +178,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setRole('admin');
     setInMemoryToken(null);
     await logoutApi().catch(() => {});
-    await supabase.auth.signOut().catch(() => {});
   };
 
   const isSuperAdmin = role === 'superadmin';

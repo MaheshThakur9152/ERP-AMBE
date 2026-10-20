@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { supabaseAdmin } from '../config/supabase';
+import { pool } from '../db/pool';
 import { CompanyProfile } from '../types/company';
+
+const DateOrString = z.union([z.string(), z.date()]).optional();
 
 const CompanyRowSchema = z
   .object({
@@ -43,8 +46,8 @@ const CompanyRowSchema = z
     signature_url: z.string().optional(),
     is_active: z.boolean().optional().default(true),
     is_locked: z.boolean().optional().default(false),
-    created_at: z.string().optional(),
-    updated_at: z.string().optional(),
+    created_at: DateOrString,
+    updated_at: DateOrString,
   })
   .passthrough();
 
@@ -128,8 +131,8 @@ function mapRowToCompanyProfile(rawRow: any): CompanyProfile {
     proforma_sequence: row.proforma_sequence,
     is_active: row.is_active,
     is_locked: Boolean(row.is_locked),
-    created_at: row.created_at,
-    updated_at: row.updated_at,
+    created_at: row.created_at instanceof Date ? row.created_at.toISOString() : (row.created_at || undefined),
+    updated_at: row.updated_at instanceof Date ? row.updated_at.toISOString() : (row.updated_at || undefined),
   };
 }
 
@@ -147,6 +150,15 @@ export class CompanyService {
    * Fetch all companies from DB strictly using SELECT * FROM companies ORDER BY name ASC
    */
   static async getAllCompanies(): Promise<CompanyProfile[]> {
+    try {
+      const res = await pool.query('SELECT * FROM public.companies ORDER BY name ASC');
+      if (res.rows) {
+        return res.rows.map(mapRowToCompanyProfile);
+      }
+    } catch (pgErr: any) {
+      console.warn('[CompanyService.getAllCompanies:pg] Fallback to Supabase:', pgErr?.message || pgErr);
+    }
+
     const { data, error } = await supabaseAdmin
       .from('companies')
       .select('*')
@@ -163,6 +175,15 @@ export class CompanyService {
    * Fetch company by ID strictly using eq('id', id)
    */
   static async getCompanyById(id: string): Promise<CompanyProfile | null> {
+    try {
+      const res = await pool.query('SELECT * FROM public.companies WHERE id = $1 LIMIT 1', [id]);
+      if (res.rows?.[0]) {
+        return mapRowToCompanyProfile(res.rows[0]);
+      }
+    } catch (pgErr: any) {
+      console.warn('[CompanyService.getCompanyById:pg] Fallback to Supabase:', pgErr?.message || pgErr);
+    }
+
     const { data, error } = await supabaseAdmin
       .from('companies')
       .select('*')
@@ -178,6 +199,18 @@ export class CompanyService {
    */
   static async getCompanyByCode(code: string): Promise<CompanyProfile | null> {
     const formattedCode = code.toUpperCase().trim();
+    try {
+      const res = await pool.query(
+        'SELECT * FROM public.companies WHERE UPPER(entity_code) = $1 OR UPPER(code) = $1 LIMIT 1',
+        [formattedCode]
+      );
+      if (res.rows?.[0]) {
+        return mapRowToCompanyProfile(res.rows[0]);
+      }
+    } catch (pgErr: any) {
+      console.warn('[CompanyService.getCompanyByCode:pg] Fallback to Supabase:', pgErr?.message || pgErr);
+    }
+
     const { data, error } = await supabaseAdmin
       .from('companies')
       .select('*')
@@ -333,24 +366,56 @@ export class CompanyService {
   }
 
   /**
-   * Auto-increment sequence on invoice save
+   * Atomic sequence increment on invoice save (SEC-004 fix)
+   * Executes atomic SQL UPDATE ... RETURNING to eliminate race conditions under concurrent saves.
    */
-  static async incrementSequence(companyIdOrCode: string, invoiceType: string): Promise<void> {
+  static async incrementSequence(
+    companyIdOrCode: string,
+    invoiceType: string
+  ): Promise<{ sequence: number; prefix: string }> {
     const isProforma = invoiceType === 'Proforma Invoice';
-    const isById = Boolean(companyIdOrCode && companyIdOrCode.length > 10);
+    const column = isProforma ? 'proforma_sequence' : 'tax_sequence';
+    const prefixColumn = isProforma ? 'proforma_prefix' : 'tax_prefix';
 
+    try {
+      const { pool } = await import('../db/pool');
+      const query = `
+        UPDATE public.companies
+        SET ${column} = COALESCE(${column}, 0) + 1
+        WHERE id::text = $1 OR UPPER(entity_code) = UPPER($1)
+        RETURNING ${column} AS sequence, ${prefixColumn} AS prefix, id
+      `;
+      const result = await pool.query(query, [companyIdOrCode.trim()]);
+      if (result.rows && result.rows.length > 0) {
+        const row = result.rows[0];
+        const nextSeq = Number(row.sequence);
+        // Mirror to Supabase
+        await supabaseAdmin
+          .from('companies')
+          .update({ [column]: nextSeq })
+          .eq('id', row.id);
+
+        return { sequence: nextSeq, prefix: row.prefix };
+      }
+    } catch (pgErr) {
+      console.warn('[CompanyService:incrementSequence:pg] Fallback to Supabase:', pgErr);
+    }
+
+    // Fallback if direct pool query fails
+    const isById = Boolean(companyIdOrCode && companyIdOrCode.length > 10);
     const company = isById
       ? await this.getCompanyById(companyIdOrCode)
       : await this.getCompanyByCode(companyIdOrCode);
 
     if (company && company.id) {
-      if (isProforma) {
-        const nextSeq = (company.proforma_sequence || 1) + 1;
-        await supabaseAdmin.from('companies').update({ proforma_sequence: nextSeq }).eq('id', company.id);
-      } else {
-        const nextSeq = (company.tax_sequence || 1) + 1;
-        await supabaseAdmin.from('companies').update({ tax_sequence: nextSeq }).eq('id', company.id);
-      }
+      const nextSeq = isProforma ? (company.proforma_sequence || 1) + 1 : (company.tax_sequence || 1) + 1;
+      await supabaseAdmin.from('companies').update({ [column]: nextSeq }).eq('id', company.id);
+      return {
+        sequence: nextSeq,
+        prefix: (isProforma ? company.proforma_prefix : company.tax_prefix) || '',
+      };
     }
+
+    return { sequence: 1, prefix: '' };
   }
 }

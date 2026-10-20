@@ -7,6 +7,7 @@ import {
   uploadInvoiceDirect,
   getAllSiteDocuments,
   getEmployeeDocuments,
+  getCompanyDocuments,
   uploadSiteDocumentGlobal,
   deleteDocument,
   deleteSiteDocument,
@@ -150,6 +151,9 @@ router.post(
 
 // Employee documents routes
 router.get('/employee', requireAuth, getEmployeeDocuments);
+
+// Company documents routes
+router.get('/company', requireAuth, getCompanyDocuments);
 
 // Site documents global management routes
 router.get('/', requireAuth, getAllSiteDocuments);

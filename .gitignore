@@ -29,17 +29,11 @@ Thumbs.db
 
 # Binary & temp files
 *.tmp
+*.sql.gz
+backups/
 
 # Ignored folders
 old frontend/
 
-# Documentation & notes
-login.md
-ratecard.md
-rate card.md
-calculation.md
-calculation .md
-uan.md
-uan.md
-xlxs.md
-xlxs.md 
+# Documentation & notes (stored in separate docs branch)
+*.md

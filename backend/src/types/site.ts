@@ -36,10 +36,11 @@ export interface Site {
   createdAt?: string;
   created_at?: string;
   updated_at?: string;
+  updatedAt?: string;
   rateCards: RateCardItem[];
 }
 
-export type CreateSiteDTO = Omit<Site, 'id' | 'createdAt' | 'created_at' | 'updated_at'> & {
+export type CreateSiteDTO = Omit<Site, 'id' | 'createdAt' | 'created_at' | 'updated_at' | 'updatedAt'> & {
   id?: string;
 };
 export type UpdateSiteDTO = Partial<CreateSiteDTO>;

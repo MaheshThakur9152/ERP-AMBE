@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { supabaseAdmin } from '../config/supabase';
+import { pool } from '../db/pool';
 import { REFRESH_TOKEN_MAX_AGE } from '../config/constants';
 
 export interface RefreshTokenRecord {
@@ -51,27 +51,22 @@ export class TokenService {
     const expiresAt = new Date(Date.now() + REFRESH_TOKEN_MAX_AGE).toISOString();
     const finalFamilyId = familyId || crypto.randomUUID();
 
-    const insertPayload: Partial<RefreshTokenRecord> = {
-      user_id: userId,
-      token_hash: tokenHash,
-      family_id: finalFamilyId,
-      supabase_refresh_token: supabaseRefreshToken || null,
-      expires_at: expiresAt,
-      revoked_at: null,
-    };
+    const insertSql = `
+      INSERT INTO public.refresh_tokens (
+        user_id, token_hash, family_id, supabase_refresh_token, expires_at, revoked_at, created_at
+      ) VALUES ($1, $2, $3, $4, $5, NULL, NOW())
+      RETURNING *;
+    `;
 
-    const { data, error } = await supabaseAdmin
-      .from('refresh_tokens')
-      .insert(insertPayload)
-      .select('*')
-      .single();
+    const res = await pool.query(insertSql, [
+      userId,
+      tokenHash,
+      finalFamilyId,
+      supabaseRefreshToken || null,
+      expiresAt,
+    ]);
 
-    if (error) {
-      console.error('[TokenService:create] Error saving refresh token:', error.message);
-      throw new Error(`Failed to create refresh token record: ${error.message}`);
-    }
-
-    return { rawToken, record: data as RefreshTokenRecord };
+    return { rawToken, record: res.rows[0] as RefreshTokenRecord };
   }
 
   /**
@@ -88,16 +83,8 @@ export class TokenService {
     console.log(`[TokenService:validate] Checking token shortHash=${shortHash}...`);
 
     // Look up token by hash
-    const { data: record, error } = await supabaseAdmin
-      .from('refresh_tokens')
-      .select('*')
-      .eq('token_hash', tokenHash)
-      .maybeSingle();
-
-    if (error) {
-      console.error(`[TokenService:lookup] DB query failed for shortHash=${shortHash}:`, error.message);
-      return { valid: false, error: 'Database lookup error' };
-    }
+    const res = await pool.query('SELECT * FROM public.refresh_tokens WHERE token_hash = $1 LIMIT 1', [tokenHash]);
+    const record = res.rows?.[0];
 
     if (!record) {
       console.warn(`[TokenService] Token hash ${shortHash} not found in database`);
@@ -106,9 +93,6 @@ export class TokenService {
 
     const now = Date.now();
     const expiresAtMs = new Date(record.expires_at).getTime();
-    console.log(
-      `[TokenService:lookup] Found record id=${record.id}, user_id=${record.user_id}, family_id=${record.family_id}, revoked_at=${record.revoked_at}, expires_at=${record.expires_at} (now=${new Date(now).toISOString()})`
-    );
 
     // 🚨 Reuse Detection: If token is already revoked, check grace period (30s)
     if (record.revoked_at) {
@@ -121,15 +105,14 @@ export class TokenService {
           `[TokenService:grace] Token ${shortHash} revoked ${revokedAgoMs}ms ago (within 30s grace window). Finding active family token for user ${record.user_id}...`
         );
 
-        // Find active token in same family
-        const { data: activeToken } = await supabaseAdmin
-          .from('refresh_tokens')
-          .select('*')
-          .eq('family_id', record.family_id)
-          .is('revoked_at', null)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
+        const activeRes = await pool.query(
+          `SELECT * FROM public.refresh_tokens
+           WHERE family_id = $1 AND revoked_at IS NULL
+           ORDER BY created_at DESC
+           LIMIT 1;`,
+          [record.family_id]
+        );
+        const activeToken = activeRes.rows?.[0];
 
         if (activeToken && new Date(activeToken.expires_at).getTime() > now) {
           console.log(`[TokenService:grace] Returning existing active family token id=${activeToken.id}`);
@@ -158,24 +141,12 @@ export class TokenService {
     // Check expiration
     if (expiresAtMs <= now) {
       console.warn(`[TokenService] Token expired at ${record.expires_at}`);
-      await supabaseAdmin
-        .from('refresh_tokens')
-        .update({ revoked_at: new Date().toISOString() })
-        .eq('id', record.id);
+      await pool.query('UPDATE public.refresh_tokens SET revoked_at = NOW() WHERE id = $1', [record.id]);
       return { valid: false, error: 'Refresh token expired' };
     }
 
     // ✅ Token is valid: Revoke old token and issue rotated token in the same family
-    const nowIso = new Date().toISOString();
-    const { error: revokeOldError } = await supabaseAdmin
-      .from('refresh_tokens')
-      .update({ revoked_at: nowIso })
-      .eq('id', record.id);
-
-    if (revokeOldError) {
-      console.error('[TokenService:revokeOld] Failed to revoke current token:', revokeOldError.message);
-      return { valid: false, error: 'Failed to rotate token' };
-    }
+    await pool.query('UPDATE public.refresh_tokens SET revoked_at = NOW() WHERE id = $1', [record.id]);
 
     // Issue new token in same family
     const { rawToken: newRawToken } = await this.createRefreshToken(
@@ -197,10 +168,10 @@ export class TokenService {
    * Updates supabase_refresh_token on the latest active token of a family.
    */
   static async updateSupabaseRefreshToken(tokenHash: string, newSupabaseRefreshToken: string): Promise<void> {
-    await supabaseAdmin
-      .from('refresh_tokens')
-      .update({ supabase_refresh_token: newSupabaseRefreshToken })
-      .eq('token_hash', tokenHash);
+    await pool.query(
+      'UPDATE public.refresh_tokens SET supabase_refresh_token = $1 WHERE token_hash = $2',
+      [newSupabaseRefreshToken, tokenHash]
+    );
   }
 
   /**
@@ -209,33 +180,19 @@ export class TokenService {
   static async revokeToken(rawToken: string): Promise<void> {
     if (!rawToken) return;
     const tokenHash = this.hashToken(rawToken);
-    const { error } = await supabaseAdmin
-      .from('refresh_tokens')
-      .update({ revoked_at: new Date().toISOString() })
-      .eq('token_hash', tokenHash);
-
-    if (error) {
-      console.error('[TokenService:revoke] Error revoking token:', error.message);
-    }
+    await pool.query('UPDATE public.refresh_tokens SET revoked_at = NOW() WHERE token_hash = $1', [tokenHash]);
   }
 
   /**
    * Revokes all refresh tokens belonging to a family (used on theft detection).
    */
   static async revokeFamily(familyId: string, userId?: string): Promise<void> {
-    const query = supabaseAdmin
-      .from('refresh_tokens')
-      .update({ revoked_at: new Date().toISOString() })
-      .eq('family_id', familyId)
-      .is('revoked_at', null);
-
-    const { error } = await query;
-    if (error) {
-      console.error(`[TokenService:revokeFamily] Error revoking family ${familyId}:`, error.message);
-    }
+    await pool.query(
+      'UPDATE public.refresh_tokens SET revoked_at = NOW() WHERE family_id = $1 AND revoked_at IS NULL',
+      [familyId]
+    );
 
     if (userId) {
-      // Also revoke all tokens for this user for safety
       await this.revokeAllUserTokens(userId);
     }
   }
@@ -244,14 +201,9 @@ export class TokenService {
    * Revokes all tokens for a given user (e.g. "sign out everywhere").
    */
   static async revokeAllUserTokens(userId: string): Promise<void> {
-    const { error } = await supabaseAdmin
-      .from('refresh_tokens')
-      .update({ revoked_at: new Date().toISOString() })
-      .eq('user_id', userId)
-      .is('revoked_at', null);
-
-    if (error) {
-      console.error(`[TokenService:revokeAll] Error revoking all user tokens for ${userId}:`, error.message);
-    }
+    await pool.query(
+      'UPDATE public.refresh_tokens SET revoked_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL',
+      [userId]
+    );
   }
 }

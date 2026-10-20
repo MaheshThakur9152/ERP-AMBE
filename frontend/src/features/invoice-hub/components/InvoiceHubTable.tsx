@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { getApiUrl, fetchWithRetry } from '@/lib/apiClient';
 import { InvoiceRecord } from '../types';
-import { fetchInvoicesApi, deleteInvoiceApi, createInvoiceApi } from '../api/invoiceApi';
+import { fetchInvoicesApi, deleteInvoiceApi, createInvoiceApi, updateInvoiceApi, convertToTaxInvoiceApi } from '../api/invoiceApi';
 import { lockInvoiceApi } from '@/features/auth/api/authApi';
 import { useAuth } from '@/features/auth/context/AuthContext';
 import { toast, ToastContainer } from '@/components/ui/toast';
-import { supabase } from '@/lib/supabase';
 import { DocumentViewerModal } from '@/components/DocumentViewerModal';
 import {
   RotateCcw,
@@ -595,15 +594,21 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
   const loadMasterData = async () => {
     try {
       const [sitesRes, compRes] = await Promise.all([
-        supabase.from('sites').select('id, site_name, client_name, code_name, company_id').order('site_name'),
-        supabase.from('companies').select('id, name, entity_code, tax_prefix, proforma_prefix').order('name'),
+        fetchWithRetry('/api/sites'),
+        fetchWithRetry('/api/companies'),
       ]);
-      if (sitesRes.data && sitesRes.data.length > 0) {
-        setDbSites(sitesRes.data);
+      if (sitesRes.ok) {
+        const sitesJson = await sitesRes.json();
+        const sData = Array.isArray(sitesJson.data) ? sitesJson.data : (Array.isArray(sitesJson) ? sitesJson : []);
+        setDbSites(sData);
       }
-      if (compRes.data && compRes.data.length > 0) {
-        setDbCompanies(compRes.data);
-        setLegacyCompanyId((prev) => prev || compRes.data[0].id);
+      if (compRes.ok) {
+        const compJson = await compRes.json();
+        const cData = Array.isArray(compJson.data) ? compJson.data : (Array.isArray(compJson) ? compJson : []);
+        setDbCompanies(cData);
+        if (cData.length > 0) {
+          setLegacyCompanyId((prev) => prev || cData[0].id);
+        }
       }
     } catch (err) {
       console.warn('Failed to load master sites/companies:', err);
@@ -788,15 +793,10 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
       // 1. Create cloned revision invoice
       await createInvoiceApi(payload as any);
 
-      // 2. Mark previous proforma as "Revised" in Supabase
-      const { error: updateErr } = await supabase
-        .from('invoices')
-        .update({ status: 'Revised' })
-        .eq('id', inv.id);
-
-      if (updateErr) {
-        console.warn('Failed to update old proforma status to Revised:', updateErr.message);
-      }
+      // 2. Mark previous proforma as "Revised"
+      await updateInvoiceApi(inv.id, { status: 'Revised' } as any).catch((err) => {
+        console.warn('Failed to update old proforma status to Revised:', err?.message || err);
+      });
 
       toast.success(`Created revision ${newInvoiceNo}`);
       await loadInvoicesFromApi();
@@ -809,58 +809,8 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
   // Action Handler: Convert Proforma to Tax Invoice
   const handleConvertToTax = async (inv: InvoiceRecord) => {
     try {
-      const data = convertRecordToInvoiceData(inv);
-      // Fetch company to get tax prefix & sequence
-      const compId = inv.company_id || inv.companyId;
-      let taxSeq = 1;
-      let taxPrefix = 'AS/26-27/';
-
-      if (compId) {
-        const { data: comp } = await supabase.from('companies').select('tax_prefix, tax_sequence').eq('id', compId).maybeSingle();
-        if (comp) {
-          taxPrefix = comp.tax_prefix || 'AS/26-27/';
-          taxSeq = comp.tax_sequence ?? 1;
-        }
-      }
-
-      const formattedSeq = String(taxSeq).padStart(3, '0');
-      const newTaxInvoiceNo = `${taxPrefix}${formattedSeq}`;
-
-      const now = new Date().toISOString().split('T')[0];
-      const payload = {
-        company_id: inv.company_id || inv.companyId,
-        site_id: inv.site_id || inv.siteId,
-        invoice_no: newTaxInvoiceNo,
-        type: 'Tax Invoice' as const,
-        status: 'Pending' as const,
-        invoice_date: now,
-        billing_period: inv.billing_period || inv.monthYear,
-        line_items: inv.line_items || [],
-        sub_total: inv.sub_total || 0,
-        tax_total: inv.tax_total || 0,
-        grand_total: inv.grand_total || inv.amount || 0,
-        management_fee_percent: (inv as any).management_fee_percent ?? (inv as any).mgmt_percent ?? 0,
-        mgmt_percent: (inv as any).management_fee_percent ?? (inv as any).mgmt_percent ?? 0,
-        machinery_charges: (inv as any).machinery_charges || 0,
-        material_charges: (inv as any).material_charges || 0,
-        additional_charges: (inv as any).additional_charges || [],
-        is_material: (inv as any).is_material || false,
-        previous_version_id: inv.id,
-        certified_doc_url: inv.certified_doc_url || null,
-        certified_attendance_url: inv.certified_attendance_url || null,
-      };
-
-      // 1. Create Tax Invoice record
-      await createInvoiceApi(payload as any);
-
-      // 2. Mark old Proforma status as "Approved"
-      await supabase.from('invoices').update({ status: 'Approved' }).eq('id', inv.id);
-
-      // 3. Increment company tax_sequence in database
-      if (compId) {
-        await supabase.from('companies').update({ tax_sequence: taxSeq + 1 }).eq('id', compId);
-      }
-
+      const res = await convertToTaxInvoiceApi(inv.id);
+      const newTaxInvoiceNo = res.data?.invoice_no || 'New Tax Invoice';
       toast.success(`Converted to Tax Invoice ${newTaxInvoiceNo}`);
       setActiveTab('Tax');
       await loadInvoicesFromApi();

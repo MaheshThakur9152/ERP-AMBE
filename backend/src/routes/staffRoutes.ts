@@ -4,6 +4,9 @@ import { requireAuth, requireAdmin, checkLockBouncer, checkFieldLockBouncer } fr
 
 const router = Router();
 
+// Staff creation
+router.post('/', requireAuth, requireAdmin, StaffController.create);
+
 // Staff listing & details
 router.get('/', requireAuth, StaffController.list);
 router.get('/:id', requireAuth, StaffController.getById);

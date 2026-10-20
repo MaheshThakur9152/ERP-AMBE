@@ -1,11 +1,23 @@
 import { Request, Response, NextFunction } from 'express';
 import { SiteService } from '../services/siteService';
 import { ApiResponse } from '../types/api';
+import { RedisCache } from '../config/redis';
 
 export class SiteController {
   static async list(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
+      const scopeKey = req.user?.company_id || req.user?.id || 'all';
+      const cacheKey = `erp:sites:${scopeKey}`;
+      const cached = await RedisCache.get<any[]>(cacheKey);
+      if (cached) {
+        res.setHeader('X-Cache', 'HIT');
+        res.json({ success: true, data: cached });
+        return;
+      }
+
       const sites = await SiteService.getAllSites(req.user);
+      await RedisCache.set(cacheKey, sites, 300);
+      res.setHeader('X-Cache', 'MISS');
       const response: ApiResponse = { success: true, data: sites };
       res.json(response);
     } catch (err: any) {
@@ -33,6 +45,8 @@ export class SiteController {
   static async create(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const site = await SiteService.createSite(req.body, req.user);
+      await RedisCache.invalidatePrefix('erp:sites:');
+      await RedisCache.invalidatePrefix('erp:ratecards:');
       const response: ApiResponse = { success: true, data: site };
       res.status(201).json(response);
     } catch (err: any) {
@@ -45,6 +59,8 @@ export class SiteController {
     try {
       const { id } = req.params;
       const site = await SiteService.updateSite(id, req.body, req.user);
+      await RedisCache.invalidatePrefix('erp:sites:');
+      await RedisCache.invalidatePrefix('erp:ratecards:');
       const response: ApiResponse = { success: true, data: site };
       res.json(response);
     } catch (err: any) {
@@ -57,6 +73,8 @@ export class SiteController {
     try {
       const { id } = req.params;
       await SiteService.deleteSite(id, req.user);
+      await RedisCache.invalidatePrefix('erp:sites:');
+      await RedisCache.invalidatePrefix('erp:ratecards:');
       const response: ApiResponse = { success: true, message: 'Site deleted successfully', id };
       res.status(200).json(response);
     } catch (err: any) {

@@ -2,12 +2,17 @@ import { Request, Response } from 'express';
 import { supabaseAdmin } from '../config/supabase';
 import { COOKIE_OPTIONS, REFRESH_TOKEN_MAX_AGE } from '../config/constants';
 import { fetchUserRole } from '../middlewares/authMiddleware';
+import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import { TokenService } from '../services/tokenService';
+import { NativeAuthService } from '../services/nativeAuthService';
+import { pool } from '../db/pool';
+import { AuthUser } from '../types/express';
 
 export class AuthController {
   /**
    * POST /api/auth/login
-   * Authenticates user via Supabase.
+   * Authenticates user via PostgreSQL native auth, falling back to Supabase.
    * Returns short-lived access token in response body.
    * Sets long-lived rotating refresh token in HTTP-only, Secure, SameSite=Strict cookie.
    */
@@ -23,7 +28,39 @@ export class AuthController {
       // Format pseudo-email if domain omitted (e.g. ambe -> ambe@ambe.local)
       const email = rawEmail.includes('@') ? rawEmail.trim() : `${rawEmail.trim()}@ambe.local`;
 
-      // Authenticate user with Supabase Auth
+      // 1. Native PostgreSQL authentication via public.app_users
+      const nativeAuth = await NativeAuthService.validateCredentials(email, password);
+      if (nativeAuth) {
+        const { user } = nativeAuth;
+        const accessToken = NativeAuthService.generateAccessToken(user);
+
+        let rawRefreshToken: string;
+        try {
+          const tokenResult = await TokenService.createRefreshToken(user.id, undefined);
+          rawRefreshToken = tokenResult.rawToken;
+        } catch (dbErr: any) {
+          rawRefreshToken = accessToken;
+        }
+
+        res.cookie('refresh_token', rawRefreshToken, {
+          ...COOKIE_OPTIONS,
+          maxAge: REFRESH_TOKEN_MAX_AGE,
+        });
+
+        res.status(200).json({
+          success: true,
+          token: accessToken,
+          access_token: accessToken,
+          user: {
+            id: user.id,
+            email: user.email,
+            role: user.role,
+          },
+        });
+        return;
+      }
+
+      // 2. Fallback to Supabase Auth
       const { data, error } = await supabaseAdmin.auth.signInWithPassword({
         email,
         password,
@@ -123,6 +160,42 @@ export class AuthController {
         targetUserId = validation.userId;
         targetSupabaseRefreshToken = validation.supabaseRefreshToken || presentedRefreshToken;
         newRawRefreshToken = validation.newRawToken;
+
+        // Check if targetUserId is a native PostgreSQL app_user
+        if (targetUserId) {
+          const appUserRes = await pool.query('SELECT * FROM public.app_users WHERE id = $1 LIMIT 1;', [targetUserId]);
+          if (appUserRes.rows && appUserRes.rows.length > 0) {
+            const row = appUserRes.rows[0];
+            const user = {
+              id: row.id,
+              email: row.email,
+              role: (row.role === 'superadmin' ? 'superadmin' : 'admin') as 'superadmin' | 'admin',
+              company_id: row.company_id || undefined,
+              companyId: row.company_id || undefined,
+            };
+            const newAccessToken = NativeAuthService.generateAccessToken(user);
+
+            if (newRawRefreshToken) {
+              res.cookie('refresh_token', newRawRefreshToken, {
+                ...COOKIE_OPTIONS,
+                maxAge: REFRESH_TOKEN_MAX_AGE,
+              });
+            }
+
+            res.status(200).json({
+              success: true,
+              token: newAccessToken,
+              access_token: newAccessToken,
+              refresh_token: newRawRefreshToken,
+              user: {
+                id: user.id,
+                email: user.email,
+                role: user.role,
+              },
+            });
+            return;
+          }
+        }
       } catch (dbErr: any) {
         console.warn('[auth:refresh] DB validation exception, checking direct Supabase refresh:', dbErr.message);
       }
@@ -270,32 +343,265 @@ export class AuthController {
         return;
       }
 
-      const { data, error } = await supabaseAdmin
-        .from('user_roles')
-        .upsert(
-          {
-            user_id: targetUserId,
-            role: newRole,
-          },
-          { onConflict: 'user_id' }
-        )
-        .select('*')
-        .single();
+      await pool.query(
+        'UPDATE public.app_users SET role = $1, updated_at = NOW() WHERE id = $2;',
+        [newRole, targetUserId]
+      );
 
-      if (error) {
-        console.error('Failed to update role in user_roles table:', error);
-        res.status(500).json({ error: `Database error updating user_roles: ${error.message}` });
-        return;
-      }
+      const roleRes = await pool.query(
+        `INSERT INTO public.user_roles (user_id, role)
+         VALUES ($1, $2)
+         ON CONFLICT (user_id) DO UPDATE SET role = EXCLUDED.role
+         RETURNING *;`,
+        [targetUserId, newRole]
+      );
 
       res.status(200).json({
         success: true,
         message: `Role for user ${targetUserId} successfully updated to ${newRole}`,
-        data,
+        data: roleRes.rows[0],
       });
     } catch (err: any) {
       console.error('updateRole error:', err);
       res.status(500).json({ error: 'Internal server error updating role' });
+    }
+  }
+
+  /**
+   * POST /api/auth/invite-user
+   * SuperAdmin generates an onboarding invitation token for a new user
+   */
+  static async inviteUser(req: Request, res: Response): Promise<void> {
+    try {
+      const { email: rawEmail, role = 'admin', company_id } = req.body;
+      if (!rawEmail) {
+        res.status(400).json({ error: 'Email is required' });
+        return;
+      }
+      const email = rawEmail.trim().toLowerCase();
+      const validRole = role === 'superadmin' ? 'superadmin' : 'admin';
+
+      let userRes = await pool.query('SELECT id, email, role FROM public.app_users WHERE LOWER(email) = $1', [email]);
+      let userId: string;
+      if (userRes.rows.length === 0) {
+        const createRes = await pool.query(
+          `INSERT INTO public.app_users (email, role, company_id, is_active, created_at, updated_at)
+           VALUES ($1, $2, $3, true, NOW(), NOW())
+           RETURNING id;`,
+          [email, validRole, company_id || null]
+        );
+        userId = createRes.rows[0].id;
+        await pool.query(
+          'INSERT INTO public.user_roles (user_id, role) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET role = EXCLUDED.role;',
+          [userId, validRole]
+        );
+      } else {
+        userId = userRes.rows[0].id;
+      }
+
+      const rawToken = crypto.randomBytes(32).toString('hex');
+      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+      await pool.query(
+        `INSERT INTO public.user_invitations (user_id, token_hash, type, expires_at)
+         VALUES ($1, $2, 'invitation', $3);`,
+        [userId, tokenHash, expiresAt]
+      );
+
+      res.status(200).json({
+        success: true,
+        message: `Invitation generated for ${email}`,
+        invitationToken: rawToken,
+        expiresAt,
+      });
+    } catch (err: any) {
+      console.error('[auth:inviteUser:error]', err.message);
+      res.status(500).json({ error: 'Failed to generate invitation', details: err.message });
+    }
+  }
+
+  /**
+   * POST /api/auth/set-initial-password
+   * Sets initial password for invited user using their token
+   */
+  static async setInitialPassword(req: Request, res: Response): Promise<void> {
+    try {
+      const { token, password } = req.body;
+      if (!token || !password) {
+        res.status(400).json({ error: 'Token and password are required' });
+        return;
+      }
+      if (password.length < 6) {
+        res.status(400).json({ error: 'Password must be at least 6 characters long' });
+        return;
+      }
+
+      const tokenHash = crypto.createHash('sha256').update(token.trim()).digest('hex');
+      const invRes = await pool.query(
+        `SELECT ui.*, u.email, u.role, u.company_id
+         FROM public.user_invitations ui
+         JOIN public.app_users u ON u.id = ui.user_id
+         WHERE ui.token_hash = $1
+           AND ui.type = 'invitation'
+           AND ui.used_at IS NULL
+           AND ui.expires_at > NOW()
+         LIMIT 1;`,
+        [tokenHash]
+      );
+
+      if (invRes.rows.length === 0) {
+        res.status(400).json({ error: 'Invalid or expired invitation token' });
+        return;
+      }
+
+      const invitation = invRes.rows[0];
+      const passwordHash = await bcrypt.hash(password, 10);
+
+      await pool.query('UPDATE public.app_users SET password_hash = $1, is_active = true, updated_at = NOW() WHERE id = $2;', [
+        passwordHash,
+        invitation.user_id,
+      ]);
+      await pool.query('UPDATE public.user_invitations SET used_at = NOW() WHERE id = $1;', [invitation.id]);
+
+      const authUser: AuthUser = {
+        id: invitation.user_id,
+        email: invitation.email,
+        role: invitation.role === 'superadmin' ? 'superadmin' : 'admin',
+        company_id: invitation.company_id || undefined,
+        companyId: invitation.company_id || undefined,
+      };
+
+      const accessToken = NativeAuthService.generateAccessToken(authUser);
+      const rawRefreshToken = await TokenService.createRefreshToken(invitation.user_id, undefined, authUser.role);
+
+      res.cookie('refresh_token', rawRefreshToken, {
+        ...COOKIE_OPTIONS,
+        maxAge: REFRESH_TOKEN_MAX_AGE,
+      });
+
+      res.status(200).json({
+        success: true,
+        accessToken,
+        user: authUser,
+      });
+    } catch (err: any) {
+      console.error('[auth:setInitialPassword:error]', err.message);
+      res.status(500).json({ error: 'Failed to set password', details: err.message });
+    }
+  }
+
+  /**
+   * POST /api/auth/forgot-password
+   * Initiates password reset for an account
+   */
+  static async forgotPassword(req: Request, res: Response): Promise<void> {
+    try {
+      const { email: rawEmail } = req.body;
+      if (!rawEmail) {
+        res.status(400).json({ error: 'Email is required' });
+        return;
+      }
+      const email = rawEmail.trim().toLowerCase();
+      const userRes = await pool.query('SELECT id, email FROM public.app_users WHERE LOWER(email) = $1 LIMIT 1;', [email]);
+
+      if (userRes.rows.length === 0) {
+        res.status(200).json({ success: true, message: 'If an account exists, a reset link has been generated.' });
+        return;
+      }
+
+      const userId = userRes.rows[0].id;
+      const rawToken = crypto.randomBytes(32).toString('hex');
+      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+      const expiresAt = new Date(Date.now() + 1 * 60 * 60 * 1000); // 1 hour
+
+      await pool.query(
+        `INSERT INTO public.user_invitations (user_id, token_hash, type, expires_at)
+         VALUES ($1, $2, 'reset', $3);`,
+        [userId, tokenHash, expiresAt]
+      );
+
+      res.status(200).json({
+        success: true,
+        message: 'Password reset link generated.',
+        resetToken: rawToken,
+        expiresAt,
+      });
+    } catch (err: any) {
+      console.error('[auth:forgotPassword:error]', err.message);
+      res.status(500).json({ error: 'Failed to process forgot password request', details: err.message });
+    }
+  }
+
+  /**
+   * POST /api/auth/reset-password
+   * Finalizes password reset with token
+   */
+  static async resetPassword(req: Request, res: Response): Promise<void> {
+    try {
+      const { token, password } = req.body;
+      if (!token || !password) {
+        res.status(400).json({ error: 'Token and password are required' });
+        return;
+      }
+      if (password.length < 6) {
+        res.status(400).json({ error: 'Password must be at least 6 characters long' });
+        return;
+      }
+
+      const tokenHash = crypto.createHash('sha256').update(token.trim()).digest('hex');
+      const invRes = await pool.query(
+        `SELECT ui.*, u.email, u.role, u.company_id
+         FROM public.user_invitations ui
+         JOIN public.app_users u ON u.id = ui.user_id
+         WHERE ui.token_hash = $1
+           AND ui.type = 'reset'
+           AND ui.used_at IS NULL
+           AND ui.expires_at > NOW()
+         LIMIT 1;`,
+        [tokenHash]
+      );
+
+      if (invRes.rows.length === 0) {
+        res.status(400).json({ error: 'Invalid or expired password reset token' });
+        return;
+      }
+
+      const invitation = invRes.rows[0];
+      const passwordHash = await bcrypt.hash(password, 10);
+
+      await pool.query('UPDATE public.app_users SET password_hash = $1, is_active = true, updated_at = NOW() WHERE id = $2;', [
+        passwordHash,
+        invitation.user_id,
+      ]);
+      await pool.query('UPDATE public.user_invitations SET used_at = NOW() WHERE id = $1;', [invitation.id]);
+
+      await TokenService.revokeAllUserTokens(invitation.user_id);
+
+      const authUser: AuthUser = {
+        id: invitation.user_id,
+        email: invitation.email,
+        role: invitation.role === 'superadmin' ? 'superadmin' : 'admin',
+        company_id: invitation.company_id || undefined,
+        companyId: invitation.company_id || undefined,
+      };
+
+      const accessToken = NativeAuthService.generateAccessToken(authUser);
+      const rawRefreshToken = await TokenService.createRefreshToken(invitation.user_id, undefined, authUser.role);
+
+      res.cookie('refresh_token', rawRefreshToken, {
+        ...COOKIE_OPTIONS,
+        maxAge: REFRESH_TOKEN_MAX_AGE,
+      });
+
+      res.status(200).json({
+        success: true,
+        accessToken,
+        user: authUser,
+      });
+    } catch (err: any) {
+      console.error('[auth:resetPassword:error]', err.message);
+      res.status(500).json({ error: 'Failed to reset password', details: err.message });
     }
   }
 }

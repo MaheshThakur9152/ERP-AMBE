@@ -12,7 +12,7 @@ import {
   Edit,
   CheckCircle,
 } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+import { fetchWithRetry } from '@/lib/apiClient';
 
 export interface SiteOption {
   id: string;
@@ -68,8 +68,16 @@ export const AdvancesHub: React.FC = () => {
   useEffect(() => {
     const fetchSites = async () => {
       try {
-        const { data } = await supabase.from('sites').select('id, site_name, code_name').order('site_name');
-        if (data) setSites(data);
+        const res = await fetchWithRetry('/api/sites');
+        if (res.ok) {
+          const json = await res.json();
+          const data = Array.isArray(json.data) ? json.data : (Array.isArray(json) ? json : []);
+          setSites(data.map((s: any) => ({
+            id: s.id,
+            site_name: s.site_name || s.name || '',
+            code_name: s.code_name || s.codeName || '',
+          })));
+        }
       } catch (err) {
         console.error('Failed to load sites:', err);
       }
@@ -83,20 +91,17 @@ export const AdvancesHub: React.FC = () => {
     setStatusMessage(null);
     try {
       const monthYearStr = `${selectedMonth} ${selectedYear}`;
-      let query = supabase
-        .from('payroll_records')
-        .select('*, staff(*)')
-        .eq('month_year', monthYearStr);
-
+      let url = `/api/payroll?month_year=${encodeURIComponent(monthYearStr)}`;
       if (selectedSiteId !== 'all') {
-        query = query.eq('site_id', selectedSiteId);
+        url += `&site_id=${encodeURIComponent(selectedSiteId)}`;
       }
 
-      const { data, error } = await query;
-      if (error) {
-        console.error('Error fetching advance records:', error);
+      const res = await fetchWithRetry(url);
+      if (res.ok) {
+        const json = await res.json();
+        setRecords(json.data || []);
       } else {
-        setRecords(data || []);
+        setRecords([]);
       }
     } catch (err: any) {
       console.error('Failed to load advances:', err);
@@ -183,7 +188,7 @@ export const AdvancesHub: React.FC = () => {
     }
   };
 
-  // Save Modal Changes to Supabase
+  // Save Modal Changes to Database via API
   const handleSaveModal = async () => {
     if (!activeRecord) return;
     const total = currentAdvTotal;
@@ -211,42 +216,20 @@ export const AdvancesHub: React.FC = () => {
       // Remove joined staff relation before upserting
       delete payload.staff;
 
-      const { error: fullError } = await supabase.from('payroll_records').upsert([payload], {
-        onConflict: 'staff_id,month_year',
+      const res = await fetchWithRetry('/api/payroll/records', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([payload]),
       });
 
-      if (fullError) {
-        console.warn('Full payload upsert failed, retrying fallback to core advances column:', fullError.message);
-        const fallbackPayload: any = { ...payload };
-        delete fallbackPayload.adv_amt;
-        delete fallbackPayload.shirt;
-        delete fallbackPayload.pant;
-        delete fallbackPayload.shoes;
-        delete fallbackPayload.id_card;
-        delete fallbackPayload.other_amt;
-        delete fallbackPayload.remark;
-        delete fallbackPayload.adv_date;
-        delete fallbackPayload.adv_total;
-        delete fallbackPayload.in_this_mth;
-        delete fallbackPayload.in_next_mth;
-
-        const { error: fallbackError } = await supabase.from('payroll_records').upsert([fallbackPayload], {
-          onConflict: 'staff_id,month_year',
-        });
-
-        if (fallbackError) {
-          console.error('Supabase Save Error:', fallbackError);
-          alert(`Failed to save! ${fallbackError.message}`);
-        } else {
-          setStatusMessage({ type: 'success', text: `Saved advance ledger for ${activeRecord.employee_name}!` });
-          setActiveRecord(null);
-          loadAdvancesData();
-        }
-      } else {
-        setStatusMessage({ type: 'success', text: `Saved advance ledger for ${activeRecord.employee_name}!` });
-        setActiveRecord(null);
-        loadAdvancesData();
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || `Failed to save advances: status ${res.status}`);
       }
+
+      setStatusMessage({ type: 'success', text: `Saved advance ledger for ${activeRecord.employee_name}!` });
+      setActiveRecord(null);
+      loadAdvancesData();
     } catch (err: any) {
       console.error('Save error:', err);
       alert(`Save error: ${err.message}`);

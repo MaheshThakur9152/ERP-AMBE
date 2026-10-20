@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
-import { supabaseAdmin } from '../config/supabase';
+import { pool } from '../db/pool';
 
 function getFYMonths(financialYear: string): string[] {
   // e.g. "2026-27" -> startYear = 2026, endYear = 2027
@@ -43,23 +43,22 @@ export const BonusController = {
       const fyMonths = getFYMonths(financialYear);
 
       // 1. Fetch Staff
-      let staffQuery = supabaseAdmin
-        .from('staff')
-        .select('id, employee_name, biometric_code, designation, status, site_id, sites(site_name, code_name)')
-        .order('employee_name', { ascending: true });
-
+      let staffQuery = `
+        SELECT s.id, s.employee_name, s.biometric_code, s.designation, s.status, s.site_id,
+               json_build_object('site_name', st.site_name, 'code_name', st.code_name) AS sites
+        FROM public.staff s
+        LEFT JOIN public.sites st ON st.id = s.site_id
+        WHERE 1=1
+      `;
+      const staffParams: any[] = [];
       if (siteId && siteId !== 'all') {
-        staffQuery = staffQuery.eq('site_id', siteId);
+        staffParams.push(siteId);
+        staffQuery += ` AND s.site_id = $${staffParams.length}`;
       }
+      staffQuery += ' ORDER BY s.employee_name ASC;';
 
-      const { data: staffData, error: staffErr } = await staffQuery;
-      if (staffErr) {
-        console.error('[BonusController:getSummary] Staff query error:', staffErr);
-        res.status(500).json({ error: staffErr.message });
-        return;
-      }
-
-      const staffList = staffData || [];
+      const staffRes = await pool.query(staffQuery, staffParams);
+      const staffList = staffRes.rows || [];
       const staffIds = staffList.map((s: any) => s.id);
 
       if (staffIds.length === 0) {
@@ -74,33 +73,28 @@ export const BonusController = {
       }
 
       // 2. Fetch Payroll Records in FY Months
-      let payrollQuery = supabaseAdmin
-        .from('payroll_records')
-        .select('staff_id, month_year, remaining_part_bonus, earned_bonus, earned_part_bonus')
-        .in('month_year', fyMonths)
-        .in('staff_id', staffIds);
-
-      const { data: payrollData, error: payrollErr } = await payrollQuery;
-      if (payrollErr) {
-        console.error('[BonusController:getSummary] Payroll query error:', payrollErr);
-      }
+      const prRes = await pool.query(
+        `SELECT staff_id, month_year, remaining_part_bonus, earned_bonus, earned_part_bonus
+         FROM public.payroll_records
+         WHERE month_year = ANY($1::text[]) AND staff_id = ANY($2::uuid[]);`,
+        [fyMonths, staffIds]
+      );
+      const payrollData = prRes.rows || [];
 
       // 3. Fetch Bonus Disbursements for FY
-      let disbQuery = supabaseAdmin
-        .from('bonus_disbursements')
-        .select('*')
-        .eq('financial_year', financialYear)
-        .in('staff_id', staffIds)
-        .order('disbursed_date', { ascending: false });
-
-      const { data: disbData, error: disbErr } = await disbQuery;
-      if (disbErr) {
-        console.error('[BonusController:getSummary] Disbursements query error:', disbErr);
-      }
+      const disbRes = await pool.query(
+        `SELECT id, staff_id, financial_year, amount, disbursed_at, notes, created_at,
+                disbursed_at::date::text AS disbursed_date, notes AS remark
+         FROM public.bonus_disbursements
+         WHERE financial_year = $1 AND staff_id = ANY($2::uuid[])
+         ORDER BY disbursed_at DESC;`,
+        [financialYear, staffIds]
+      );
+      const disbData = disbRes.rows || [];
 
       // 4. Map & aggregate
       const payrollMap = new Map<string, { totalAccrued: number; months: Record<string, number> }>();
-      (payrollData || []).forEach((pr: any) => {
+      payrollData.forEach((pr: any) => {
         const sid = pr.staff_id;
         if (!payrollMap.has(sid)) {
           payrollMap.set(sid, { totalAccrued: 0, months: {} });
@@ -112,7 +106,7 @@ export const BonusController = {
       });
 
       const disbMap = new Map<string, { totalDisbursed: number; list: any[] }>();
-      (disbData || []).forEach((d: any) => {
+      disbData.forEach((d: any) => {
         const sid = d.staff_id;
         if (!disbMap.has(sid)) {
           disbMap.set(sid, { totalDisbursed: 0, list: [] });
@@ -139,7 +133,7 @@ export const BonusController = {
         grandDisbursed += disbursed;
         grandBalance += balance;
 
-        const siteObj = Array.isArray(s.sites) ? s.sites[0] : s.sites;
+        const siteObj = s.sites;
 
         return {
           staff_id: s.id,
@@ -189,34 +183,24 @@ export const BonusController = {
         return;
       }
 
-      const { staff_id, site_id, financial_year, amount, disbursed_date, remark } = parsed.data;
+      const { staff_id, financial_year, amount, disbursed_date, remark } = parsed.data;
 
       // 1. Calculate accrued total for this FY
       const fyMonths = getFYMonths(financial_year);
-      const { data: prs, error: prErr } = await supabaseAdmin
-        .from('payroll_records')
-        .select('remaining_part_bonus')
-        .in('month_year', fyMonths)
-        .eq('staff_id', staff_id);
-
-      if (prErr) {
-        console.error('[BonusController:recordDisbursement] PR fetch error:', prErr);
-      }
-
-      const accrued = (prs || []).reduce((acc: number, r: any) => acc + (Number(r.remaining_part_bonus) || 0), 0);
+      const prRes = await pool.query(
+        `SELECT remaining_part_bonus FROM public.payroll_records
+         WHERE month_year = ANY($1::text[]) AND staff_id = $2;`,
+        [fyMonths, staff_id]
+      );
+      const accrued = (prRes.rows || []).reduce((acc: number, r: any) => acc + (Number(r.remaining_part_bonus) || 0), 0);
 
       // 2. Calculate existing disbursements
-      const { data: priorDisb, error: priorErr } = await supabaseAdmin
-        .from('bonus_disbursements')
-        .select('amount')
-        .eq('financial_year', financial_year)
-        .eq('staff_id', staff_id);
-
-      if (priorErr) {
-        console.error('[BonusController:recordDisbursement] Prior disb error:', priorErr);
-      }
-
-      const alreadyDisbursed = (priorDisb || []).reduce((acc: number, d: any) => acc + (Number(d.amount) || 0), 0);
+      const priorRes = await pool.query(
+        `SELECT amount FROM public.bonus_disbursements
+         WHERE financial_year = $1 AND staff_id = $2;`,
+        [financial_year, staff_id]
+      );
+      const alreadyDisbursed = (priorRes.rows || []).reduce((acc: number, d: any) => acc + (Number(d.amount) || 0), 0);
       const outstanding = Math.max(0, Math.round(accrued - alreadyDisbursed));
 
       if (amount > outstanding + 1) { // 1 rupee margin for rounding
@@ -228,26 +212,14 @@ export const BonusController = {
       }
 
       // 3. Insert disbursement record
-      const { data: inserted, error: insErr } = await supabaseAdmin
-        .from('bonus_disbursements')
-        .insert([
-          {
-            staff_id,
-            site_id: site_id || null,
-            financial_year,
-            amount,
-            disbursed_date,
-            remark: remark || '',
-          },
-        ])
-        .select()
-        .single();
-
-      if (insErr) {
-        console.error('[BonusController:recordDisbursement] Insert error:', insErr);
-        res.status(500).json({ error: `Failed to record bonus disbursement: ${insErr.message}` });
-        return;
-      }
+      const insertRes = await pool.query(
+        `INSERT INTO public.bonus_disbursements (staff_id, financial_year, amount, disbursed_at, notes, disbursed_by)
+         VALUES ($1, $2, $3, $4::timestamptz, $5, $6)
+         RETURNING id, staff_id, financial_year, amount, disbursed_at, notes, created_at,
+                   disbursed_at::date::text AS disbursed_date, notes AS remark;`,
+        [staff_id, financial_year, amount, disbursed_date, remark || '', req.user?.id || null]
+      );
+      const inserted = insertRes.rows[0];
 
       const updatedBalance = Math.max(0, outstanding - Math.round(amount));
 
@@ -270,21 +242,21 @@ export const BonusController = {
   async getHistory(req: Request, res: Response): Promise<void> {
     try {
       const { staffId } = req.params;
-      const { data, error } = await supabaseAdmin
-        .from('bonus_disbursements')
-        .select('*, sites(site_name, code_name)')
-        .eq('staff_id', staffId)
-        .order('disbursed_date', { ascending: false });
-
-      if (error) {
-        console.error('[BonusController:getHistory] Error fetching history:', error);
-        res.status(500).json({ error: error.message });
-        return;
-      }
+      const result = await pool.query(
+        `SELECT bd.id, bd.staff_id, bd.financial_year, bd.amount, bd.disbursed_at, bd.notes, bd.created_at,
+                bd.disbursed_at::date::text AS disbursed_date, bd.notes AS remark,
+                json_build_object('site_name', st.site_name, 'code_name', st.code_name) AS sites
+         FROM public.bonus_disbursements bd
+         LEFT JOIN public.staff s ON s.id = bd.staff_id
+         LEFT JOIN public.sites st ON st.id = s.site_id
+         WHERE bd.staff_id = $1
+         ORDER BY bd.disbursed_at DESC;`,
+        [staffId]
+      );
 
       res.status(200).json({
         success: true,
-        history: data || [],
+        history: result.rows || [],
       });
     } catch (err: any) {
       console.error('[BonusController:getHistory] Unexpected error:', err);

@@ -15,7 +15,6 @@ import {
   Loader2,
   Lock,
 } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
 import { fetchWithRetry } from '@/lib/apiClient';
 import { toast } from '@/components/ui/toast';
 import { useAuth } from '@/features/auth/context/AuthContext';
@@ -142,18 +141,12 @@ export const StaffFormModal: React.FC<StaffFormModalProps> = ({
       return;
     }
     try {
+      const q = sId ? `site_id=${encodeURIComponent(sId)}` : `site_name=${encodeURIComponent(sName || '')}`;
+      const res = await fetchWithRetry(`/api/rate-cards?${q}`);
       let list: any[] = [];
-      let query = supabase.from('rate_cards').select('*');
-      if (sId && sName) {
-        query = query.or(`site_id.eq.${sId},site_name.eq.${sName}`);
-      } else if (sId) {
-        query = query.eq('site_id', sId);
-      } else if (sName) {
-        query = query.eq('site_name', sName);
-      }
-      const { data, error } = await query.order('created_at', { ascending: false });
-      if (!error && data) {
-        // Filter out zero-salary billing artifacts if any exist
+      if (res.ok) {
+        const json = await res.json();
+        const data = json.data || [];
         list = data.filter(
           (rc: any) =>
             Boolean(rc.is_flat_wage) ||
@@ -161,7 +154,6 @@ export const StaffFormModal: React.FC<StaffFormModalProps> = ({
             Number(rc.basic_da || 0) > 0
         );
       }
-
       setRateCardsOptions(list);
     } catch (e) {
       console.warn('Error fetching payroll rate cards for modal:', e);
@@ -175,20 +167,7 @@ export const StaffFormModal: React.FC<StaffFormModalProps> = ({
       const response = await fetchWithRetry(`/api/documents/employee?staff_id=${encodeURIComponent(staffId)}`);
       if (response.ok) {
         const json = await response.json();
-        if (json.success && Array.isArray(json.data)) {
-          setStaffDocs(json.data);
-          return;
-        }
-      }
-
-      const { data, error } = await supabase
-        .from('employee_documents')
-        .select('*')
-        .eq('staff_id', staffId)
-        .order('uploaded_at', { ascending: false });
-
-      if (!error && data) {
-        setStaffDocs(data);
+        setStaffDocs(json.data || []);
       } else {
         setStaffDocs([]);
       }
@@ -205,19 +184,21 @@ export const StaffFormModal: React.FC<StaffFormModalProps> = ({
         if (propSites && propSites.length > 0) {
           setAvailableSites(propSites);
         } else {
-          const { data: sitesData } = await supabase
-            .from('sites')
-            .select('id, site_name, code_name, companies(name)')
-            .order('site_name', { ascending: true });
-          if (sitesData) setAvailableSites(sitesData);
+          const res = await fetchWithRetry('/api/sites');
+          if (res.ok) {
+            const json = await res.json();
+            setAvailableSites(json.data || []);
+          }
         }
 
-        const { data: desigData } = await supabase
-          .from('staff')
-          .select('designation')
-          .not('designation', 'is', null)
-          .neq('designation', '')
-          .order('designation', { ascending: true });
+        const staffRes = await fetchWithRetry('/api/staff');
+        const desigSet = new Set<string>();
+        if (staffRes.ok) {
+          const staffJson = await staffRes.json();
+          (staffJson.data || []).forEach((st: any) => {
+            if (st.designation?.trim()) desigSet.add(st.designation.trim());
+          });
+        }
 
         const defaults = [
           'Keyman',
@@ -239,7 +220,7 @@ export const StaffFormModal: React.FC<StaffFormModalProps> = ({
         const distinct = Array.from(
           new Set([
             ...defaults,
-            ...(desigData ? desigData.map((d: any) => d.designation?.trim()).filter(Boolean) : []),
+            ...Array.from(desigSet),
           ])
         ) as string[];
 
@@ -555,28 +536,15 @@ export const StaffFormModal: React.FC<StaffFormModalProps> = ({
           }
         }
 
-        // Try backend API first, fallback to supabase update
-        let updatedSuccess = false;
-        try {
-          const response = await fetchWithRetry(`/api/staff/${encodeURIComponent(staffId)}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-          if (response.ok) {
-            updatedSuccess = true;
-          }
-        } catch (apiErr) {
-          console.warn('API staff update failed, falling back to supabase client:', apiErr);
-        }
-
-        if (!updatedSuccess) {
-          const { error: sbErr } = await supabase
-            .from('staff')
-            .update(payload)
-            .eq('id', staffId);
-
-          if (sbErr) throw sbErr;
+        // Update via backend API
+        const response = await fetchWithRetry(`/api/staff/${encodeURIComponent(staffId)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || 'Failed to update staff member via API');
         }
 
         toast.success(
@@ -585,10 +553,17 @@ export const StaffFormModal: React.FC<StaffFormModalProps> = ({
             : 'Staff record updated successfully'
         );
       } else {
-        // Add Mode -> insert with explicit is_locked: false
+        // Add Mode -> call POST /api/staff via backend API
         payload.is_locked = false;
-        const { error: insertErr } = await supabase.from('staff').insert([payload]);
-        if (insertErr) throw insertErr;
+        const response = await fetchWithRetry('/api/staff', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || 'Failed to create staff member via API');
+        }
 
         toast.success('Staff member added successfully');
       }

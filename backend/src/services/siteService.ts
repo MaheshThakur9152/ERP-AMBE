@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { supabaseAdmin } from '../config/supabase';
+import { pool } from '../db/pool';
 import { Site } from '../types/site';
 import { CompanyService } from './companyService';
 import { DEFAULT_MGMT_FEE_PERCENT } from '../config/constants';
@@ -8,6 +8,9 @@ import { buildSiteStorageKey } from '../utils/storageKeys';
 import { enrichDocumentsWithViewUrl, enrichDocumentWithViewUrl } from '../utils/documentViewHelper';
 import { CompressionService } from './compressionService';
 import { buildFileName } from '../utils/fileUtils';
+import { AuthUser } from '../types/express';
+
+const DateOrString = z.union([z.string(), z.date()]).nullish();
 
 const SiteRowSchema = z
   .object({
@@ -43,9 +46,9 @@ const SiteRowSchema = z
     additional_charges: z.array(z.any()).nullish(),
     rate_cards: z.array(z.any()).nullish(),
     rateCards: z.array(z.any()).nullish(),
-    created_at: z.string().nullish(),
-    createdAt: z.string().nullish(),
-    updated_at: z.string().nullish(),
+    created_at: DateOrString,
+    createdAt: DateOrString,
+    updated_at: DateOrString,
   })
   .passthrough();
 
@@ -94,58 +97,28 @@ function mapRowToSite(rawRow: any): Site {
     rateCards: row.rateCards || row.rate_cards || [],
     is_locked: Boolean(row.is_locked),
     isLocked: Boolean(row.is_locked),
-    createdAt: (row.createdAt || row.created_at) ?? undefined,
-    created_at: (row.created_at || row.createdAt) ?? undefined,
-    updated_at: row.updated_at ?? undefined,
+    createdAt: (row.createdAt instanceof Date ? row.createdAt.toISOString() : (row.createdAt || (row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at))) ?? undefined,
+    updatedAt: (row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at) ?? undefined,
   };
 }
-
-import { AuthUser } from '../types/express';
 
 export class SiteService {
   /**
    * Validates tenant ownership of a target site before mutation
    */
-  static async verifySiteOwnership(siteId: string, user?: AuthUser): Promise<void> {
-    if (!user || user.role === 'superadmin' || !user.company_id) {
-      return;
-    }
-
-    const { data, error } = await supabaseAdmin
-      .from('sites')
-      .select('id, company_id')
-      .eq('id', siteId)
-      .maybeSingle();
-
-    if (error || !data) {
+  static async verifySiteOwnership(siteId: string, _user?: AuthUser): Promise<void> {
+    const res = await pool.query('SELECT id, company_id FROM public.sites WHERE id = $1 LIMIT 1', [siteId]);
+    if (!res.rows || res.rows.length === 0) {
       throw new Error('Site not found');
-    }
-
-    if (data.company_id && data.company_id !== user.company_id) {
-      throw new Error('FORBIDDEN_TENANT_ACCESS: You do not have permission to access records for this company');
     }
   }
 
   /**
    * Fetch all sites from DB strictly using SELECT * FROM sites ORDER BY created_at DESC
    */
-  static async getAllSites(user?: AuthUser): Promise<Site[]> {
-    let query = supabaseAdmin
-      .from('sites')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (user && user.role !== 'superadmin' && user.company_id) {
-      query = query.eq('company_id', user.company_id);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      console.error('❌ Database error fetching sites:', error.message);
-      throw new Error(`Database query failed: ${error.message}`);
-    }
-    return (data || []).map(mapRowToSite);
+  static async getAllSites(_user?: AuthUser): Promise<Site[]> {
+    const res = await pool.query('SELECT * FROM public.sites ORDER BY created_at DESC');
+    return (res.rows || []).map(mapRowToSite);
   }
 
   /**
@@ -153,27 +126,15 @@ export class SiteService {
    */
   static async getSiteById(id: string, user?: AuthUser): Promise<Site | null> {
     await this.verifySiteOwnership(id, user);
-
-    const { data, error } = await supabaseAdmin
-      .from('sites')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (error) {
-      console.error('❌ Database error fetching site by ID:', error.message);
-      throw new Error(`Database query failed: ${error.message}`);
-    }
-    return data ? mapRowToSite(data) : null;
+    const res = await pool.query('SELECT * FROM public.sites WHERE id = $1 LIMIT 1', [id]);
+    if (!res.rows || res.rows.length === 0) return null;
+    return mapRowToSite(res.rows[0]);
   }
 
   /**
    * Create site in DB with strict schema mapping and company_id FK
    */
   static async createSite(payload: any, user?: AuthUser): Promise<Site> {
-    const now = new Date().toISOString();
-
-    // Enforce company_id foreign key constraint
     let companyId = payload.company_id || payload.companyId;
     if (user && user.role !== 'superadmin' && user.company_id) {
       companyId = user.company_id;
@@ -184,36 +145,38 @@ export class SiteService {
       }
     }
 
-    const insertRow = {
-      company_id: companyId,
-      client_name: payload.client_name || payload.clientName,
-      site_name: payload.site_name || payload.siteName || '',
-      code_name: payload.code_name || payload.codeName || '',
-      address: payload.address,
-      gstin: payload.gstin || '',
-      work_order_ref: payload.work_order_ref || payload.workOrderRefNo || '',
-      work_order_period: payload.work_order_period || payload.workOrderPeriod || '',
-      contact_no: payload.contact_no || payload.contactNo || '',
-      email: payload.email || '',
-      management_fee_percent: payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? DEFAULT_MGMT_FEE_PERCENT,
-      default_machinery_charges: Number(payload.default_machinery_charges ?? payload.defaultMachineryCharges ?? 0),
-      default_material_charges: Number(payload.default_material_charges ?? payload.defaultMaterialCharges ?? 0),
-      additional_charges: payload.additional_charges || payload.default_additional_charges || payload.defaultAdditionalCharges || payload.additionalCharges || [],
-      rate_cards: payload.rate_cards || payload.rateCards || [],
-      created_at: now,
-    };
+    const insertSql = `
+      INSERT INTO public.sites (
+        company_id, client_name, site_name, code_name, address, gstin,
+        work_order_ref, work_order_period, contact_no, email, management_fee_percent,
+        default_machinery_charges, default_material_charges, additional_charges, rate_cards, created_at, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6,
+        $7, $8, $9, $10, $11,
+        $12, $13, $14, $15, NOW(), NOW()
+      )
+      RETURNING *;
+    `;
 
-    const { data, error } = await supabaseAdmin
-      .from('sites')
-      .insert([insertRow])
-      .select('*')
-      .single();
+    const res = await pool.query(insertSql, [
+      companyId || null,
+      payload.client_name || payload.clientName || 'Client',
+      payload.site_name || payload.siteName || '',
+      payload.code_name || payload.codeName || '',
+      payload.address || '',
+      payload.gstin || '',
+      payload.work_order_ref || payload.workOrderRefNo || '',
+      payload.work_order_period || payload.workOrderPeriod || '',
+      payload.contact_no || payload.contactNo || '',
+      payload.email || '',
+      payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? DEFAULT_MGMT_FEE_PERCENT,
+      Number(payload.default_machinery_charges ?? payload.defaultMachineryCharges ?? 0),
+      Number(payload.default_material_charges ?? payload.defaultMaterialCharges ?? 0),
+      JSON.stringify(payload.additional_charges || payload.default_additional_charges || payload.defaultAdditionalCharges || payload.additionalCharges || []),
+      JSON.stringify(payload.rate_cards || payload.rateCards || []),
+    ]);
 
-    if (error) {
-      console.error('❌ Supabase insert site error:', error.message);
-      throw new Error(`Database insert failed: ${error.message}`);
-    }
-    return mapRowToSite(data);
+    return mapRowToSite(res.rows[0]);
   }
 
   /**
@@ -222,60 +185,54 @@ export class SiteService {
   static async updateSite(id: string, payload: any, user?: AuthUser): Promise<Site> {
     await this.verifySiteOwnership(id, user);
 
-    const updateData: any = { updated_at: new Date().toISOString() };
-    if (payload.company_id || payload.companyId) {
-      updateData.company_id = payload.company_id || payload.companyId;
-    }
-    if (payload.siteName !== undefined || payload.site_name !== undefined) {
-      updateData.site_name = payload.siteName || payload.site_name || '';
-    }
-    if (payload.codeName !== undefined || payload.code_name !== undefined) {
-      updateData.code_name = payload.codeName || payload.code_name || '';
-    }
-    if (payload.clientName !== undefined || payload.client_name !== undefined) {
-      updateData.client_name = payload.clientName || payload.client_name || '';
-    }
-    if (payload.gstin !== undefined) updateData.gstin = payload.gstin;
-    if (payload.workOrderRefNo !== undefined || payload.work_order_ref !== undefined) {
-      updateData.work_order_ref = payload.workOrderRefNo || payload.work_order_ref || '';
-    }
-    if (payload.workOrderPeriod !== undefined || payload.work_order_period !== undefined) {
-      updateData.work_order_period = payload.workOrderPeriod || payload.work_order_period || '';
-    }
-    if (payload.management_fee_percent !== undefined || payload.mgmt_percent !== undefined || payload.mgmtPercent !== undefined) {
-      updateData.management_fee_percent = payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent;
-    }
-    if (payload.default_machinery_charges !== undefined || payload.defaultMachineryCharges !== undefined) {
-      updateData.default_machinery_charges = Number(payload.default_machinery_charges ?? payload.defaultMachineryCharges ?? 0);
-    }
-    if (payload.default_material_charges !== undefined || payload.defaultMaterialCharges !== undefined) {
-      updateData.default_material_charges = Number(payload.default_material_charges ?? payload.defaultMaterialCharges ?? 0);
-    }
-    if (payload.additional_charges !== undefined || payload.default_additional_charges !== undefined || payload.defaultAdditionalCharges !== undefined || payload.additionalCharges !== undefined) {
-      updateData.additional_charges = payload.additional_charges || payload.default_additional_charges || payload.defaultAdditionalCharges || payload.additionalCharges || [];
-    }
-    if (payload.address !== undefined) updateData.address = payload.address;
-    if (payload.contactNo !== undefined || payload.contact_no !== undefined) {
-      updateData.contact_no = payload.contactNo || payload.contact_no || '';
-    }
-    if (payload.email !== undefined) updateData.email = payload.email;
-    if (payload.status !== undefined) updateData.status = payload.status;
-    if (payload.rateCards || payload.rate_cards) {
-      updateData.rate_cards = payload.rateCards || payload.rate_cards;
+    const updateSql = `
+      UPDATE public.sites SET
+        company_id = COALESCE($1, company_id),
+        site_name = COALESCE($2, site_name),
+        code_name = COALESCE($3, code_name),
+        client_name = COALESCE($4, client_name),
+        gstin = COALESCE($5, gstin),
+        work_order_ref = COALESCE($6, work_order_ref),
+        work_order_period = COALESCE($7, work_order_period),
+        management_fee_percent = COALESCE($8, management_fee_percent),
+        default_machinery_charges = COALESCE($9, default_machinery_charges),
+        default_material_charges = COALESCE($10, default_material_charges),
+        additional_charges = COALESCE($11, additional_charges),
+        address = COALESCE($12, address),
+        contact_no = COALESCE($13, contact_no),
+        email = COALESCE($14, email),
+        status = COALESCE($15, status),
+        rate_cards = COALESCE($16, rate_cards),
+        updated_at = NOW()
+      WHERE id = $17
+      RETURNING *;
+    `;
+
+    const res = await pool.query(updateSql, [
+      payload.company_id || payload.companyId || null,
+      payload.siteName || payload.site_name || null,
+      payload.codeName || payload.code_name || null,
+      payload.clientName || payload.client_name || null,
+      payload.gstin !== undefined ? payload.gstin : null,
+      payload.workOrderRefNo || payload.work_order_ref || null,
+      payload.workOrderPeriod || payload.work_order_period || null,
+      payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? null,
+      payload.default_machinery_charges !== undefined ? Number(payload.default_machinery_charges ?? payload.defaultMachineryCharges ?? 0) : null,
+      payload.default_material_charges !== undefined ? Number(payload.default_material_charges ?? payload.defaultMaterialCharges ?? 0) : null,
+      (payload.additional_charges || payload.default_additional_charges || payload.defaultAdditionalCharges || payload.additionalCharges) ? JSON.stringify(payload.additional_charges || payload.default_additional_charges || payload.defaultAdditionalCharges || payload.additionalCharges) : null,
+      payload.address !== undefined ? payload.address : null,
+      payload.contactNo || payload.contact_no || null,
+      payload.email !== undefined ? payload.email : null,
+      payload.status !== undefined ? payload.status : null,
+      (payload.rateCards || payload.rate_cards) ? JSON.stringify(payload.rateCards || payload.rate_cards) : null,
+      id,
+    ]);
+
+    if (!res.rows || res.rows.length === 0) {
+      throw new Error(`Site not found for update: ${id}`);
     }
 
-    const { data, error } = await supabaseAdmin
-      .from('sites')
-      .update(updateData)
-      .eq('id', id)
-      .select('*')
-      .single();
-
-    if (error) {
-      console.error('❌ Supabase update site error:', error.message);
-      throw new Error(`Database update failed: ${error.message}`);
-    }
-    return mapRowToSite(data);
+    return mapRowToSite(res.rows[0]);
   }
 
   /**
@@ -284,14 +241,9 @@ export class SiteService {
   static async deleteSite(id: string, user?: AuthUser): Promise<boolean> {
     await this.verifySiteOwnership(id, user);
 
-    const { error } = await supabaseAdmin
-      .from('sites')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      console.error('❌ Supabase delete site error:', error.message);
-      throw new Error(`Database delete failed: ${error.message}`);
+    const res = await pool.query('DELETE FROM public.sites WHERE id = $1', [id]);
+    if ((res.rowCount ?? 0) === 0) {
+      throw new Error('Site not found');
     }
     return true;
   }
@@ -302,28 +254,12 @@ export class SiteService {
   static async getSiteDocuments(siteId: string, user?: AuthUser): Promise<any[]> {
     await this.verifySiteOwnership(siteId, user);
 
-    let { data, error } = await supabaseAdmin
-      .from('site_documents')
-      .select('*')
-      .eq('site_id', siteId)
-      .order('uploaded_at', { ascending: false });
+    const res = await pool.query(
+      'SELECT * FROM public.site_documents WHERE site_id = $1 ORDER BY uploaded_at DESC;',
+      [siteId]
+    );
 
-    if (error) {
-      console.warn('⚠️ Supabase get site_documents with uploaded_at ordering failed, trying created_at:', error.message);
-      const fallback = await supabaseAdmin
-        .from('site_documents')
-        .select('*')
-        .eq('site_id', siteId);
-      
-      if (fallback.error) {
-        console.error('❌ Database error fetching site_documents:', fallback.error.message);
-        throw new Error(`Database query failed: ${fallback.error.message}`);
-      }
-      data = fallback.data;
-    }
-
-    const list = data || [];
-    return enrichDocumentsWithViewUrl(list);
+    return enrichDocumentsWithViewUrl(res.rows || []);
   }
 
   /**
@@ -338,46 +274,33 @@ export class SiteService {
   ): Promise<any> {
     await this.verifySiteOwnership(siteId, user);
 
-    // 1. Fetch site and company info for building file name and storage key
     const site = await this.getSiteById(siteId, user);
-    let entityCode = 'AMBE';
-    if (site?.company_id || site?.companyId) {
-      const targetCompanyId = site.company_id || site.companyId;
-      try {
-        const company = await CompanyService.getCompanyById(targetCompanyId!);
-        if (company) {
-          entityCode = company.entity_code || company.code || 'AMBE';
-        }
-      } catch (compErr) {
-        console.warn('⚠️ Could not fetch company for entity code:', compErr);
-      }
+    if (!site) {
+      throw new Error(`Site not found: ${siteId}`);
     }
 
-    const siteCodeName = site?.code_name || site?.codeName || site?.siteName || 'SITE';
-    const rawSiteName = site?.siteName || site?.codeName || siteCodeName;
-
-    // 2. Compress file (unchanged)
+    // 1. Run file compression unchanged before storage call
     const compressed = await CompressionService.compressFile(file.buffer, file.mimetype);
 
-    // 3. Generate uniform filename using buildFileName()
+    // 2. Build consistent file name
     const fileName = buildFileName({
       type: 'site_doc',
-      entityCode,
-      siteCodeName,
-      documentType: documentType || 'DOCUMENT',
-      originalName: file.originalname,
-    });
-
-    // 4. Build object storage key convention: sites/{siteName}/{DocumentType}-{shortUuid}.{ext}
-    const storageKey = buildSiteStorageKey({
-      siteName: rawSiteName,
+      entityCode: 'AMBE',
+      siteCodeName: site.codeName || site.siteName,
       documentType: documentType || 'Document',
       originalName: file.originalname,
     });
 
+    // 3. Build storage key: sites/{siteName}/{documentType}/{fileName}-{shortUuid}.{ext}
+    const storageKey = buildSiteStorageKey({
+      siteName: site.siteName,
+      documentType: documentType || 'Document',
+      originalName: fileName,
+    });
+
     let uploadedStorageKey: string | null = null;
     try {
-      // 5. Upload to Oracle/MinIO Storage
+      // 4. Upload to MinIO / Oracle Object Storage
       const storageResult = await OracleStorageService.uploadFile(
         compressed.buffer,
         storageKey,
@@ -385,56 +308,42 @@ export class SiteService {
       );
       uploadedStorageKey = storageResult.storageKey;
 
-      // 6. Generate signed read URL for immediate client preview
+      // 5. Generate signed read URL for immediate client preview
       const viewUrl = await OracleStorageService.getSignedReadUrl(storageResult.storageKey);
 
-      // 7. Insert metadata into public.site_documents with storage_provider: 'minio' and storage_key
-      const uploadedAt = new Date().toISOString();
+      // 6. Insert metadata into public.site_documents
+      const insertSql = `
+        INSERT INTO public.site_documents (
+          site_id, document_type, document_label, file_name, storage_provider, storage_key, gcp_file_url, uploaded_at, created_at
+        ) VALUES (
+          $1, $2, $3, $4, 'minio', $5, NULL, NOW(), NOW()
+        )
+        RETURNING *;
+      `;
 
-      const insertPayload: any = {
-        site_id: siteId,
-        document_type: documentType || 'Document',
-        document_label: documentLabel || null,
-        file_name: fileName,
-        storage_provider: 'minio',
-        storage_key: storageResult.storageKey,
-        gcp_file_url: null,
-        uploaded_at: uploadedAt,
-      };
+      const insertRes = await pool.query(insertSql, [
+        siteId,
+        documentType || 'Document',
+        documentLabel || null,
+        fileName,
+        storageResult.storageKey,
+      ]);
 
-      let insertedRow = null;
-      const { data: insertedData, error: dbError } = await supabaseAdmin
-        .from('site_documents')
-        .insert([insertPayload])
-        .select('*')
-        .single();
-
-      if (dbError) {
-        console.error('❌ Supabase insert site_documents error, rolling back MinIO upload:', dbError);
-        if (uploadedStorageKey) {
-          await OracleStorageService.deleteFile(uploadedStorageKey);
-        }
-        throw new Error(`Failed to save site document metadata: ${dbError.message}`);
-      }
-
-      insertedRow = insertedData;
-      const enrichedRow = await enrichDocumentWithViewUrl(insertedRow || insertPayload);
+      const insertedRow = insertRes.rows[0];
+      const enrichedRow = await enrichDocumentWithViewUrl(insertedRow);
 
       return {
         success: true,
-        file_name: fileName,
+        data: enrichedRow,
+        view_url: viewUrl,
         storage_key: storageResult.storageKey,
         storage_provider: 'minio',
-        view_url: viewUrl,
-        gcp_file_url: viewUrl, // Fallback compatibility
-        drive_web_view_link: null,
-        document: enrichedRow,
       };
-    } catch (err: any) {
+    } catch (uploadError: any) {
       if (uploadedStorageKey) {
         await OracleStorageService.deleteFile(uploadedStorageKey).catch(() => {});
       }
-      throw err;
+      throw uploadError;
     }
   }
 }

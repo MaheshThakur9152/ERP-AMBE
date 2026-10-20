@@ -1,6 +1,6 @@
 import app from './app';
 import { env } from './config/env';
-import { supabaseAdmin } from './config/supabase';
+import { pool, checkDbHealth } from './db/pool';
 import { OracleStorageService } from './services/oracleStorageService';
 import { withTimeout } from './utils/timeoutHelper';
 
@@ -26,15 +26,14 @@ process.on('warning', (warning: Error) => {
  */
 async function warmupConnections() {
   try {
-    const dbQuery = supabaseAdmin.from('companies').select('id').limit(1);
-    const { error } = await withTimeout(dbQuery, 5000, 'Warmup:DB');
-    if (error) {
-      console.warn('⚠️ DB Connection warmup warning:', error.message);
+    const dbHealth = await checkDbHealth();
+    if (dbHealth.ok) {
+      console.log(`✅ Native PostgreSQL pool warmed up successfully (${dbHealth.latencyMs}ms)`);
     } else {
-      console.log('✅ DB Connection warmed up successfully');
+      console.warn('⚠️ Native PostgreSQL warmup warning:', dbHealth.error);
     }
   } catch (err: any) {
-    console.warn('⚠️ DB Connection warmup error:', err.message);
+    console.warn('⚠️ Native PostgreSQL warmup error:', err.message);
   }
 
   try {
@@ -55,12 +54,21 @@ const server = app.listen(PORT, () => {
 });
 
 // Graceful termination handling
-const shutdown = (signal: string) => {
+const shutdown = async (signal: string) => {
   console.log(`🛑 Received ${signal}. Starting graceful shutdown...`);
-  server.close(() => {
-    console.log('✅ HTTP server closed. Process exiting.');
+  
+  // Close HTTP server
+  server.close(async () => {
+    console.log('✅ HTTP server closed.');
+    try {
+      await pool.end();
+      console.log('✅ Native PostgreSQL pool drained.');
+    } catch (err: any) {
+      console.error('⚠️ Error draining pool:', err.message);
+    }
     process.exit(0);
   });
+
   // Force exit after 10s if hanging connections remain
   setTimeout(() => {
     console.error('🚨 Forced shutdown after 10s timeout.');
@@ -70,3 +78,4 @@ const shutdown = (signal: string) => {
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
+

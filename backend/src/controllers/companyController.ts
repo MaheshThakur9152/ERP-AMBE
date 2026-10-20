@@ -1,11 +1,22 @@
 import { Request, Response, NextFunction } from 'express';
 import { CompanyService } from '../services/companyService';
 import { ApiResponse } from '../types/api';
+import { RedisCache } from '../config/redis';
 
 export class CompanyController {
   static async list(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
+      const cacheKey = 'erp:companies:all';
+      const cached = await RedisCache.get<any[]>(cacheKey);
+      if (cached) {
+        res.setHeader('X-Cache', 'HIT');
+        res.json({ success: true, data: cached });
+        return;
+      }
+
       const companies = await CompanyService.getAllCompanies();
+      await RedisCache.set(cacheKey, companies, 300);
+      res.setHeader('X-Cache', 'MISS');
       const response: ApiResponse = { success: true, data: companies };
       res.json(response);
     } catch (err: any) {
@@ -32,20 +43,8 @@ export class CompanyController {
 
   static async create(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      if (
-        req.user?.role !== 'superadmin' &&
-        req.user?.company_id &&
-        req.body.id &&
-        req.body.id !== req.user.company_id
-      ) {
-        res.status(403).json({
-          success: false,
-          error: 'Forbidden: Cannot create profiles for other company entities',
-        });
-        return;
-      }
-
       const company = await CompanyService.createCompany(req.body);
+      await RedisCache.del('erp:companies:all');
       const response: ApiResponse = { success: true, data: company };
       res.status(201).json(response);
     } catch (err: any) {
@@ -57,20 +56,8 @@ export class CompanyController {
   static async update(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
       const { id } = req.params;
-
-      if (
-        req.user?.role !== 'superadmin' &&
-        req.user?.company_id &&
-        id !== req.user.company_id
-      ) {
-        res.status(403).json({
-          success: false,
-          error: 'Forbidden: Cannot modify profiles of other company entities',
-        });
-        return;
-      }
-
       const company = await CompanyService.updateCompany(id, req.body);
+      await RedisCache.del('erp:companies:all');
       const response: ApiResponse = { success: true, data: company };
       res.json(response);
     } catch (err: any) {
@@ -84,6 +71,7 @@ export class CompanyController {
       const { id } = req.params;
       const { is_active } = req.body;
       const company = await CompanyService.toggleActiveState(id, Boolean(is_active));
+      await RedisCache.del('erp:companies:all');
       const response: ApiResponse = { success: true, data: company };
       res.json(response);
     } catch (err: any) {

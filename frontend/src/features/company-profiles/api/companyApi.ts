@@ -1,14 +1,13 @@
-import { supabase } from '@/lib/supabase';
 import { CompanyProfile, CreateCompanyInput, UpdateCompanyInput } from '../types';
-import { fetchWithRetry } from '@/lib/apiClient';
+import { fetchWithRetry, getInMemoryToken } from '@/lib/apiClient';
 
 const API_BASE = '/api';
 
-async function getAuthHeader() {
-  const { data: { session } } = await supabase.auth.getSession();
+function getAuthHeader() {
+  const token = getInMemoryToken();
   return {
     'Content-Type': 'application/json',
-    'Authorization': session?.access_token ? `Bearer ${session.access_token}` : '',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
   };
 }
 

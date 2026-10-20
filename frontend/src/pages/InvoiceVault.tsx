@@ -16,7 +16,6 @@ import {
   Tag,
   Hash,
 } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
 import { DocumentViewerModal } from '@/components/DocumentViewerModal';
 
 interface CompanyDocument {
@@ -67,10 +66,12 @@ export const InvoiceVault: React.FC = () => {
 
   const fetchSites = async () => {
     try {
-      const { data, error } = await supabase.from('sites').select('site_name, code_name');
-      if (data) {
+      const res = await fetchWithRetry('/api/sites');
+      if (res.ok) {
+        const json = await res.json();
+        const data = json.data || json || [];
         const names = data
-          .map((s) => s.code_name || s.site_name)
+          .map((s: any) => s.code_name || s.codeName || s.site_name || s.siteName)
           .filter(Boolean)
           .sort();
         setSiteOptions(Array.from(new Set(names)));
@@ -86,15 +87,12 @@ export const InvoiceVault: React.FC = () => {
   const fetchCompanyDocuments = async () => {
     setLoadingDocs(true);
     try {
-      const { data, error } = await supabase
-        .from('company_documents')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('Error fetching company documents:', error);
-      } else if (data) {
-        setDocuments(data as CompanyDocument[]);
+      const res = await fetchWithRetry('/api/documents/company');
+      if (res.ok) {
+        const json = await res.json();
+        setDocuments((json.data || json || []) as CompanyDocument[]);
+      } else {
+        console.error('Error fetching company documents: HTTP', res.status);
       }
     } catch (err) {
       console.error('Unexpected error fetching company documents:', err);
@@ -211,9 +209,12 @@ export const InvoiceVault: React.FC = () => {
     if (!confirm(`Are you sure you want to delete "${fileName}"?`)) return;
 
     try {
-      const { error } = await supabase.from('company_documents').delete().eq('id', id);
-      if (error) {
-        alert(`Failed to delete document: ${error.message}`);
+      const res = await fetchWithRetry(`/api/documents/${id}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        alert(`Failed to delete document: ${errJson.error || 'Server error'}`);
       } else {
         setDocuments((prev) => prev.filter((doc) => doc.id !== id));
       }

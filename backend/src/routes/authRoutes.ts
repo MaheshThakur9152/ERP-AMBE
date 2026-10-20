@@ -10,6 +10,10 @@ router.post('/refresh', AuthController.refresh);
 router.post('/logout', AuthController.logout);
 router.get('/me', requireAuth, AuthController.me);
 router.patch('/role', requireAuth, requireSuperAdmin, AuthController.updateRole);
+router.post('/invite-user', requireAuth, requireSuperAdmin, AuthController.inviteUser);
+router.post('/set-initial-password', authLimiter, AuthController.setInitialPassword);
+router.post('/forgot-password', authLimiter, AuthController.forgotPassword);
+router.post('/reset-password', authLimiter, AuthController.resetPassword);
 
 export default router;
 

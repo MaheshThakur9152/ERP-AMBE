@@ -15,7 +15,6 @@ import {
   RefreshCw,
   Edit,
 } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
 import { calculatePayroll, RateCard, PayrollCalculationResult } from '../utils/payrollCalculator';
 import {
   exportComplianceExcel,
@@ -125,17 +124,10 @@ export const PayrollHub: React.FC = () => {
   useEffect(() => {
     const fetchSites = async () => {
       try {
-        const { data, error } = await supabase
-          .from('sites')
-          .select('id, site_name, code_name, company_id, companies(id, name)')
-          .order('site_name');
-        if (error) {
-          console.warn('Fallback: fetching sites via API', error);
-          const res = await fetchWithRetry('/api/sites');
+        const res = await fetchWithRetry('/api/sites');
+        if (res.ok) {
           const json = await res.json();
           setSites(json.data || json || []);
-        } else if (data) {
-          setSites(data);
         }
       } catch (err) {
         console.error('Failed to load sites:', err);
@@ -155,11 +147,11 @@ export const PayrollHub: React.FC = () => {
       // 1. Fetch all site deployments for this month_year across ALL sites
       let allDeployments: any[] = [];
       try {
-        const { data: depData } = await supabase
-          .from('site_deployments')
-          .select('*')
-          .eq('month_year', monthYearStr);
-        if (depData) allDeployments = depData;
+        const depRes = await fetchWithRetry(`/api/deployments?month_year=${encodeURIComponent(monthYearStr)}`);
+        if (depRes.ok) {
+          const depJson = await depRes.json();
+          allDeployments = depJson.data || [];
+        }
       } catch (depErr) {
         console.warn('site_deployments check skipped:', depErr);
       }
@@ -176,8 +168,11 @@ export const PayrollHub: React.FC = () => {
       // 2. Fetch all rate cards to support split deployment rate cards
       let allRateCards: any[] = [];
       try {
-        const { data: rcData } = await supabase.from('rate_cards').select('*');
-        if (rcData) allRateCards = rcData;
+        const rcRes = await fetchWithRetry('/api/rate-cards');
+        if (rcRes.ok) {
+          const rcJson = await rcRes.json();
+          allRateCards = rcJson.data || [];
+        }
       } catch (rcErr) {
         console.warn('rate_cards fetch error:', rcErr);
       }
@@ -185,35 +180,34 @@ export const PayrollHub: React.FC = () => {
       allRateCards.forEach((rc) => rateCardsById.set(rc.id, rc));
 
       // 3. Fetch Staff query
-      let staffQuery = supabase.from('staff').select('*, rate_cards(*), sites(site_name, code_name, company_id, companies(id, name))');
-      if (selectedSiteId !== 'all') {
-        const deployedStaffIds = allDeployments
-          .filter((d) => d.site_id === selectedSiteId)
-          .map((d) => d.staff_id);
-
-        if (deployedStaffIds.length > 0) {
-          staffQuery = staffQuery.or(`site_id.eq.${selectedSiteId},id.in.(${deployedStaffIds.join(',')})`);
-        } else {
-          staffQuery = staffQuery.eq('site_id', selectedSiteId);
+      let staffList: any[] = [];
+      try {
+        const staffRes = await fetchWithRetry('/api/staff');
+        if (staffRes.ok) {
+          const staffJson = await staffRes.json();
+          const allStaff = staffJson.data || [];
+          if (selectedSiteId !== 'all') {
+            const deployedStaffIds = allDeployments
+              .filter((d) => d.site_id === selectedSiteId)
+              .map((d) => d.staff_id);
+            staffList = allStaff.filter(
+              (s: any) => s.site_id === selectedSiteId || deployedStaffIds.includes(s.id)
+            );
+          } else {
+            staffList = allStaff;
+          }
         }
-      }
-      const { data: staffData, error: staffError } = await staffQuery;
-
-      if (staffError) {
+      } catch (staffError) {
         console.error('Error fetching staff:', staffError);
       }
-
-      const staffList = staffData || [];
 
       // 4. Fetch existing saved payroll records for month_year
       let payrollRecordsMap = new Map<string, any>();
       try {
-        const { data: savedRecs } = await supabase
-          .from('payroll_records')
-          .select('*')
-          .eq('month_year', monthYearStr);
-
-        if (savedRecs) {
+        const prRes = await fetchWithRetry(`/api/payroll?month_year=${encodeURIComponent(monthYearStr)}`);
+        if (prRes.ok) {
+          const prJson = await prRes.json();
+          const savedRecs = prJson.data || [];
           savedRecs.forEach((r: any) => {
             const staffKey = r.staff_id || r.employee_id || r.emp_id;
             if (staffKey) {
@@ -515,51 +509,18 @@ export const PayrollHub: React.FC = () => {
       console.log('Attempting full save for', row.name, recordToSave);
       console.log('SAVING total_net_salary:', row.name, adjustedTotalNetSalary, recordToSave.total_net_salary);
 
-      const { error: fullError } = await supabase.from('payroll_records').upsert([recordToSave], {
-        onConflict: 'staff_id,month_year',
+      const saveRes = await fetchWithRetry('/api/payroll/records', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([recordToSave]),
       });
 
-      if (fullError) {
-        console.error('FULL UPSERT FAILED:', fullError);
-        console.warn('Full record upsert failed, retrying fallback to core columns:', fullError.message);
-        const fallbackRecord: any = { ...recordToSave };
-        delete fallbackRecord.manual_pt_adjustment;
-        delete fallbackRecord.manual_pt_adjustment_reason;
-        delete fallbackRecord.adv_amt;
-        delete fallbackRecord.shirt;
-        delete fallbackRecord.pant;
-        delete fallbackRecord.shoes;
-        delete fallbackRecord.id_card;
-        delete fallbackRecord.other_amt;
-        delete fallbackRecord.remark;
-        delete fallbackRecord.adv_date;
-        delete fallbackRecord.adv_total;
-        delete fallbackRecord.in_this_mth;
-        delete fallbackRecord.in_next_mth;
-        delete fallbackRecord.bonus_amount_snapshot;
-        delete fallbackRecord.part_bonus_amount_snapshot;
-        delete fallbackRecord.rate_card_remark_snapshot;
-        delete fallbackRecord.earned_part_bonus;
-        delete fallbackRecord.remaining_part_bonus;
-        delete fallbackRecord.total_net_salary;
-        delete fallbackRecord.rate_card_remark_snapshot;
-        delete fallbackRecord.earned_part_bonus;
-        delete fallbackRecord.remaining_part_bonus;
-        delete fallbackRecord.total_net_salary;
-
-        const { error: fallbackError } = await supabase.from('payroll_records').upsert([fallbackRecord], {
-          onConflict: 'staff_id,month_year',
-        });
-
-        if (fallbackError) {
-          console.error('Supabase Upsert Error:', fallbackError);
-          alert(`Failed to save! Supabase says: ${fallbackError.message}`);
-        } else {
-          setRows((prev) => prev.map((r) => (r.id === row.id && r.siteId === row.siteId ? { ...r, isSaved: true } : r)));
-        }
-      } else {
-        setRows((prev) => prev.map((r) => (r.id === row.id && r.siteId === row.siteId ? { ...r, isSaved: true } : r)));
+      if (!saveRes.ok) {
+        const errJson = await saveRes.json().catch(() => ({}));
+        throw new Error(errJson.error || `Save failed with status ${saveRes.status}`);
       }
+
+      setRows((prev) => prev.map((r) => (r.id === row.id && r.siteId === row.siteId ? { ...r, isSaved: true } : r)));
     } catch (err: any) {
       console.error('Auto-save error:', err);
       alert(`Auto-save error: ${err.message}`);
@@ -649,7 +610,7 @@ export const PayrollHub: React.FC = () => {
     }
   };
 
-  // Save Advance Ledger to State & Supabase
+  // Save Advance Ledger to State & Database via API
   const handleSaveAdvanceLedger = async () => {
     if (!activeAdvanceRow) return;
     const total = currentAdvTotal;
@@ -777,13 +738,15 @@ export const PayrollHub: React.FC = () => {
         };
       });
 
-      const { error } = await supabase.from('payroll_records').upsert(recordsToSave, {
-        onConflict: 'staff_id,month_year',
+      const bulkRes = await fetchWithRetry('/api/payroll/records', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(recordsToSave),
       });
 
-      if (error) {
-        console.error('Bulk Paid Upsert Error:', error);
-        alert(`Failed to mark paid: ${error.message}`);
+      if (!bulkRes.ok) {
+        const errJson = await bulkRes.json().catch(() => ({}));
+        throw new Error(errJson.error || `Bulk paid update failed with status ${bulkRes.status}`);
       } else {
         setRows((prev) =>
             prev.map((r) => (selectedIds.has(`${r.id}_${r.siteId}`) ? { ...r, isPaid: true, isSaved: true } : r))

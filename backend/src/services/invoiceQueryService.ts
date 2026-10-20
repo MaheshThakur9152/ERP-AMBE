@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { supabaseAdmin } from '../config/supabase';
+import crypto from 'crypto';
+import { pool, withTransaction } from '../db/pool';
 import { InvoiceRecord } from '../types/invoice';
 import { CompanyService } from './companyService';
 import { InvoiceMathService } from './invoiceMathService';
@@ -12,12 +13,14 @@ import { OracleStorageService } from './oracleStorageService';
 import { CompressionService } from './compressionService';
 import { buildInvoiceStorageKey } from '../utils/storageKeys';
 
+const DateOrString = z.union([z.string(), z.date()]).optional().nullable();
+
 const InvoiceRowSchema = z.object({
   id: z.string().optional().nullable(),
   invoice_no: z.string().optional().nullable(),
   invoiceNo: z.string().optional().nullable(),
-  invoice_date: z.string().optional().nullable(),
-  date: z.string().optional().nullable(),
+  invoice_date: DateOrString,
+  date: DateOrString,
   billing_period: z.string().optional().nullable(),
   month_year: z.string().optional().nullable(),
   monthYear: z.string().optional().nullable(),
@@ -53,7 +56,7 @@ const InvoiceRowSchema = z.object({
   legacy_uploaded_by: z.string().optional().nullable(),
   legacy_notes: z.string().optional().nullable(),
   challan_no: z.string().optional().nullable(),
-  challan_date: z.string().optional().nullable(),
+  challan_date: DateOrString,
   buyer_order_no: z.string().optional().nullable(),
   dispatch_doc_no: z.string().optional().nullable(),
   dispatched_through: z.string().optional().nullable(),
@@ -63,8 +66,8 @@ const InvoiceRowSchema = z.object({
   certifiedDocUrl: z.string().optional().nullable(),
   certified_attendance_url: z.string().optional().nullable(),
   certifiedAttendanceUrl: z.string().optional().nullable(),
-  created_at: z.string().optional().nullable(),
-  updated_at: z.string().optional().nullable(),
+  created_at: DateOrString,
+  updated_at: DateOrString,
 }).passthrough();
 
 export function mapRowToInvoiceRecord(rawRow: any): InvoiceRecord {
@@ -78,7 +81,8 @@ export function mapRowToInvoiceRecord(rawRow: any): InvoiceRecord {
   const siteName = site.site_name || site.siteName || payload?.party?.siteName || '';
 
   const invoiceNo = row.invoice_no || row.invoiceNo || payload?.meta?.invoiceNo || '';
-  const date = row.invoice_date || row.date || payload?.meta?.invoiceDate || '';
+  const rawDate = row.invoice_date || row.date || payload?.meta?.invoiceDate || '';
+  const date = rawDate instanceof Date ? rawDate.toISOString().split('T')[0] : String(rawDate || '');
   const monthYear = row.billing_period || row.month_year || row.monthYear || payload?.meta?.billingPeriod || '';
   const amount = Number(row.grand_total ?? row.amount ?? payload?.meta?.amount ?? 0);
 
@@ -232,33 +236,52 @@ export function mapRowToInvoiceRecord(rawRow: any): InvoiceRecord {
     certifiedAttendanceConfirmedAt: (row.certified_attendance_confirmed_at || row.certifiedAttendanceConfirmedAt) ? String(row.certified_attendance_confirmed_at || row.certifiedAttendanceConfirmedAt) : null,
     previous_version_id: row.previous_version_id || row.previousVersionId || row.payload?.previous_version_id || null,
     payload: fullPayload,
-    created_at: row.created_at ? String(row.created_at) : (row.createdAt ? String(row.createdAt) : undefined),
-    updated_at: row.updated_at ? String(row.updated_at) : undefined,
+    created_at: row.created_at instanceof Date ? row.created_at.toISOString() : (row.created_at ? String(row.created_at) : (row.createdAt ? String(row.createdAt) : undefined)),
+    updated_at: row.updated_at instanceof Date ? row.updated_at.toISOString() : (row.updated_at ? String(row.updated_at) : undefined),
   };
 }
 
 export class InvoiceQueryService {
   /**
+   * Fetch a single invoice by ID joining sites and companies tables
+   */
+  static async getInvoiceById(id: string): Promise<InvoiceRecord> {
+    const sql = `
+      SELECT 
+        i.*,
+        row_to_json(s.*) AS sites,
+        row_to_json(c.*) AS companies
+      FROM public.invoices i
+      LEFT JOIN public.sites s ON s.id = i.site_id
+      LEFT JOIN public.companies c ON c.id = i.company_id
+      WHERE i.id = $1;
+    `;
+    const res = await pool.query(sql, [id]);
+    if (!res.rows || res.rows.length === 0) {
+      const err: any = new Error(`Invoice not found: ${id}`);
+      err.statusCode = 404;
+      throw err;
+    }
+    return await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(res.rows[0]));
+  }
+
+  /**
    * Fetch all invoices from DB joining sites and companies tables
    */
-  static async getAllInvoices(user?: AuthUser): Promise<InvoiceRecord[]> {
+  static async getAllInvoices(_user?: AuthUser): Promise<InvoiceRecord[]> {
     try {
-      let query = supabaseAdmin
-        .from('invoices')
-        .select('*, sites(*), companies(*)')
-        .order('created_at', { ascending: false });
-
-      if (user && user.role !== 'superadmin' && user.company_id) {
-        query = query.eq('company_id', user.company_id);
-      }
-
-      const { data, error } = await query;
-      if (error) {
-        console.error('❌ Database error fetching invoices:', error.message);
-        return [];
-      }
-
-      const mapped = (data || [])
+      const sql = `
+        SELECT 
+          i.*,
+          row_to_json(s.*) AS sites,
+          row_to_json(c.*) AS companies
+        FROM public.invoices i
+        LEFT JOIN public.sites s ON s.id = i.site_id
+        LEFT JOIN public.companies c ON c.id = i.company_id
+        ORDER BY i.created_at DESC;
+      `;
+      const res = await pool.query(sql);
+      const mapped = (res.rows || [])
         .map((row: any) => {
           try {
             return mapRowToInvoiceRecord(row);
@@ -282,23 +305,18 @@ export class InvoiceQueryService {
   /**
    * Validates tenant ownership of a target invoice before mutation
    */
-  static async verifyInvoiceOwnership(invoiceId: string, user?: AuthUser): Promise<void> {
-    if (!user || user.role === 'superadmin' || !user.company_id) {
-      return;
+  static async verifyInvoiceOwnership(invoiceId: string, _user?: AuthUser): Promise<void> {
+    const res = await pool.query('SELECT id, company_id FROM public.invoices WHERE id = $1', [invoiceId]);
+    if (!res.rows || res.rows.length === 0) {
+      const err: any = new Error('Invoice not found');
+      err.statusCode = 404;
+      throw err;
     }
-
-    const { data, error } = await supabaseAdmin
-      .from('invoices')
-      .select('id, company_id')
-      .eq('id', invoiceId)
-      .maybeSingle();
-
-    if (error || !data) {
-      throw new Error('Invoice not found');
-    }
-
-    if (data.company_id && data.company_id !== user.company_id) {
-      throw new Error('FORBIDDEN_TENANT_ACCESS: You do not have permission to access records for this company');
+    const inv = res.rows[0];
+    if (_user && _user.role !== 'superadmin' && _user.company_id && _user.company_id !== inv.company_id) {
+      const authErr: any = new Error('Access denied: Unauthorized company access');
+      authErr.statusCode = 403;
+      throw authErr;
     }
   }
 
@@ -350,92 +368,300 @@ export class InvoiceQueryService {
       payload.payload?.company_id ||
       payload.payload?.company?.id;
 
-    if (user && user.role !== 'superadmin' && user.company_id && companyId && companyId !== user.company_id) {
-      const err: any = new Error('FORBIDDEN_TENANT_ACCESS: Cannot create invoices for another company entity');
-      err.statusCode = 403;
-      throw err;
-    }
-
     const siteId =
       payload.site_id ||
       payload.siteId ||
       payload.payload?.site_id ||
       payload.payload?.party?.siteId;
 
-    const now = new Date().toISOString();
+    if (!companyId) {
+      const err: any = new Error('Missing required field: company_id');
+      err.statusCode = 400;
+      throw err;
+    }
 
-    const insertRow: any = {
-      company_id: companyId,
-      site_id: siteId,
-      invoice_no: payload.invoice_no || payload.invoiceNo || payload.meta?.invoiceNo || '',
-      type: payload.type || payload.payload?.meta?.invoiceType || 'Tax Invoice',
-      status: payload.status || 'Pending',
-      invoice_date: payload.invoice_date || payload.date || payload.meta?.invoiceDate || now.split('T')[0],
-      billing_period: payload.billing_period || payload.billingPeriod || payload.monthYear || payload.meta?.billingPeriod || '',
-      line_items: payload.line_items || payload.items || payload.payload?.items || [],
-      sub_total: payload.sub_total !== undefined ? Number(payload.sub_total) : (payload.subTotal !== undefined ? Number(payload.subTotal) : 0),
-      tax_total: payload.tax_total !== undefined ? Number(payload.tax_total) : (payload.taxTotal !== undefined ? Number(payload.taxTotal) : 0),
-      grand_total: payload.grand_total !== undefined ? Number(payload.grand_total) : (payload.amount !== undefined ? Number(payload.amount) : (payload.grandTotal !== undefined ? Number(payload.grandTotal) : 0)),
-      management_fee_percent: payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? payload.payload?.mgmtPercent ?? DEFAULT_MGMT_FEE_PERCENT,
-      mgmt_percent: payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? payload.payload?.mgmtPercent ?? DEFAULT_MGMT_FEE_PERCENT,
-      machinery_charges: payload.machinery_charges ?? payload.machineryCharges ?? payload.payload?.machineryCharges ?? 0,
-      material_charges: payload.material_charges ?? payload.materialCharges ?? payload.payload?.materialCharges ?? 0,
-      additional_charges: payload.additional_charges || payload.additionalCharges || payload.payload?.additionalCharges || payload.payload?.additional_charges || [],
-      challan_no: payload.challan_no || payload.challanNo || payload.meta?.challanNo || '',
-      challan_date: payload.challan_date || payload.challanDate || payload.meta?.challanDate || '',
-      buyer_order_no: payload.buyer_order_no || payload.buyerOrderNo || payload.meta?.buyerOrderNo || '',
-      dispatch_doc_no: payload.dispatch_doc_no || payload.dispatchDocNo || payload.meta?.dispatchDocNo || '',
-      dispatched_through: payload.dispatched_through || payload.dispatchedThrough || payload.meta?.dispatchedThrough || '',
-      destination: payload.destination || payload.meta?.destination || '',
-      terms_of_delivery: payload.terms_of_delivery || payload.termsOfDelivery || payload.meta?.termsOfDelivery || '',
-      is_material: payload.is_material ?? payload.isMaterial ?? false,
-      previous_version_id: payload.previous_version_id || payload.previousVersionId || null,
-      certified_doc_url: payload.certified_doc_url || payload.certifiedDocUrl || null,
-      certified_attendance_url: payload.certified_attendance_url || payload.certifiedAttendanceUrl || null,
-      generated_pdf_url: payload.generated_pdf_url || payload.generatedPdfUrl || payload.pdf_url || payload.pdfUrl || null,
-      created_at: now,
+    // 1. Authorization enforcement: caller-supplied company_id must match authenticated user unless superadmin
+    if (user && user.role !== 'superadmin' && user.company_id && user.company_id !== companyId) {
+      const authErr: any = new Error('Access denied: Unauthorized company access');
+      authErr.statusCode = 403;
+      throw authErr;
+    }
+
+    const idempotencyKey = payload.idempotency_key || payload.idempotencyKey || null;
+    if (idempotencyKey) {
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(idempotencyKey)) {
+        const idErr: any = new Error('Invalid idempotency_key: must be a valid UUID');
+        idErr.statusCode = 400;
+        throw idErr;
+      }
+    }
+
+    const type = payload.type || payload.payload?.meta?.invoiceType || 'Tax Invoice';
+    const invoiceDate = payload.invoice_date || payload.date || payload.meta?.invoiceDate || new Date().toISOString().split('T')[0];
+    const billingPeriod = payload.billing_period || payload.billingPeriod || payload.monthYear || payload.meta?.billingPeriod || '';
+    const rawLineItems = payload.line_items || payload.items || payload.payload?.items || [];
+
+    // Compute canonical request hash from validated business inputs
+    const canonicalPayload = {
+      companyId,
+      siteId,
+      type,
+      invoiceDate,
+      billingPeriod,
+      lineItems: rawLineItems.map((item: any) => ({
+        desc: item.description || item.roleName || '',
+        qty: Number(item.quantity ?? item.persons ?? 1),
+        rate: Number(item.unit_rate ?? item.rate ?? item.monthlyRate ?? 0),
+        days: Number(item.working_days ?? item.workingDays ?? 30),
+      })),
+      mgmtPercent: payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? DEFAULT_MGMT_FEE_PERCENT,
+      machineryCharges: Number(payload.machinery_charges ?? payload.machineryCharges ?? 0),
+      materialCharges: Number(payload.material_charges ?? payload.materialCharges ?? 0),
     };
+    const requestHash = crypto.createHash('sha256').update(JSON.stringify(canonicalPayload)).digest('hex');
 
-    // Server-side NOT NULL validation before DB write
-    this.validateRequiredColumns(insertRow);
+    return await withTransaction(async (client) => {
+      // 2. Lock company sequence row to serialize sequence allocation for this company
+      const compRes = await client.query(
+        `SELECT id, name, entity_code, tax_prefix, tax_sequence, proforma_prefix, proforma_sequence
+         FROM public.companies
+         WHERE id = $1
+         FOR UPDATE;`,
+        [companyId]
+      );
 
-    const { data, error } = await supabaseAdmin
-      .from('invoices')
-      .insert([insertRow])
-      .select('*, sites(*), companies(*)')
-      .single();
-
-    if (error) {
-      console.error('❌ Supabase insert invoice error:', error);
-      const dbErr: any = new Error(`Database insert failed: ${error.message}`);
-      dbErr.statusCode = 500;
-      dbErr.details = error.details || error.hint || error.message;
-      dbErr.hint = error.hint;
-      dbErr.code = error.code;
-      throw dbErr;
-    }
-
-    if (data) {
-      if (!data.companies && companyId) {
-        const { data: comp } = await supabaseAdmin.from('companies').select('*').eq('id', companyId).maybeSingle();
-        if (comp) data.companies = comp;
+      if (!compRes.rows || compRes.rows.length === 0) {
+        const cErr: any = new Error(`Company not found: ${companyId}`);
+        cErr.statusCode = 404;
+        throw cErr;
       }
-      if (!data.sites && siteId) {
-        const { data: st } = await supabaseAdmin.from('sites').select('*').eq('id', siteId).maybeSingle();
-        if (st) data.sites = st;
+      const company = compRes.rows[0];
+
+      // 3. Check idempotency within transaction
+      if (idempotencyKey) {
+        const idemRes = await client.query(
+          `SELECT id, invoice_no, idempotency_request_hash
+           FROM public.invoices
+           WHERE company_id = $1 AND idempotency_key = $2
+           LIMIT 1;`,
+          [companyId, idempotencyKey]
+        );
+
+        if (idemRes.rows && idemRes.rows.length > 0) {
+          const existing = idemRes.rows[0];
+          if (existing.idempotency_request_hash === requestHash) {
+            // Idempotent retry: return existing invoice
+            const fullInv = await client.query(
+              `SELECT i.*, row_to_json(s.*) AS sites, row_to_json(c.*) AS companies
+               FROM public.invoices i
+               LEFT JOIN public.sites s ON s.id = i.site_id
+               LEFT JOIN public.companies c ON c.id = i.company_id
+               WHERE i.id = $1;`,
+              [existing.id]
+            );
+            return await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(fullInv.rows[0]));
+          } else {
+            // Key reused with conflicting payload
+            const conflictErr: any = new Error(`Idempotency key collision: key ${idempotencyKey} already used with different payload`);
+            conflictErr.statusCode = 409;
+            throw conflictErr;
+          }
+        }
       }
-    }
 
-    const isRevision = Boolean(
-      insertRow.previous_version_id ||
-      /-(?:R|REV)\d+/i.test(insertRow.invoice_no)
-    );
+      // 4. Resolve tax jurisdiction (state & GSTIN) from site / client master data
+      let isInterstate = false;
+      if (siteId) {
+        const siteRes = await client.query(
+          `SELECT s.id, s.gstin, c.gstin as client_gstin
+           FROM public.sites s
+           LEFT JOIN public.clients c ON c.id = s.client_id
+           WHERE s.id = $1;`,
+          [siteId]
+        );
+        if (siteRes.rows?.[0]) {
+          const siteRow = siteRes.rows[0];
+          const gstin = (siteRow.client_gstin || siteRow.gstin || '').trim();
+          if (gstin.length >= 2 && !gstin.startsWith('27')) {
+            isInterstate = true;
+          }
+        }
+      }
 
-    if (companyId && !isRevision) {
-      await InvoiceSequenceService.incrementSequence(companyId, insertRow.type);
-    }
+      const cgstRate = isInterstate ? 0.00 : 9.00;
+      const sgstRate = isInterstate ? 0.00 : 9.00;
+      const igstRate = isInterstate ? 18.00 : 0.00;
 
-    return await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(data));
+      // 5. Line items calculation using integer-paisa rounding
+      let calculatedSubTotal = 0;
+      let calculatedTaxTotal = 0;
+      const normalizedItems: any[] = [];
+
+      for (const item of rawLineItems) {
+        const qty = Number(item.quantity ?? item.persons ?? 1);
+        const rate = Number(item.unit_rate ?? item.rate ?? item.monthlyRate ?? 0);
+        const days = Number(item.working_days ?? item.workingDays ?? 30);
+        // Integer-safe minor units
+        const lineAmountPaisa = Math.round(qty * rate * 100);
+        const lineAmount = lineAmountPaisa / 100;
+
+        const cgstAmtPaisa = cgstRate > 0 ? Math.round((lineAmountPaisa * cgstRate) / 100) : 0;
+        const sgstAmtPaisa = sgstRate > 0 ? Math.round((lineAmountPaisa * sgstRate) / 100) : 0;
+        const igstAmtPaisa = igstRate > 0 ? Math.round((lineAmountPaisa * igstRate) / 100) : 0;
+
+        calculatedSubTotal += lineAmount;
+        calculatedTaxTotal += (cgstAmtPaisa + sgstAmtPaisa + igstAmtPaisa) / 100;
+
+        normalizedItems.push({
+          description: item.description || item.roleName || 'Service Item',
+          location: item.location || '',
+          hsn_code: item.hsn_code || item.hsnCode || '9985',
+          quantity: qty,
+          working_days: days,
+          unit_rate: rate,
+          amount: lineAmount,
+          cgst_rate: cgstRate,
+          sgst_rate: sgstRate,
+          igst_rate: igstRate,
+          cgst_amount: cgstAmtPaisa / 100,
+          sgst_amount: sgstAmtPaisa / 100,
+          igst_amount: igstAmtPaisa / 100,
+        });
+      }
+
+      const mgmtPercent = Number(payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? DEFAULT_MGMT_FEE_PERCENT);
+      const mgmtFee = Math.round(((calculatedSubTotal * mgmtPercent) / 100) * 100) / 100;
+      const machineryCharges = Number(payload.machinery_charges ?? payload.machineryCharges ?? 0);
+      const materialCharges = Number(payload.material_charges ?? payload.materialCharges ?? 0);
+
+      const finalSubTotal = Math.round((calculatedSubTotal + mgmtFee + machineryCharges + materialCharges) * 100) / 100;
+      const finalGrandTotal = Math.round((finalSubTotal + calculatedTaxTotal) * 100) / 100;
+
+      // 6. Sequence allocation
+      const isRevision = Boolean(
+        payload.previous_version_id ||
+        payload.previousVersionId ||
+        /-(?:R|REV)\d+/i.test(payload.invoice_no || '')
+      );
+
+      let invoiceNo = payload.invoice_no || payload.invoiceNo || '';
+      const isProforma = type === 'Proforma Invoice';
+
+      if (!invoiceNo || !isRevision) {
+        if (isProforma) {
+          const nextSeq = (Number(company.proforma_sequence) || 0) + 1;
+          const prefix = company.proforma_prefix || 'AS/P/26-27/';
+          invoiceNo = `${prefix}${String(nextSeq).padStart(3, '0')}`;
+          await client.query(
+            `UPDATE public.companies SET proforma_sequence = $1 WHERE id = $2;`,
+            [nextSeq, companyId]
+          );
+        } else {
+          const nextSeq = (Number(company.tax_sequence) || 0) + 1;
+          const prefix = company.tax_prefix || 'AS/26-27/';
+          invoiceNo = `${prefix}${String(nextSeq).padStart(3, '0')}`;
+          await client.query(
+            `UPDATE public.companies SET tax_sequence = $1 WHERE id = $2;`,
+            [nextSeq, companyId]
+          );
+        }
+      }
+
+      const insertInvoiceSql = `
+        INSERT INTO public.invoices (
+          company_id, site_id, invoice_no, type, status, invoice_date, billing_period,
+          line_items, sub_total, tax_total, grand_total, management_fee_percent, mgmt_percent,
+          machinery_charges, material_charges, additional_charges, challan_no, challan_date,
+          buyer_order_no, dispatch_doc_no, dispatched_through, destination, terms_of_delivery,
+          is_material, previous_version_id, certified_doc_url, certified_attendance_url,
+          generated_pdf_url, idempotency_key, idempotency_request_hash, created_at, updated_at
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7,
+          $8, $9, $10, $11, $12, $13,
+          $14, $15, $16, $17, $18,
+          $19, $20, $21, $22, $23,
+          $24, $25, $26, $27,
+          $28, $29, $30, NOW(), NOW()
+        )
+        RETURNING id;
+      `;
+
+      const insertValues = [
+        companyId,
+        siteId || null,
+        invoiceNo,
+        type,
+        payload.status || 'Pending',
+        invoiceDate,
+        billingPeriod,
+        JSON.stringify(rawLineItems),
+        finalSubTotal,
+        calculatedTaxTotal,
+        finalGrandTotal,
+        mgmtPercent,
+        mgmtPercent,
+        machineryCharges,
+        materialCharges,
+        JSON.stringify(payload.additional_charges || payload.additionalCharges || []),
+        payload.challan_no || payload.challanNo || null,
+        payload.challan_date || payload.challanDate || null,
+        payload.buyer_order_no || payload.buyerOrderNo || null,
+        payload.dispatch_doc_no || payload.dispatchDocNo || null,
+        payload.dispatched_through || payload.dispatchedThrough || null,
+        payload.destination || null,
+        payload.terms_of_delivery || payload.termsOfDelivery || null,
+        Boolean(payload.is_material ?? payload.isMaterial ?? false),
+        payload.previous_version_id || payload.previousVersionId || null,
+        payload.certified_doc_url || payload.certifiedDocUrl || null,
+        payload.certified_attendance_url || payload.certifiedAttendanceUrl || null,
+        payload.generated_pdf_url || payload.generatedPdfUrl || null,
+        idempotencyKey,
+        requestHash,
+      ];
+
+      const invRes = await client.query(insertInvoiceSql, insertValues);
+      const newInvoiceId = invRes.rows[0].id;
+
+      // 7. Insert normalized invoice items into public.invoice_items
+      for (const item of normalizedItems) {
+        await client.query(
+          `INSERT INTO public.invoice_items (
+            invoice_id, description, location, hsn_code, quantity, working_days,
+            unit_rate, amount, cgst_rate, sgst_rate, igst_rate,
+            cgst_amount, sgst_amount, igst_amount
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);`,
+          [
+            newInvoiceId,
+            item.description,
+            item.location,
+            item.hsn_code,
+            item.quantity,
+            item.working_days,
+            item.unit_rate,
+            item.amount,
+            item.cgst_rate,
+            item.sgst_rate,
+            item.igst_rate,
+            item.cgst_amount,
+            item.sgst_amount,
+            item.igst_amount,
+          ]
+        );
+      }
+
+      // Fetch full created record with joins
+      const fullRes = await client.query(
+        `SELECT i.*, row_to_json(s.*) AS sites, row_to_json(c.*) AS companies
+         FROM public.invoices i
+         LEFT JOIN public.sites s ON s.id = i.site_id
+         LEFT JOIN public.companies c ON c.id = i.company_id
+         WHERE i.id = $1;`,
+        [newInvoiceId]
+      );
+
+      return await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(fullRes.rows[0]));
+    });
   }
 
   /**
@@ -444,18 +670,10 @@ export class InvoiceQueryService {
   static async deleteInvoice(id: string, user?: AuthUser): Promise<boolean> {
     await this.verifyInvoiceOwnership(id, user);
 
-    const { error } = await supabaseAdmin
-      .from('invoices')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      console.error('❌ Supabase delete invoice error:', error);
-      const dbErr: any = new Error(`Database delete failed: ${error.message}`);
-      dbErr.statusCode = 500;
-      dbErr.details = error.details || error.hint || error.message;
-      dbErr.hint = error.hint;
-      dbErr.code = error.code;
+    const res = await pool.query('DELETE FROM public.invoices WHERE id = $1', [id]);
+    if ((res.rowCount ?? 0) === 0) {
+      const dbErr: any = new Error('Database delete failed: Invoice not found');
+      dbErr.statusCode = 404;
       throw dbErr;
     }
 
@@ -480,81 +698,98 @@ export class InvoiceQueryService {
       payload.payload?.site_id ||
       payload.payload?.party?.siteId;
 
-    const updateRow: any = {
-      company_id: companyId,
-      site_id: siteId,
-      invoice_no: payload.invoice_no || payload.invoiceNo || payload.meta?.invoiceNo,
-      type: payload.type || payload.payload?.meta?.invoiceType || (payload.payload?.terms?.[0]?.type),
-      status: payload.status || 'Pending',
-      invoice_date: payload.invoice_date || payload.date || payload.meta?.invoiceDate,
-      billing_period: payload.billing_period || payload.billingPeriod || payload.monthYear || payload.meta?.billingPeriod,
-      line_items: payload.line_items || payload.items || payload.payload?.items || (payload.payload?.terms?.[0]?.payload?.items),
-      sub_total: payload.sub_total !== undefined ? Number(payload.sub_total) : (payload.subTotal !== undefined ? Number(payload.subTotal) : undefined),
-      tax_total: payload.tax_total !== undefined ? Number(payload.tax_total) : (payload.taxTotal !== undefined ? Number(payload.taxTotal) : undefined),
-      grand_total: payload.grand_total !== undefined ? Number(payload.grand_total) : (payload.amount !== undefined ? Number(payload.amount) : (payload.grandTotal !== undefined ? Number(payload.grandTotal) : undefined)),
-      management_fee_percent: payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? payload.payload?.mgmtPercent ?? DEFAULT_MGMT_FEE_PERCENT,
-      mgmt_percent: payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? payload.payload?.mgmtPercent ?? DEFAULT_MGMT_FEE_PERCENT,
-      machinery_charges: payload.machinery_charges ?? payload.machineryCharges ?? payload.payload?.machineryCharges ?? 0,
-      material_charges: payload.material_charges ?? payload.materialCharges ?? payload.payload?.materialCharges ?? 0,
-      additional_charges: payload.additional_charges || payload.additionalCharges || payload.payload?.additionalCharges || payload.payload?.additional_charges || [],
-      challan_no: payload.challan_no || payload.challanNo || payload.meta?.challanNo,
-      challan_date: payload.challan_date || payload.challanDate || payload.meta?.challanDate,
-      buyer_order_no: payload.buyer_order_no || payload.buyerOrderNo || payload.meta?.buyerOrderNo,
-      dispatch_doc_no: payload.dispatch_doc_no || payload.dispatchDocNo || payload.meta?.dispatchDocNo,
-      dispatched_through: payload.dispatched_through || payload.dispatchedThrough || payload.meta?.dispatchedThrough,
-      destination: payload.destination || payload.meta?.destination,
-      terms_of_delivery: payload.terms_of_delivery || payload.termsOfDelivery || payload.meta?.termsOfDelivery,
-      is_material: payload.is_material ?? payload.isMaterial ?? false,
-    };
+    const invoiceNo = payload.invoice_no || payload.invoiceNo || payload.meta?.invoiceNo;
+    const type = payload.type || payload.payload?.meta?.invoiceType || (payload.payload?.terms?.[0]?.type);
+    const status = payload.status || 'Pending';
+    const invoiceDate = payload.invoice_date || payload.date || payload.meta?.invoiceDate;
+    const billingPeriod = payload.billing_period || payload.billingPeriod || payload.monthYear || payload.meta?.billingPeriod;
+    const lineItems = payload.line_items || payload.items || payload.payload?.items || (payload.payload?.terms?.[0]?.payload?.items);
+    const subTotal = payload.sub_total !== undefined ? Number(payload.sub_total) : (payload.subTotal !== undefined ? Number(payload.subTotal) : undefined);
+    const taxTotal = payload.tax_total !== undefined ? Number(payload.tax_total) : (payload.taxTotal !== undefined ? Number(payload.taxTotal) : undefined);
+    const grandTotal = payload.grand_total !== undefined ? Number(payload.grand_total) : (payload.amount !== undefined ? Number(payload.amount) : (payload.grandTotal !== undefined ? Number(payload.grandTotal) : undefined));
+    const mgmtPercent = Number(payload.management_fee_percent ?? payload.mgmt_percent ?? payload.mgmtPercent ?? payload.payload?.mgmtPercent ?? DEFAULT_MGMT_FEE_PERCENT);
+    const machineryCharges = Number(payload.machinery_charges ?? payload.machineryCharges ?? payload.payload?.machineryCharges ?? 0);
+    const materialCharges = Number(payload.material_charges ?? payload.materialCharges ?? payload.payload?.materialCharges ?? 0);
+    const additionalCharges = payload.additional_charges || payload.additionalCharges || payload.payload?.additionalCharges || payload.payload?.additional_charges || [];
+    const challanNo = payload.challan_no || payload.challanNo || payload.meta?.challanNo || null;
+    const challanDate = payload.challan_date || payload.challanDate || payload.meta?.challanDate || null;
+    const buyerOrderNo = payload.buyer_order_no || payload.buyerOrderNo || payload.meta?.buyerOrderNo || null;
+    const dispatchDocNo = payload.dispatch_doc_no || payload.dispatchDocNo || payload.meta?.dispatchDocNo || null;
+    const dispatchedThrough = payload.dispatched_through || payload.dispatchedThrough || payload.meta?.dispatchedThrough || null;
+    const destination = payload.destination || payload.meta?.destination || null;
+    const termsOfDelivery = payload.terms_of_delivery || payload.termsOfDelivery || payload.meta?.termsOfDelivery || null;
+    const isMaterial = Boolean(payload.is_material ?? payload.isMaterial ?? false);
 
-    if (payload.generated_pdf_url !== undefined || payload.generatedPdfUrl !== undefined) {
-      updateRow.generated_pdf_url = payload.generated_pdf_url || payload.generatedPdfUrl || null;
-    }
-    if (payload.certified_doc_url !== undefined || payload.certifiedDocUrl !== undefined) {
-      updateRow.certified_doc_url = payload.certified_doc_url || payload.certifiedDocUrl || null;
-    }
-    if (payload.certified_attendance_url !== undefined || payload.certifiedAttendanceUrl !== undefined) {
-      updateRow.certified_attendance_url = payload.certified_attendance_url || payload.certifiedAttendanceUrl || null;
-    }
-    if (payload.cancelled_at !== undefined || payload.cancelledAt !== undefined) {
-      updateRow.cancelled_at = payload.cancelled_at || payload.cancelledAt || null;
-    }
-    if (payload.cancelled_reason !== undefined || payload.cancelledReason !== undefined) {
-      updateRow.cancelled_reason = payload.cancelled_reason || payload.cancelledReason || null;
+    const updateSql = `
+      UPDATE public.invoices SET
+        company_id = COALESCE($1, company_id),
+        site_id = COALESCE($2, site_id),
+        invoice_no = COALESCE($3, invoice_no),
+        type = COALESCE($4, type),
+        status = COALESCE($5, status),
+        invoice_date = COALESCE($6, invoice_date),
+        billing_period = COALESCE($7, billing_period),
+        line_items = COALESCE($8, line_items),
+        sub_total = COALESCE($9, sub_total),
+        tax_total = COALESCE($10, tax_total),
+        grand_total = COALESCE($11, grand_total),
+        management_fee_percent = COALESCE($12, management_fee_percent),
+        mgmt_percent = COALESCE($13, mgmt_percent),
+        machinery_charges = COALESCE($14, machinery_charges),
+        material_charges = COALESCE($15, material_charges),
+        additional_charges = COALESCE($16, additional_charges),
+        challan_no = COALESCE($17, challan_no),
+        challan_date = COALESCE($18, challan_date),
+        buyer_order_no = COALESCE($19, buyer_order_no),
+        dispatch_doc_no = COALESCE($20, dispatch_doc_no),
+        dispatched_through = COALESCE($21, dispatched_through),
+        destination = COALESCE($22, destination),
+        terms_of_delivery = COALESCE($23, terms_of_delivery),
+        is_material = COALESCE($24, is_material),
+        generated_pdf_url = COALESCE($25, generated_pdf_url),
+        certified_doc_url = COALESCE($26, certified_doc_url),
+        certified_attendance_url = COALESCE($27, certified_attendance_url),
+        updated_at = NOW()
+      WHERE id = $28
+      RETURNING id;
+    `;
+
+    const res = await pool.query(updateSql, [
+      companyId || null,
+      siteId || null,
+      invoiceNo || null,
+      type || null,
+      status || null,
+      invoiceDate || null,
+      billingPeriod || null,
+      lineItems ? JSON.stringify(lineItems) : null,
+      subTotal,
+      taxTotal,
+      grandTotal,
+      mgmtPercent,
+      mgmtPercent,
+      machineryCharges,
+      materialCharges,
+      JSON.stringify(additionalCharges),
+      challanNo,
+      challanDate,
+      buyerOrderNo,
+      dispatchDocNo,
+      dispatchedThrough,
+      destination,
+      termsOfDelivery,
+      isMaterial,
+      payload.generated_pdf_url || payload.generatedPdfUrl || null,
+      payload.certified_doc_url || payload.certifiedDocUrl || null,
+      payload.certified_attendance_url || payload.certifiedAttendanceUrl || null,
+      id,
+    ]);
+
+    if (!res.rows || res.rows.length === 0) {
+      throw new Error(`Invoice not found for update: ${id}`);
     }
 
-    // Server-side NOT NULL validation before DB write
-    this.validateRequiredColumns(updateRow);
-
-    const { data, error } = await supabaseAdmin
-      .from('invoices')
-      .update(updateRow)
-      .eq('id', id)
-      .select('*, sites(*), companies(*)')
-      .single();
-
-    if (error) {
-      console.error('❌ Supabase update invoice error:', error);
-      const dbErr: any = new Error(`Database update failed: ${error.message}`);
-      dbErr.statusCode = 500;
-      dbErr.details = error.details || error.hint || error.message;
-      dbErr.hint = error.hint;
-      dbErr.code = error.code;
-      throw dbErr;
-    }
-
-    if (data) {
-      if (!data.companies && companyId) {
-        const { data: comp } = await supabaseAdmin.from('companies').select('*').eq('id', companyId).maybeSingle();
-        if (comp) data.companies = comp;
-      }
-      if (!data.sites && siteId) {
-        const { data: st } = await supabaseAdmin.from('sites').select('*').eq('id', siteId).maybeSingle();
-        if (st) data.sites = st;
-      }
-    }
-
-    return await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(data));
+    return await this.getInvoiceById(id);
   }
 
   /**
@@ -564,28 +799,19 @@ export class InvoiceQueryService {
     await this.verifyInvoiceOwnership(id, user);
     const now = new Date().toISOString();
 
-    const updatePayload: any = {
-      status: 'Cancelled',
-      cancelled_at: now,
-      updated_at: now,
-    };
-    if (cancelledReason !== undefined && cancelledReason !== null) {
-      updatePayload.cancelled_reason = cancelledReason;
+    const res = await pool.query(
+      `UPDATE public.invoices
+       SET status = 'Cancelled', cancelled_at = $1, cancelled_reason = COALESCE($2, cancelled_reason), updated_at = $1
+       WHERE id = $3
+       RETURNING id;`,
+      [now, cancelledReason || null, id]
+    );
+
+    if (!res.rows || res.rows.length === 0) {
+      throw new Error(`Invoice not found: ${id}`);
     }
 
-    const { data, error } = await supabaseAdmin
-      .from('invoices')
-      .update(updatePayload)
-      .eq('id', id)
-      .select('*, sites(*), companies(*)')
-      .single();
-
-    if (error) {
-      console.error(`[invoice:cancel:error] invoice_id=${id} error:`, error.message);
-      throw new Error(`Invoice cancellation failed: ${error.message}`);
-    }
-
-    return await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(data));
+    return await this.getInvoiceById(id);
   }
 
   /**
@@ -595,20 +821,19 @@ export class InvoiceQueryService {
     const now = new Date().toISOString();
     console.warn(`[invoice:lock:update] invoice_id=${id} setting is_locked=${isLocked}`);
 
-    const { data, error } = await supabaseAdmin
-      .from('invoices')
-      .update({ is_locked: isLocked, updated_at: now })
-      .eq('id', id)
-      .select('*, sites(*), companies(*)')
-      .single();
+    const res = await pool.query(
+      `UPDATE public.invoices
+       SET is_locked = $1, updated_at = $2
+       WHERE id = $3
+       RETURNING id;`,
+      [isLocked, now, id]
+    );
 
-    if (error) {
-      console.error(`[invoice:lock:update:error] invoice_id=${id} error:`, error.message);
-      throw new Error(`Lock status update failed: ${error.message}`);
+    if (!res.rows || res.rows.length === 0) {
+      throw new Error(`Invoice not found: ${id}`);
     }
 
-    console.warn(`[invoice:lock:update:success] invoice_id=${id} db_is_locked=${data?.is_locked} updated_at=${data?.updated_at}`);
-    return await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(data));
+    return await this.getInvoiceById(id);
   }
 
   /**
@@ -619,15 +844,11 @@ export class InvoiceQueryService {
   static async approveProforma(id: string, user?: AuthUser): Promise<InvoiceRecord> {
     await this.verifyInvoiceOwnership(id, user);
 
-    const { data: inv, error: fetchErr } = await supabaseAdmin
-      .from('invoices')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (fetchErr || !inv) {
-      throw new Error(`Invoice not found: ${fetchErr?.message || id}`);
+    const checkRes = await pool.query('SELECT type, status FROM public.invoices WHERE id = $1', [id]);
+    if (!checkRes.rows || checkRes.rows.length === 0) {
+      throw new Error(`Invoice not found: ${id}`);
     }
+    const inv = checkRes.rows[0];
 
     const isProforma =
       inv.type === 'Proforma Invoice' ||
@@ -643,24 +864,15 @@ export class InvoiceQueryService {
     }
 
     const now = new Date().toISOString();
-    const { data, error } = await supabaseAdmin
-      .from('invoices')
-      .update({
-        status: 'Approved',
-        approved_at: now,
-        updated_at: now,
-      })
-      .eq('id', id)
-      .select('*, sites(*), companies(*)')
-      .single();
-
-    if (error) {
-      console.error(`[invoice:approve:error] invoice_id=${id} error:`, error.message);
-      throw new Error(`Invoice approval failed: ${error.message}`);
-    }
+    await pool.query(
+      `UPDATE public.invoices
+       SET status = 'Approved', approved_at = $1, updated_at = $1
+       WHERE id = $2;`,
+      [now, id]
+    );
 
     console.log(`[invoice:approve:success] invoice_id=${id} approved_at=${now}`);
-    return await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(data));
+    return await this.getInvoiceById(id);
   }
 
   /**
@@ -670,91 +882,120 @@ export class InvoiceQueryService {
   static async convertToTaxInvoice(id: string, user?: AuthUser): Promise<InvoiceRecord> {
     await this.verifyInvoiceOwnership(id, user);
 
-    const { data: proforma, error: fetchErr } = await supabaseAdmin
-      .from('invoices')
-      .select('*, sites(*), companies(*)')
-      .eq('id', id)
-      .single();
+    return await withTransaction(async (client) => {
+      // 1. Fetch and lock proforma invoice
+      const proformaRes = await client.query(
+        `SELECT * FROM public.invoices WHERE id = $1 FOR UPDATE;`,
+        [id]
+      );
+      if (!proformaRes.rows || proformaRes.rows.length === 0) {
+        throw new Error(`Proforma invoice not found: ${id}`);
+      }
+      const proforma = proformaRes.rows[0];
 
-    if (fetchErr || !proforma) {
-      throw new Error(`Proforma invoice not found: ${fetchErr?.message || id}`);
-    }
+      if (proforma.status !== 'Approved') {
+        throw new Error(`Only Approved Proforma invoices can be converted to Tax Invoice. Current status: ${proforma.status}`);
+      }
 
-    if (proforma.status !== 'Approved') {
-      throw new Error(`Only Approved Proforma invoices can be converted to Tax Invoice. Current status: ${proforma.status}`);
-    }
+      const companyId = proforma.company_id;
+      if (!companyId) {
+        throw new Error('Company ID is required to generate Tax Invoice sequence number');
+      }
 
-    const companyId = proforma.company_id || proforma.companies?.id;
-    if (!companyId) {
-      throw new Error('Company ID is required to generate Tax Invoice sequence number');
-    }
+      // 2. Lock company sequence row
+      const compRes = await client.query(
+        `SELECT id, tax_prefix, tax_sequence FROM public.companies WHERE id = $1 FOR UPDATE;`,
+        [companyId]
+      );
+      if (!compRes.rows || compRes.rows.length === 0) {
+        throw new Error(`Company not found: ${companyId}`);
+      }
+      const company = compRes.rows[0];
 
-    // Fetch company to get tax_prefix and tax_sequence
-    const { data: comp, error: compErr } = await supabaseAdmin
-      .from('companies')
-      .select('*')
-      .eq('id', companyId)
-      .single();
+      const nextSeq = (Number(company.tax_sequence) || 0) + 1;
+      const taxPrefix = company.tax_prefix || 'AS/26-27/';
+      const nextTaxInvoiceNo = `${taxPrefix}${String(nextSeq).padStart(3, '0')}`;
 
-    if (compErr || !comp) {
-      throw new Error(`Company not found: ${compErr?.message || companyId}`);
-    }
+      // Update sequence in company
+      await client.query(
+        `UPDATE public.companies SET tax_sequence = $1 WHERE id = $2;`,
+        [nextSeq, companyId]
+      );
 
-    const taxPrefix = comp.tax_prefix || 'AS/26-27/';
-    const taxSeq = comp.tax_sequence || 1;
-    const nextTaxInvoiceNo = `${taxPrefix}${taxSeq}`;
-    const now = new Date().toISOString();
+      // Insert Tax Invoice header
+      const insertSql = `
+        INSERT INTO public.invoices (
+          company_id, site_id, invoice_no, type, status, invoice_date, billing_period,
+          line_items, sub_total, tax_total, grand_total, management_fee_percent, mgmt_percent,
+          machinery_charges, material_charges, additional_charges, challan_no, challan_date,
+          buyer_order_no, dispatch_doc_no, dispatched_through, destination, terms_of_delivery,
+          is_material, previous_version_id, created_at, updated_at
+        ) VALUES (
+          $1, $2, $3, 'Tax Invoice', 'Pending', CURRENT_DATE, $4,
+          $5, $6, $7, $8, $9, $10,
+          $11, $12, $13, $14, $15,
+          $16, $17, $18, $19, $20,
+          $21, $22, NOW(), NOW()
+        )
+        RETURNING id;
+      `;
 
-    const insertRow: any = {
-      company_id: companyId,
-      site_id: proforma.site_id,
-      invoice_no: nextTaxInvoiceNo,
-      type: 'Tax Invoice',
-      status: 'Pending',
-      previous_version_id: proforma.id,
-      invoice_date: now.split('T')[0],
-      billing_period: proforma.billing_period || '',
-      line_items: proforma.line_items || [],
-      sub_total: proforma.sub_total || 0,
-      tax_total: proforma.tax_total || 0,
-      grand_total: proforma.grand_total || 0,
-      management_fee_percent: proforma.management_fee_percent ?? proforma.mgmt_percent ?? DEFAULT_MGMT_FEE_PERCENT,
-      mgmt_percent: proforma.management_fee_percent ?? proforma.mgmt_percent ?? DEFAULT_MGMT_FEE_PERCENT,
-      machinery_charges: proforma.machinery_charges || 0,
-      material_charges: proforma.material_charges || 0,
-      additional_charges: proforma.additional_charges || [],
-      challan_no: proforma.challan_no || '',
-      challan_date: proforma.challan_date || '',
-      buyer_order_no: proforma.buyer_order_no || '',
-      dispatch_doc_no: proforma.dispatch_doc_no || '',
-      dispatched_through: proforma.dispatched_through || '',
-      destination: proforma.destination || '',
-      terms_of_delivery: proforma.terms_of_delivery || '',
-      is_material: proforma.is_material || false,
-      created_at: now,
-    };
+      const insertValues = [
+        companyId,
+        proforma.site_id,
+        nextTaxInvoiceNo,
+        proforma.billing_period,
+        JSON.stringify(proforma.line_items || []),
+        proforma.sub_total,
+        proforma.tax_total,
+        proforma.grand_total,
+        proforma.management_fee_percent,
+        proforma.mgmt_percent,
+        proforma.machinery_charges,
+        proforma.material_charges,
+        JSON.stringify(proforma.additional_charges || []),
+        proforma.challan_no,
+        proforma.challan_date,
+        proforma.buyer_order_no,
+        proforma.dispatch_doc_no,
+        proforma.dispatched_through,
+        proforma.destination,
+        proforma.terms_of_delivery,
+        proforma.is_material,
+        proforma.id,
+      ];
 
-    this.validateRequiredColumns(insertRow);
+      const newInvRes = await client.query(insertSql, insertValues);
+      const newTaxInvoiceId = newInvRes.rows[0].id;
 
-    const { data: newTaxInvoice, error: insertErr } = await supabaseAdmin
-      .from('invoices')
-      .insert([insertRow])
-      .select('*, sites(*), companies(*)')
-      .single();
+      // Copy line items if present in public.invoice_items
+      await client.query(
+        `INSERT INTO public.invoice_items (
+          invoice_id, description, location, hsn_code, quantity, working_days,
+          unit_rate, amount, cgst_rate, sgst_rate, igst_rate,
+          cgst_amount, sgst_amount, igst_amount
+        )
+        SELECT 
+          $1, description, location, hsn_code, quantity, working_days,
+          unit_rate, amount, cgst_rate, sgst_rate, igst_rate,
+          cgst_amount, sgst_amount, igst_amount
+        FROM public.invoice_items
+        WHERE invoice_id = $2;`,
+        [newTaxInvoiceId, proforma.id]
+      );
 
-    if (insertErr) {
-      console.error(`[invoice:convert:error] proforma_id=${id} error:`, insertErr.message);
-      throw new Error(`Failed to create Tax Invoice: ${insertErr.message}`);
-    }
+      const fullRes = await client.query(
+        `SELECT i.*, row_to_json(s.*) AS sites, row_to_json(c.*) AS companies
+         FROM public.invoices i
+         LEFT JOIN public.sites s ON s.id = i.site_id
+         LEFT JOIN public.companies c ON c.id = i.company_id
+         WHERE i.id = $1;`,
+        [newTaxInvoiceId]
+      );
 
-    // Increment company tax sequence
-    await supabaseAdmin
-      .from('companies')
-      .update({ tax_sequence: taxSeq + 1 })
-      .eq('id', companyId);
-
-    console.log(`[invoice:convert:success] proforma_id=${id} created tax_invoice_id=${newTaxInvoice.id} invoice_no=${nextTaxInvoiceNo}`);
-    return await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(newTaxInvoice));
+      console.log(`[invoice:convert:success] proforma_id=${id} created tax_invoice_id=${newTaxInvoiceId} invoice_no=${nextTaxInvoiceNo}`);
+      return await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(fullRes.rows[0]));
+    });
   }
 
   /**
@@ -768,20 +1009,17 @@ export class InvoiceQueryService {
     const updateField = isAttendance ? 'certified_attendance_confirmed_at' : 'certified_doc_confirmed_at';
     const now = new Date().toISOString();
 
-    const { data, error } = await supabaseAdmin
-      .from('invoices')
-      .update({ [updateField]: now, updated_at: now })
-      .eq('id', id)
-      .select('*, sites(*), companies(*)')
-      .single();
+    const res = await pool.query(
+      `UPDATE public.invoices SET ${updateField} = $1, updated_at = $1 WHERE id = $2 RETURNING id;`,
+      [now, id]
+    );
 
-    if (error) {
-      console.error(`[invoice:certify:error] invoice_id=${id} docType=${docType} error:`, error.message);
-      throw new Error(`Certification update failed: ${error.message}`);
+    if (!res.rows || res.rows.length === 0) {
+      throw new Error(`Invoice not found: ${id}`);
     }
 
     console.log(`[invoice:certify:success] invoice_id=${id} docType=${docType} confirmed_at=${now}`);
-    return await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(data));
+    return await this.getInvoiceById(id);
   }
 
   /**
@@ -791,15 +1029,11 @@ export class InvoiceQueryService {
   static async deleteInvoiceDocument(id: string, docType: string, user?: AuthUser): Promise<InvoiceRecord> {
     await this.verifyInvoiceOwnership(id, user);
 
-    const { data: inv, error: fetchErr } = await supabaseAdmin
-      .from('invoices')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (fetchErr || !inv) {
-      throw new Error(`Invoice not found: ${fetchErr?.message || id}`);
+    const checkRes = await pool.query('SELECT * FROM public.invoices WHERE id = $1', [id]);
+    if (!checkRes.rows || checkRes.rows.length === 0) {
+      throw new Error(`Invoice not found: ${id}`);
     }
+    const inv = checkRes.rows[0];
 
     const isAttendance = docType.toLowerCase().includes('attendance');
     const storageKey = isAttendance ? inv.certified_attendance_storage_key : inv.certified_doc_storage_key;
@@ -810,34 +1044,25 @@ export class InvoiceQueryService {
       });
     }
 
-    const updatePayload: any = isAttendance
-      ? {
-          certified_attendance_url: null,
-          certified_attendance_storage_key: null,
-          certified_attendance_confirmed_at: null,
-          updated_at: new Date().toISOString(),
-        }
-      : {
-          certified_doc_url: null,
-          certified_doc_storage_key: null,
-          certified_doc_confirmed_at: null,
-          updated_at: new Date().toISOString(),
-        };
-
-    const { data, error } = await supabaseAdmin
-      .from('invoices')
-      .update(updatePayload)
-      .eq('id', id)
-      .select('*, sites(*), companies(*)')
-      .single();
-
-    if (error) {
-      console.error(`[invoice:deleteDoc:error] invoice_id=${id} docType=${docType} error:`, error.message);
-      throw new Error(`Document deletion failed: ${error.message}`);
+    const now = new Date().toISOString();
+    if (isAttendance) {
+      await pool.query(
+        `UPDATE public.invoices
+         SET certified_attendance_url = NULL, certified_attendance_storage_key = NULL, certified_attendance_confirmed_at = NULL, updated_at = $1
+         WHERE id = $2;`,
+        [now, id]
+      );
+    } else {
+      await pool.query(
+        `UPDATE public.invoices
+         SET certified_doc_url = NULL, certified_doc_storage_key = NULL, certified_doc_confirmed_at = NULL, updated_at = $1
+         WHERE id = $2;`,
+        [now, id]
+      );
     }
 
     console.log(`[invoice:deleteDoc:success] invoice_id=${id} docType=${docType} deleted`);
-    return await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(data));
+    return await this.getInvoiceById(id);
   }
 
   /**
@@ -845,15 +1070,11 @@ export class InvoiceQueryService {
    * GET /api/invoices/:id/document/:docType/view
    */
   static async getInvoiceDocumentLocation(id: string, docType: string): Promise<{ storageKey?: string; viewUrl?: string; fileName: string }> {
-    const { data: inv, error: fetchErr } = await supabaseAdmin
-      .from('invoices')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (fetchErr || !inv) {
-      throw new Error(`Invoice not found: ${fetchErr?.message || id}`);
+    const checkRes = await pool.query('SELECT * FROM public.invoices WHERE id = $1', [id]);
+    if (!checkRes.rows || checkRes.rows.length === 0) {
+      throw new Error(`Invoice not found: ${id}`);
     }
+    const inv = checkRes.rows[0];
 
     const lower = docType.toLowerCase();
     let storageKey: string | null = null;
@@ -939,16 +1160,16 @@ export class InvoiceQueryService {
     // 1. Resolve Company Entity
     let company: any = null;
     if (body.entityId) {
-      const { data: comp } = await supabaseAdmin.from('companies').select('*').eq('id', body.entityId).maybeSingle();
-      company = comp;
+      const compRes = await pool.query('SELECT * FROM public.companies WHERE id = $1', [body.entityId]);
+      company = compRes.rows[0];
     }
     if (!company && body.entity) {
-      const { data: comp } = await supabaseAdmin.from('companies').select('*').ilike('name', `%${body.entity.trim()}%`).maybeSingle();
-      company = comp;
+      const compRes = await pool.query('SELECT * FROM public.companies WHERE name ILIKE $1 LIMIT 1', [`%${body.entity.trim()}%`]);
+      company = compRes.rows[0];
     }
     if (!company) {
-      const { data: comp } = await supabaseAdmin.from('companies').select('*').limit(1).maybeSingle();
-      company = comp;
+      const compRes = await pool.query('SELECT * FROM public.companies LIMIT 1');
+      company = compRes.rows[0];
     }
 
     if (!company) {
@@ -958,12 +1179,12 @@ export class InvoiceQueryService {
     // 2. Resolve Site
     let site: any = null;
     if (body.siteId) {
-      const { data: st } = await supabaseAdmin.from('sites').select('*').eq('id', body.siteId).maybeSingle();
-      site = st;
+      const siteRes = await pool.query('SELECT * FROM public.sites WHERE id = $1', [body.siteId]);
+      site = siteRes.rows[0];
     }
     if (!site && body.siteName) {
-      const { data: st } = await supabaseAdmin.from('sites').select('*').ilike('site_name', `%${body.siteName.trim()}%`).maybeSingle();
-      site = st;
+      const siteRes = await pool.query('SELECT * FROM public.sites WHERE site_name ILIKE $1 LIMIT 1', [`%${body.siteName.trim()}%`]);
+      site = siteRes.rows[0];
     }
 
     // 3. Invoice Number Validation & Prefix Enforcement
@@ -982,13 +1203,8 @@ export class InvoiceQueryService {
       : `${expectedPrefix}${rawBill}`;
 
     // Duplicate Check: Return 409 Conflict if already exists
-    const { data: existingInv } = await supabaseAdmin
-      .from('invoices')
-      .select('id, invoice_no')
-      .eq('invoice_no', finalInvoiceNo)
-      .maybeSingle();
-
-    if (existingInv) {
+    const checkInv = await pool.query('SELECT id, invoice_no FROM public.invoices WHERE invoice_no = $1', [finalInvoiceNo]);
+    if (checkInv.rows.length > 0) {
       const err: any = new Error(`Invoice #${finalInvoiceNo} already exists in the database.`);
       err.statusCode = 409;
       throw err;
@@ -1019,50 +1235,61 @@ export class InvoiceQueryService {
     const numericAmount = Number(body.amount) || 0;
     const nowIso = new Date().toISOString();
 
-    const insertRow: any = {
-      company_id: company.id,
-      site_id: site?.id || null,
-      invoice_no: finalInvoiceNo,
-      type: invoiceType,
-      status: 'Unpaid',
-      is_legacy: true,
-      legacy_uploaded_by: user?.id || null,
-      legacy_notes: body.notes || '',
-      invoice_date: lastDay,
-      billing_period: `${monthStr} ${yNum}`,
-      line_items: [
-        {
-          id: 'item-1',
-          srNo: 1,
-          description: 'Legacy Bill (Historical Record)',
-          rate: numericAmount,
-          amount: numericAmount,
-        },
-      ],
-      sub_total: numericAmount,
-      tax_total: 0,
-      grand_total: numericAmount,
-      certified_doc_url: null,
-      certified_doc_storage_key: storageResult.storageKey,
-      certified_doc_confirmed_at: nowIso,
-      invoice_storage_provider: 'minio',
-      is_locked: false,
-      created_at: nowIso,
-    };
+    const insertSql = `
+      INSERT INTO public.invoices (
+        company_id, site_id, invoice_no, type, status, is_legacy, legacy_uploaded_by, legacy_notes,
+        invoice_date, billing_period, line_items, sub_total, tax_total, grand_total,
+        certified_doc_url, certified_doc_storage_key, certified_doc_confirmed_at,
+        invoice_storage_provider, is_locked, created_at, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8,
+        $9, $10, $11, $12, $13, $14,
+        $15, $16, $17,
+        $18, $19, $20, $20
+      )
+      RETURNING id;
+    `;
 
-    const { data: insertedInvoice, error: dbError } = await supabaseAdmin
-      .from('invoices')
-      .insert([insertRow])
-      .select('*, sites(*), companies(*)')
-      .single();
-
-    if (dbError) {
+    let insertedId: string;
+    try {
+      const res = await pool.query(insertSql, [
+        company.id,
+        site?.id || null,
+        finalInvoiceNo,
+        invoiceType,
+        'Unpaid',
+        true,
+        user?.id || null,
+        body.notes || '',
+        lastDay,
+        `${monthStr} ${yNum}`,
+        JSON.stringify([
+          {
+            id: 'item-1',
+            srNo: 1,
+            description: 'Legacy Bill (Historical Record)',
+            rate: numericAmount,
+            amount: numericAmount,
+          },
+        ]),
+        numericAmount,
+        0,
+        numericAmount,
+        null,
+        storageResult.storageKey,
+        nowIso,
+        'minio',
+        false,
+        nowIso,
+      ]);
+      insertedId = res.rows[0].id;
+    } catch (dbError: any) {
       console.error('❌ DB insert failed for legacy invoice, rolling back MinIO upload:', dbError);
       await OracleStorageService.deleteFile(storageResult.storageKey).catch(() => {});
       throw new Error(`Database insert failed: ${dbError.message}`);
     }
 
-    const enriched = await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(insertedInvoice));
+    const enriched = await this.getInvoiceById(insertedId);
     const signedViewUrl = await OracleStorageService.getSignedReadUrl(storageResult.storageKey, 3600);
 
     return {
@@ -1096,27 +1323,27 @@ export class InvoiceQueryService {
     // Resolve Company
     let company: any = null;
     if (body.entityId) {
-      const { data: comp } = await supabaseAdmin.from('companies').select('*').eq('id', body.entityId).maybeSingle();
-      company = comp;
+      const compRes = await pool.query('SELECT * FROM public.companies WHERE id = $1', [body.entityId]);
+      company = compRes.rows[0];
     }
     if (!company && body.entity) {
-      const { data: comp } = await supabaseAdmin.from('companies').select('*').ilike('name', `%${body.entity.trim()}%`).maybeSingle();
-      company = comp;
+      const compRes = await pool.query('SELECT * FROM public.companies WHERE name ILIKE $1 LIMIT 1', [`%${body.entity.trim()}%`]);
+      company = compRes.rows[0];
     }
     if (!company) {
-      const { data: comp } = await supabaseAdmin.from('companies').select('*').limit(1).maybeSingle();
-      company = comp;
+      const compRes = await pool.query('SELECT * FROM public.companies LIMIT 1');
+      company = compRes.rows[0];
     }
 
     // Resolve Site
     let site: any = null;
     if (body.siteId) {
-      const { data: st } = await supabaseAdmin.from('sites').select('*').eq('id', body.siteId).maybeSingle();
-      site = st;
+      const siteRes = await pool.query('SELECT * FROM public.sites WHERE id = $1', [body.siteId]);
+      site = siteRes.rows[0];
     }
     if (!site && body.siteName) {
-      const { data: st } = await supabaseAdmin.from('sites').select('*').ilike('site_name', `%${body.siteName.trim()}%`).maybeSingle();
-      site = st;
+      const siteRes = await pool.query('SELECT * FROM public.sites WHERE site_name ILIKE $1 LIMIT 1', [`%${body.siteName.trim()}%`]);
+      site = siteRes.rows[0];
     }
 
     // Prefix enforcement
@@ -1129,32 +1356,6 @@ export class InvoiceQueryService {
     const finalInvoiceNo = rawBill.startsWith(expectedPrefix) ? rawBill : `${expectedPrefix}${rawBill}`;
 
     const numericAmount = Number(body.amount) || 0;
-
-    const updateRow: any = {
-      company_id: company?.id || null,
-      site_id: site?.id || null,
-      invoice_no: finalInvoiceNo,
-      type: invoiceType,
-      invoice_date: lastDay,
-      billing_period: `${monthStr} ${yNum}`,
-      sub_total: numericAmount,
-      tax_total: 0,
-      grand_total: numericAmount,
-      line_items: [
-        {
-          id: 'item-1',
-          srNo: 1,
-          description: 'Legacy Bill (Historical Record)',
-          rate: numericAmount,
-          amount: numericAmount,
-        },
-      ],
-      updated_at: new Date().toISOString(),
-    };
-
-    if (body.notes !== undefined) {
-      updateRow.legacy_notes = body.notes;
-    }
 
     let storageKey: string | null = null;
     let signedViewUrl: string | undefined = undefined;
@@ -1178,26 +1379,58 @@ export class InvoiceQueryService {
       });
 
       const storageResult = await OracleStorageService.uploadFile(uploadBuffer, storageKey, uploadMimeType);
-      updateRow.certified_doc_storage_key = storageResult.storageKey;
-      updateRow.certified_doc_confirmed_at = new Date().toISOString();
-      updateRow.invoice_storage_provider = 'minio';
-
+      storageKey = storageResult.storageKey;
       signedViewUrl = await OracleStorageService.getSignedReadUrl(storageResult.storageKey, 3600);
     }
 
-    const { data: updatedInvoice, error: dbError } = await supabaseAdmin
-      .from('invoices')
-      .update(updateRow)
-      .eq('id', id)
-      .select('*, sites(*), companies(*)')
-      .single();
+    const updateSql = `
+      UPDATE public.invoices SET
+        company_id = COALESCE($1, company_id),
+        site_id = COALESCE($2, site_id),
+        invoice_no = COALESCE($3, invoice_no),
+        type = COALESCE($4, type),
+        invoice_date = COALESCE($5, invoice_date),
+        billing_period = COALESCE($6, billing_period),
+        sub_total = COALESCE($7, sub_total),
+        tax_total = 0,
+        grand_total = COALESCE($7, grand_total),
+        line_items = $8,
+        legacy_notes = COALESCE($9, legacy_notes),
+        certified_doc_storage_key = COALESCE($10, certified_doc_storage_key),
+        certified_doc_confirmed_at = CASE WHEN $10 IS NOT NULL THEN NOW() ELSE certified_doc_confirmed_at END,
+        invoice_storage_provider = CASE WHEN $10 IS NOT NULL THEN 'minio' ELSE invoice_storage_provider END,
+        updated_at = NOW()
+      WHERE id = $11
+      RETURNING id;
+    `;
 
-    if (dbError) {
-      console.error('❌ DB update failed for legacy invoice:', dbError);
-      throw new Error(`Database update failed: ${dbError.message}`);
+    const res = await pool.query(updateSql, [
+      company?.id || null,
+      site?.id || null,
+      finalInvoiceNo,
+      invoiceType,
+      lastDay,
+      `${monthStr} ${yNum}`,
+      numericAmount,
+      JSON.stringify([
+        {
+          id: 'item-1',
+          srNo: 1,
+          description: 'Legacy Bill (Historical Record)',
+          rate: numericAmount,
+          amount: numericAmount,
+        },
+      ]),
+      body.notes !== undefined ? body.notes : null,
+      storageKey,
+      id,
+    ]);
+
+    if (!res.rows || res.rows.length === 0) {
+      throw new Error(`Invoice not found for update: ${id}`);
     }
 
-    const enriched = await enrichInvoiceWithViewUrls(mapRowToInvoiceRecord(updatedInvoice));
+    const enriched = await this.getInvoiceById(id);
     return {
       invoice: enriched,
       view_url: signedViewUrl || enriched.certified_doc_view_url || enriched.view_url || undefined,

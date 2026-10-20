@@ -26,7 +26,7 @@ import {
 import { AttendanceTemplate } from '@/features/invoices/components/AttendanceTemplate';
 import { MinervaSheetTemplate } from './MinervaSheetTemplate';
 import { mapDbToAttendanceTemplate, getWeeklyOffDayNum } from '../utils/attendanceMapper';
-import { supabase } from '@/lib/supabase';
+import { fetchWithRetry } from '@/lib/apiClient';
 import { pdfService } from '@/services/pdfService';
 import { AddStaffModal } from './AddStaffModal';
 
@@ -219,7 +219,7 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
       return filtered;
     });
 
-    // Save directly to Supabase attendance_records table
+    // Save to PostgreSQL attendance_records table via backend API
     try {
       const recordPayload = {
         staff_id: empId,
@@ -233,25 +233,11 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
         duration: existingRec?.duration || null,
       };
 
-      if (existingRec?.id) {
-        supabase
-          .from('attendance_records')
-          .update({
-            status: targetStatus,
-            shift_type: overtimeVal ? 'overtime' : 'regular',
-          })
-          .eq('id', existingRec.id)
-          .then(({ error }) => {
-            if (error) console.warn('⚠️ Error updating attendance_record:', error.message);
-          });
-      } else {
-        supabase
-          .from('attendance_records')
-          .insert([recordPayload])
-          .then(({ error }) => {
-            if (error) console.warn('⚠️ Error inserting attendance_record:', error.message);
-          });
-      }
+      fetchWithRetry('/api/attendance/records', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(recordPayload),
+      }).catch((e) => console.warn('⚠️ Error saving attendance_record:', e));
     } catch (e) {
       console.warn('⚠️ Could not save attendance_record:', e);
     }
@@ -492,12 +478,11 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
 
     try {
       if (newRecordsToUpsert.length > 0) {
-        supabase
-          .from('attendance_records')
-          .upsert(newRecordsToUpsert, { onConflict: 'staff_id,record_date' })
-          .then(({ error }) => {
-            if (error) console.warn('⚠️ Error bulk upserting attendance:', error.message);
-          });
+        fetchWithRetry('/api/attendance/records', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newRecordsToUpsert),
+        }).catch((err) => console.warn('⚠️ Error bulk upserting attendance:', err));
       }
     } catch (err) {
       console.warn('⚠️ Could not save bulk attendance:', err);
@@ -510,41 +495,41 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
 
     async function loadRelationalData() {
       try {
-        // 1. Fetch Sites from Supabase sites table
-        const { data: dbSites, error: sitesErr } = await supabase
-          .from('sites')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (!sitesErr && dbSites && dbSites.length > 0) {
-          const mappedSites = dbSites.map((s: any) => ({
-            id: s.id,
-            name: s.site_name || s.siteName || s.name || '',
-            codeName: s.code_name || s.codeName || '',
-            attendanceGridName: s.site_name || s.siteName || s.name || '',
-            approvedManpower: Number(s.approved_manpower || s.approvedManpower || s.contracted_manpower || 5),
-            workOrderRef: s.work_order_ref || '',
-            clientName: s.client_name || '',
-          }));
-          if (isMounted) {
-            setSiteList(mappedSites);
-            if (selectedSiteFilter === 'all' && mappedSites.length > 0) {
-              setSelectedSiteFilter(mappedSites[0].id);
+        // 1. Fetch Sites from backend API
+        const sitesRes = await fetchWithRetry('/api/sites');
+        if (sitesRes.ok) {
+          const jsonSites = await sitesRes.json();
+          const dbSites = jsonSites.data || jsonSites || [];
+          if (Array.isArray(dbSites) && dbSites.length > 0) {
+            const mappedSites = dbSites.map((s: any) => ({
+              id: s.id,
+              name: s.site_name || s.siteName || s.name || '',
+              codeName: s.code_name || s.codeName || '',
+              attendanceGridName: s.site_name || s.siteName || s.name || '',
+              approvedManpower: Number(s.approved_manpower || s.approvedManpower || s.contracted_manpower || 5),
+              workOrderRef: s.work_order_ref || '',
+              clientName: s.client_name || '',
+            }));
+            if (isMounted) {
+              setSiteList(mappedSites);
+              if (selectedSiteFilter === 'all' && mappedSites.length > 0) {
+                setSelectedSiteFilter(mappedSites[0].id);
+              }
             }
           }
         }
 
         // 2. Query 1: Fetch staff for selected site
-        let staffQuery = supabase.from('staff').select('*');
-        if (selectedSiteFilter && selectedSiteFilter !== 'all') {
-          staffQuery = staffQuery.eq('site_id', selectedSiteFilter);
-        }
+        const staffRes = await fetchWithRetry('/api/staff');
+        if (staffRes.ok) {
+          const jsonStaff = await staffRes.json();
+          let dbStaff = jsonStaff.data || jsonStaff || [];
+          if (selectedSiteFilter && selectedSiteFilter !== 'all') {
+            dbStaff = dbStaff.filter((st: any) => (st.site_id || st.siteId) === selectedSiteFilter);
+          }
 
-        const { data: dbStaff, error: staffErr } = await staffQuery;
+          const monthStart = new Date(Number(selectedYear), Number(selectedMonth) - 1, 1);
 
-        const monthStart = new Date(Number(selectedYear), Number(selectedMonth) - 1, 1);
-
-        if (!staffErr && dbStaff) {
           const activeStaffList = dbStaff.filter((st: any) => {
             if (st.status === 'Inactive') {
               const leftDStr = st.left_date || st.leftDate;
@@ -583,19 +568,19 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
         const lastDay = new Date(selectedYear, selectedMonth, 0).getDate();
         const endDateStr = `${selectedYear}-${selectedMonth.toString().padStart(2, '0')}-${lastDay.toString().padStart(2, '0')}`;
 
-        let recQuery = supabase
-          .from('attendance_records')
-          .select('*')
-          .gte('record_date', startDateStr)
-          .lte('record_date', endDateStr);
-
+        const qParams = new URLSearchParams({
+          start_date: startDateStr,
+          end_date: endDateStr,
+        });
         if (selectedSiteFilter && selectedSiteFilter !== 'all') {
-          recQuery = recQuery.eq('site_id', selectedSiteFilter);
+          qParams.append('site_id', selectedSiteFilter);
         }
 
-        const { data: dbRecords, error: recErr } = await recQuery;
+        const recRes = await fetchWithRetry(`/api/attendance/records?${qParams.toString()}`);
+        if (recRes.ok) {
+          const jsonRec = await recRes.json();
+          const dbRecords = jsonRec.data || jsonRec || [];
 
-        if (!recErr && dbRecords) {
           const mappedRecords: AttendanceRecord[] = dbRecords.map((r: any) => ({
             id: r.id,
             employeeId: r.staff_id || r.employee_id || r.employeeId || r.staffId || '',

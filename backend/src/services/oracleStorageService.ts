@@ -170,6 +170,11 @@ export class OracleStorageService {
     }
   }
 
+  public static async getFileStream(key: string): Promise<any> {
+    const obj = await this.getObject(key);
+    return obj.body;
+  }
+
   /**
    * Deletes an object from MinIO/Oracle storage for rollback/cleanup.
    */

@@ -30,7 +30,6 @@ import {
   Lock,
   Unlock,
 } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
 import {
   fetchInvoicesApi,
   cancelInvoiceApi,

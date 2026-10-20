@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { parseAttendanceDurationExcel } from '../services/attendanceDurationParser';
-import { supabaseAdmin } from '../config/supabase';
+import { pool, withTransaction } from '../db/pool';
 
 export class AttendanceCalculatorController {
   /**
@@ -31,15 +31,14 @@ export class AttendanceCalculatorController {
       const parsedEmployees = await parseAttendanceDurationExcel(req.file.buffer, thresholdHours);
 
       // 2. Fresh query of ALL staff from database with joined sites
-      const { data: dbStaff, error: staffError } = await supabaseAdmin
-        .from('staff')
-        .select('id, employee_name, biometric_code, designation, weekly_off, site_id, sites(id, site_name, client_name, code_name, company_id)');
+      const staffRes = await pool.query(`
+        SELECT s.id, s.employee_name, s.biometric_code, s.designation, s.weekly_off, s.site_id,
+               json_build_object('id', st.id, 'site_name', st.site_name, 'client_name', st.client_name, 'code_name', st.code_name, 'company_id', st.company_id) AS sites
+        FROM public.staff s
+        LEFT JOIN public.sites st ON st.id = s.site_id;
+      `);
 
-      if (staffError) {
-        console.error('❌ Error querying staff for biometric matching:', staffError.message);
-      }
-
-      const staffList = dbStaff || [];
+      const staffList = staffRes.rows || [];
 
       console.log(`[AttendanceCalculator:preview] Total parsed Excel sheets: ${parsedEmployees.length}, Total staff fetched from DB: ${staffList.length}`);
 
@@ -63,7 +62,7 @@ export class AttendanceCalculatorController {
         });
 
         if (matchedStaff) {
-          const siteObj = Array.isArray(matchedStaff.sites) ? matchedStaff.sites[0] : matchedStaff.sites;
+          const siteObj = matchedStaff.sites;
           const resolvedSiteName =
             siteObj?.site_name ||
             siteObj?.client_name ||
@@ -101,29 +100,21 @@ export class AttendanceCalculatorController {
         year,
         matched,
         unmatched,
-        data: matched,
-        debugStaffList: staffList.map((s) => ({
-          id: s.id,
-          employee_name: s.employee_name,
-          biometric_code: s.biometric_code,
-          site_id: s.site_id,
-        })),
-        staffError: staffError ? staffError.message : null,
       });
     } catch (error: any) {
-      console.error('❌ Attendance Calculator preview error:', error);
+      console.error('❌ Attendance Calculator Preview error:', error);
       res.status(500).json({
-        error: 'Failed to parse Excel file',
-        message: error.message || 'Unknown error occurred while processing workbook',
+        error: 'Failed to process Excel file',
+        message: error.message || 'Unknown parsing error occurred',
       });
     }
   }
 
   /**
-   * POST /api/attendance-calculator/save
-   * Saves calculated attendance records to attendance_records (per-day rows) grouped by resolved site_id.
+   * POST /api/attendance-calculator/commit
+   * Saves matched attendance records into PostgreSQL attendance_records and attendance_sheets.
    */
-  static async save(req: Request, res: Response): Promise<void> {
+  static async commit(req: Request, res: Response): Promise<void> {
     try {
       const { month, year, records, thresholdHours = 8.0 } = req.body;
 
@@ -146,11 +137,11 @@ export class AttendanceCalculatorController {
 
       // Fetch fresh weekly_off from staff table for exact day comparison
       const rawStaffIds = records.map((r: any) => r.staffId).filter(Boolean);
-      const { data: staffData } = await supabaseAdmin
-        .from('staff')
-        .select('id, weekly_off')
-        .in('id', rawStaffIds);
-      const staffWeeklyOffMap = new Map((staffData || []).map((s: any) => [s.id, s.weekly_off || 'Sunday']));
+      const staffRes = await pool.query(
+        'SELECT id, weekly_off FROM public.staff WHERE id = ANY($1::uuid[]);',
+        [rawStaffIds]
+      );
+      const staffWeeklyOffMap = new Map((staffRes.rows || []).map((s: any) => [s.id, s.weekly_off || 'Sunday']));
 
       const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -178,119 +169,100 @@ export class AttendanceCalculatorController {
           const inTime = emp.dailyInTime?.[d - 1] || null;
           const outTime = emp.dailyOutTime?.[d - 1] || null;
           const durationHours = emp.dailyHours?.[d - 1] !== undefined ? Number(emp.dailyHours[d - 1]) : 0;
-          const duration = emp.dailyDuration?.[d - 1] || (durationHours > 0 ? `${durationHours}h` : null);
+          const duration = emp.dailyDurationText?.[d - 1] || null;
 
-          let finalStatus = rawStatus;
-          let shiftType = 'regular';
-
-          if (isWeeklyOff) {
-            if (rawStatus === 'P') {
-              finalStatus = 'WOP';
-              shiftType = 'overtime';
-            } else {
-              finalStatus = 'W/O';
-            }
-          } else {
-            finalStatus = rawStatus === 'P' ? 'P' : 'A';
+          let status = rawStatus;
+          if (rawStatus === 'P') {
+            status = 'P';
+          } else if (rawStatus === 'WO' || rawStatus === 'W/O') {
+            status = 'W/O';
+          } else if (isWeeklyOff) {
+            status = 'W/O';
+          } else if (rawStatus === 'A') {
+            status = 'A';
           }
 
           attendanceRecordRows.push({
             staff_id: emp.staffId,
             site_id: emp.siteId,
             record_date: dateStr,
-            shift_type: shiftType,
-            status: finalStatus,
+            shift_type: 'Day',
+            status,
             in_time: inTime,
             out_time: outTime,
             duration_hours: durationHours,
-            duration: duration,
+            duration,
           });
         }
       }
 
-      if (attendanceRecordRows.length === 0) {
-        res.status(400).json({
-          error: 'No valid matched staff with site assignments found in records to save.',
-        });
-        return;
-      }
-
-      // 1. Delete existing daily records for these staff members within this month range
       const uniqueStaffIds = Array.from(new Set(staffIds));
-      const { error: deleteErr } = await supabaseAdmin
-        .from('attendance_records')
-        .delete()
-        .in('staff_id', uniqueStaffIds)
-        .gte('record_date', startDateStr)
-        .lte('record_date', endDateStr);
 
-      if (deleteErr) {
-        console.warn('⚠️ Warning during attendance_records delete cleanup:', deleteErr.message);
-      }
+      // 1. Transactional PostgreSQL atomic save
+      await withTransaction(async (client) => {
+        // Delete previous daily records for these staff in this month window
+        await client.query(
+          `DELETE FROM public.attendance_records
+           WHERE staff_id = ANY($1::uuid[])
+             AND record_date >= $2::date
+             AND record_date <= $3::date;`,
+          [uniqueStaffIds, startDateStr, endDateStr]
+        );
 
-      // 2. Insert fresh per-day rows in chunks of 500
-      const CHUNK_SIZE = 500;
-      for (let i = 0; i < attendanceRecordRows.length; i += CHUNK_SIZE) {
-        const chunk = attendanceRecordRows.slice(i, i + CHUNK_SIZE);
-        const { error: insertErr } = await supabaseAdmin
-          .from('attendance_records')
-          .insert(chunk);
-
-        if (insertErr) {
-          console.error('❌ Error inserting attendance_records chunk:', insertErr);
-          throw new Error(`Failed to save attendance_records: ${insertErr.message}`);
+        // Batch insert attendance records
+        for (const row of attendanceRecordRows) {
+          await client.query(
+            `INSERT INTO public.attendance_records
+              (staff_id, site_id, record_date, shift_type, status, in_time, out_time, duration_hours, duration)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             ON CONFLICT (staff_id, record_date)
+             DO UPDATE SET
+               site_id = EXCLUDED.site_id,
+               status = EXCLUDED.status,
+               in_time = EXCLUDED.in_time,
+               out_time = EXCLUDED.out_time,
+               duration_hours = EXCLUDED.duration_hours,
+               duration = EXCLUDED.duration;`,
+            [
+              row.staff_id,
+              row.site_id,
+              row.record_date,
+              row.shift_type,
+              row.status,
+              row.in_time,
+              row.out_time,
+              row.duration_hours,
+              row.duration,
+            ]
+          );
         }
-      }
 
-      // 3. Upsert attendance_sheets entry for each affected site (summary store)
-      for (const [siteId, siteEmployees] of recordsBySite.entries()) {
-        try {
-          const { data: siteData } = await supabaseAdmin
-            .from('sites')
-            .select('id, site_name, company_id')
-            .eq('id', siteId)
-            .maybeSingle();
+        // Upsert attendance_sheets entry for each affected site
+        const monthNames = [
+          'January', 'February', 'March', 'April', 'May', 'June',
+          'July', 'August', 'September', 'October', 'November', 'December'
+        ];
+        const monthName = monthNames[Number(month) - 1] || String(month);
+        const monthYearStr = `${monthName} ${year}`;
 
-          const siteName = siteData?.site_name || 'Site';
-          const companyId = siteData?.company_id || (req.user as any)?.company_id || null;
-
-          const { data: existingSheet } = await supabaseAdmin
-            .from('attendance_sheets')
-            .select('id')
-            .eq('site_id', siteId)
-            .eq('month', String(month))
-            .eq('year', String(year))
-            .maybeSingle();
-
-          const sheetPayload = {
-            site_id: siteId,
-            company_id: companyId,
-            site_name: siteName,
-            month: String(month),
-            year: String(year),
-            records: siteEmployees,
-            summary: {
-              totalEmployees: siteEmployees.length,
-              thresholdHours,
-              savedAt: new Date().toISOString(),
-            },
-            updated_at: new Date().toISOString(),
+        for (const [siteId, siteEmployees] of recordsBySite.entries()) {
+          const summaryObj = {
+            totalEmployees: siteEmployees.length,
+            thresholdHours,
+            savedAt: new Date().toISOString(),
           };
 
-          if (existingSheet?.id) {
-            await supabaseAdmin
-              .from('attendance_sheets')
-              .update(sheetPayload)
-              .eq('id', existingSheet.id);
-          } else {
-            await supabaseAdmin
-              .from('attendance_sheets')
-              .insert([{ ...sheetPayload, created_at: new Date().toISOString() }]);
-          }
-        } catch (sheetErr: any) {
-          console.warn(`⚠️ Warning syncing attendance_sheets for site ${siteId}:`, sheetErr.message);
+          await client.query(
+            `INSERT INTO public.attendance_sheets (site_id, month_year, summary, records, status, updated_at, created_at)
+             VALUES ($1, $2, $3, $4, 'draft', NOW(), NOW())
+             ON CONFLICT (id) DO UPDATE SET
+               summary = EXCLUDED.summary,
+               records = EXCLUDED.records,
+               updated_at = NOW();`,
+            [siteId, monthYearStr, JSON.stringify(summaryObj), JSON.stringify(siteEmployees)]
+          );
         }
-      }
+      });
 
       console.log(`✅ [attendance-calculator:save] Successfully saved ${uniqueStaffIds.length} staff (${attendanceRecordRows.length} daily rows) across ${recordsBySite.size} site(s).`);
 
@@ -311,4 +283,6 @@ export class AttendanceCalculatorController {
       });
     }
   }
+
+  static save = AttendanceCalculatorController.commit;
 }

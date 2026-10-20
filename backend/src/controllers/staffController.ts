@@ -1,6 +1,36 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
-import { supabaseAdmin } from '../config/supabase';
+import { pool } from '../db/pool';
+
+const CreateStaffSchema = z.object({
+  employee_name: z.string().min(1, 'Employee name is required'),
+  biometric_code: z.string().optional().nullable(),
+  designation: z.string().optional().nullable(),
+  weekly_off: z.string().optional().default('Sunday'),
+  status: z.string().optional().default('Active'),
+  phone: z.string().optional().nullable(),
+  gender: z.string().optional().default('Male'),
+  site_id: z.string().uuid().optional().nullable(),
+  rate_card_id: z.string().uuid().optional().nullable(),
+  monthly_incentive: z.number().optional().default(0),
+  compliance_name: z.string().optional().nullable(),
+  bank_account_no: z.string().optional().nullable(),
+  bank_ifsc_code: z.string().optional().nullable(),
+  bank_name: z.string().optional().nullable(),
+  payee_name: z.string().optional().nullable(),
+  aadhar_no: z.string().optional().nullable(),
+  pan_no: z.string().optional().nullable(),
+  uan_no: z.string().optional().nullable(),
+  esic_no: z.string().optional().nullable(),
+  aadhar_doc_url: z.string().optional().nullable(),
+  pan_doc_url: z.string().optional().nullable(),
+  passbook_doc_url: z.string().optional().nullable(),
+  uan_card_doc_url: z.string().optional().nullable(),
+  esic_card_doc_url: z.string().optional().nullable(),
+  left_date: z.string().optional().nullable(),
+  inactive_reason: z.string().optional().default(''),
+  is_locked: z.boolean().optional().default(false),
+});
 
 const BulkAssignRateCardSchema = z.object({
   rate_card_id: z.string().uuid('Invalid rate card ID'),
@@ -10,21 +40,55 @@ const BulkAssignRateCardSchema = z.object({
 
 export const StaffController = {
   /**
-   * GET /api/staff
+   * POST /api/staff
    */
-  async list(req: Request, res: Response): Promise<void> {
+  async create(req: Request, res: Response): Promise<void> {
     try {
-      const { data, error } = await supabaseAdmin
-        .from('staff')
-        .select('*, rate_cards(*), sites(id, site_name, code_name)')
-        .order('employee_name');
-
-      if (error) {
-        res.status(500).json({ error: error.message });
+      const parsed = CreateStaffSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ error: parsed.error.errors[0]?.message || 'Validation error' });
         return;
       }
-      res.status(200).json({ success: true, data });
+
+      const payload: Record<string, any> = { ...parsed.data };
+      if (payload.site_id === '') payload.site_id = null;
+      if (payload.rate_card_id === '') payload.rate_card_id = null;
+      if (payload.left_date === '') payload.left_date = null;
+      payload.is_locked = false;
+
+      const keys = Object.keys(payload);
+      const values = keys.map((k) => payload[k]);
+      const cols = keys.map((k) => `"${k}"`).join(', ');
+      const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
+
+      const query = `INSERT INTO public.staff (${cols}) VALUES (${placeholders}) RETURNING *;`;
+      const result = await pool.query(query, values);
+
+      res.status(201).json({ success: true, data: result.rows[0] });
     } catch (err: any) {
+      console.error('[StaffController:create] Fatal error:', err.message);
+      res.status(500).json({ error: err.message || 'Internal server error creating staff' });
+    }
+  },
+
+  /**
+   * GET /api/staff
+   */
+  async list(_req: Request, res: Response): Promise<void> {
+    try {
+      const query = `
+        SELECT s.*,
+               row_to_json(rc.*) AS rate_cards,
+               json_build_object('id', st.id, 'site_name', st.site_name, 'code_name', st.code_name) AS sites
+        FROM public.staff s
+        LEFT JOIN public.rate_cards rc ON rc.id = s.rate_card_id
+        LEFT JOIN public.sites st ON st.id = s.site_id
+        ORDER BY s.employee_name;
+      `;
+      const result = await pool.query(query);
+      res.status(200).json({ success: true, data: result.rows || [] });
+    } catch (err: any) {
+      console.error('[StaffController:list] Error:', err.message);
       res.status(500).json({ error: err.message });
     }
   },
@@ -35,31 +99,35 @@ export const StaffController = {
   async getById(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const { data, error } = await supabaseAdmin
-        .from('staff')
-        .select('*, rate_cards(*), sites(id, site_name, code_name)')
-        .eq('id', id)
-        .maybeSingle();
-
-      if (error || !data) {
+      const query = `
+        SELECT s.*,
+               row_to_json(rc.*) AS rate_cards,
+               json_build_object('id', st.id, 'site_name', st.site_name, 'code_name', st.code_name) AS sites
+        FROM public.staff s
+        LEFT JOIN public.rate_cards rc ON rc.id = s.rate_card_id
+        LEFT JOIN public.sites st ON st.id = s.site_id
+        WHERE s.id = $1;
+      `;
+      const result = await pool.query(query, [id]);
+      if (!result.rows || result.rows.length === 0) {
         res.status(404).json({ error: 'Staff record not found' });
         return;
       }
-      res.status(200).json({ success: true, data });
+      res.status(200).json({ success: true, data: result.rows[0] });
     } catch (err: any) {
+      console.error('[StaffController:getById] Error:', err.message);
       res.status(500).json({ error: err.message });
     }
   },
 
   /**
    * PUT/PATCH /api/staff/:id
-   * Protected by checkFieldLockBouncer('staff')
    */
   async update(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
       const body = req.body || {};
-      const updateData: any = {};
+      const updateData: Record<string, any> = {};
 
       if (body.employee_name !== undefined || body.name !== undefined) {
         updateData.employee_name = (body.employee_name || body.name || '').trim();
@@ -121,61 +189,54 @@ export const StaffController = {
       if (req.user?.role === 'superadmin' && body.is_locked !== undefined) {
         updateData.is_locked = Boolean(body.is_locked);
       }
-      updateData.updated_at = new Date().toISOString();
 
-      let { data, error } = await supabaseAdmin
-        .from('staff')
-        .update(updateData)
-        .eq('id', id)
-        .select('*')
-        .maybeSingle();
-
-      if (error) {
-        delete updateData.updated_at;
-        const retry = await supabaseAdmin
-          .from('staff')
-          .update(updateData)
-          .eq('id', id)
-          .select('*')
-          .maybeSingle();
-        data = retry.data;
-        error = retry.error;
-      }
-
-      if (error) {
-        console.error('[StaffController:update] Error:', error);
-        res.status(500).json({ error: `Failed to update staff: ${error.message}` });
+      const keys = Object.keys(updateData);
+      if (keys.length === 0) {
+        const getRes = await pool.query('SELECT * FROM public.staff WHERE id = $1', [id]);
+        res.status(200).json({ success: true, data: getRes.rows[0], message: 'No updates provided' });
         return;
       }
 
-      res.status(200).json({ success: true, data, message: 'Staff record updated successfully' });
+      const values = keys.map((k) => updateData[k]);
+      const setClauses = keys.map((k, i) => `"${k}" = $${i + 1}`).join(', ');
+
+      const updateResult = await pool.query(
+        `UPDATE public.staff SET ${setClauses} WHERE id = $${keys.length + 1} RETURNING *;`,
+        [...values, id]
+      );
+
+      if (!updateResult.rows || updateResult.rows.length === 0) {
+        res.status(404).json({ error: 'Staff record not found' });
+        return;
+      }
+
+      res.status(200).json({
+        success: true,
+        data: updateResult.rows[0],
+        message: 'Staff record updated successfully',
+      });
     } catch (err: any) {
-      console.error('[StaffController:update] Fatal error:', err);
+      console.error('[StaffController:update] Fatal error:', err.message);
       res.status(500).json({ error: err.message || 'Internal server error' });
     }
   },
 
   /**
    * DELETE /api/staff/:id
-   * Protected by checkLockBouncer('staff')
    */
   async delete(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const { error } = await supabaseAdmin
-        .from('staff')
-        .delete()
-        .eq('id', id);
+      const result = await pool.query('DELETE FROM public.staff WHERE id = $1', [id]);
 
-      if (error) {
-        console.error('[StaffController:delete] Error:', error);
-        res.status(500).json({ error: `Failed to delete staff: ${error.message}` });
+      if ((result.rowCount ?? 0) === 0) {
+        res.status(404).json({ error: 'Staff record not found' });
         return;
       }
 
       res.status(200).json({ success: true, message: 'Staff deleted successfully', id });
     } catch (err: any) {
-      console.error('[StaffController:delete] Fatal error:', err);
+      console.error('[StaffController:delete] Fatal error:', err.message);
       res.status(500).json({ error: err.message || 'Internal server error' });
     }
   },
@@ -207,36 +268,18 @@ export const StaffController = {
         return;
       }
 
-      // Assign rate_card_id to added staff
       if (added.length > 0) {
-        const { error: addError } = await supabaseAdmin
-          .from('staff')
-          .update({
-            rate_card_id,
-          })
-          .in('id', added);
-
-        if (addError) {
-          console.error('[StaffController:bulkAssignRateCard] Error adding staff to rate card:', addError);
-          res.status(500).json({ error: `Failed to assign staff: ${addError.message}` });
-          return;
-        }
+        await pool.query(
+          'UPDATE public.staff SET rate_card_id = $1 WHERE id = ANY($2::uuid[])',
+          [rate_card_id, added]
+        );
       }
 
-      // Unassign rate_card_id from removed staff
       if (removed.length > 0) {
-        const { error: removeError } = await supabaseAdmin
-          .from('staff')
-          .update({
-            rate_card_id: null,
-          })
-          .in('id', removed);
-
-        if (removeError) {
-          console.error('[StaffController:bulkAssignRateCard] Error removing staff from rate card:', removeError);
-          res.status(500).json({ error: `Failed to unassign staff: ${removeError.message}` });
-          return;
-        }
+        await pool.query(
+          'UPDATE public.staff SET rate_card_id = NULL WHERE id = ANY($1::uuid[])',
+          [removed]
+        );
       }
 
       console.info(
@@ -250,7 +293,7 @@ export const StaffController = {
         removedCount: removed.length,
       });
     } catch (err: any) {
-      console.error('[StaffController:bulkAssignRateCard] Unexpected error:', err);
+      console.error('[StaffController:bulkAssignRateCard] Unexpected error:', err.message);
       res.status(500).json({ error: err.message || 'Internal server error while assigning rate card roster' });
     }
   },

@@ -14,7 +14,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+import { fetchWithRetry } from '@/lib/apiClient';
 
 export interface SiteOption {
   id: string;
@@ -99,21 +99,28 @@ export const DeploymentsHub: React.FC = () => {
   useEffect(() => {
     const fetchMasterData = async () => {
       try {
-        const { data: sData, error: sErr } = await supabase.from('sites').select('id, site_name, code_name');
-        if (sErr) console.warn('sites query error:', sErr);
-        if (sData) setSites(sData);
+        const sRes = await fetchWithRetry('/api/sites');
+        if (sRes.ok) {
+          const sJson = await sRes.json();
+          const sData = Array.isArray(sJson.data) ? sJson.data : (Array.isArray(sJson) ? sJson : []);
+          setSites(sData.map((s: any) => ({
+            id: s.id,
+            site_name: s.site_name || s.name || '',
+            code_name: s.code_name || s.codeName || '',
+          })));
+        }
 
-        const { data: stData, error: stErr } = await supabase.from('staff').select('*');
-        if (stErr) {
-          console.error('Error fetching staff:', stErr);
-        } else if (stData) {
+        const stRes = await fetchWithRetry('/api/staff');
+        if (stRes.ok) {
+          const stJson = await stRes.json();
+          const stData = Array.isArray(stJson.data) ? stJson.data : (Array.isArray(stJson) ? stJson : []);
           setStaffList(stData);
         }
 
-        const { data: rcData, error: rcErr } = await supabase.from('rate_cards').select('*');
-        if (rcErr) {
-          console.warn('Error fetching rate cards:', rcErr);
-        } else if (rcData) {
+        const rcRes = await fetchWithRetry('/api/rate-cards');
+        if (rcRes.ok) {
+          const rcJson = await rcRes.json();
+          const rcData = Array.isArray(rcJson.data) ? rcJson.data : (Array.isArray(rcJson) ? rcJson : []);
           setRateCards(rcData);
         }
       } catch (err) {
@@ -129,16 +136,12 @@ export const DeploymentsHub: React.FC = () => {
     setStatusMessage(null);
     try {
       const monthYearStr = `${selectedMonth} ${selectedYear}`;
-      const { data, error } = await supabase
-        .from('site_deployments')
-        .select('*')
-        .eq('month_year', monthYearStr);
-
-      if (error) {
-        console.warn('site_deployments query notice:', error.message);
-        setDeployments([]);
+      const res = await fetchWithRetry(`/api/deployments?month_year=${encodeURIComponent(monthYearStr)}`);
+      if (res.ok) {
+        const json = await res.json();
+        setDeployments(json.data || []);
       } else {
-        setDeployments(data || []);
+        setDeployments([]);
       }
     } catch (err: any) {
       console.error('Error fetching deployments:', err);
@@ -229,24 +232,25 @@ export const DeploymentsHub: React.FC = () => {
         rate_card_id: selectedRateCardId || undefined,
       };
 
-      const { error } = await supabase.from('site_deployments').upsert([record], {
-        onConflict: 'month_year,site_id,staff_id',
+      const res = await fetchWithRetry('/api/deployments/upsert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(record),
       });
-
-      if (error) {
-        console.error('Failed to assign deployment:', error);
-        alert(`Failed to deploy! ${error.message}`);
-      } else {
-        setDeployments((prev) => {
-          const filtered = prev.filter((d) => !(d.staff_id === staff.id && d.site_id === site.id));
-          return [...filtered, record];
-        });
-        setStatusMessage({
-          type: 'success',
-          text: `Deployed ${empName} to ${site.code_name || site.site_name}`,
-        });
-        setActiveModal(null);
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || `Deployment failed with status ${res.status}`);
       }
+
+      setDeployments((prev) => {
+        const filtered = prev.filter((d) => !(d.staff_id === staff.id && d.site_id === site.id));
+        return [...filtered, record];
+      });
+      setStatusMessage({
+        type: 'success',
+        text: `Deployed ${empName} to ${site.code_name || site.site_name}`,
+      });
+      setActiveModal(null);
     } catch (err: any) {
       console.error('Deployment save error:', err);
       alert(`Error: ${err.message}`);
@@ -261,24 +265,26 @@ export const DeploymentsHub: React.FC = () => {
     const empName = staff.employee_name || staff.name || 'Worker';
 
     try {
-      const { error } = await supabase
-        .from('site_deployments')
-        .delete()
-        .eq('month_year', monthYearStr)
-        .eq('staff_id', staff.id)
-        .eq('site_id', site.id);
-
-      if (error) {
-        console.error('Failed to remove deployment:', error);
-        alert(`Error removing deployment: ${error.message}`);
-      } else {
-        setDeployments((prev) => prev.filter((d) => !(d.staff_id === staff.id && d.site_id === site.id)));
-        setStatusMessage({
-          type: 'success',
-          text: `Removed ${empName} from ${site.code_name || site.site_name}`,
-        });
-        setActiveModal(null);
+      const res = await fetchWithRetry('/api/deployments', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          month_year: monthYearStr,
+          staff_id: staff.id,
+          site_id: site.id,
+        }),
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || `Failed to remove deployment: status ${res.status}`);
       }
+
+      setDeployments((prev) => prev.filter((d) => !(d.staff_id === staff.id && d.site_id === site.id)));
+      setStatusMessage({
+        type: 'success',
+        text: `Removed ${empName} from ${site.code_name || site.site_name}`,
+      });
+      setActiveModal(null);
     } catch (err: any) {
       console.error('Deployment delete error:', err);
       alert(`Error: ${err.message}`);
@@ -581,24 +587,28 @@ export const DeploymentsHub: React.FC = () => {
                         type="button"
                         onClick={async () => {
                           try {
-                            const { error } = await supabase
-                              .from('site_deployments')
-                              .delete()
-                              .eq('month_year', d.month_year)
-                              .eq('staff_id', d.staff_id)
-                              .eq('site_id', d.site_id);
-
-                            if (error) {
-                              alert(`Failed to remove: ${error.message}`);
-                            } else {
-                              setDeployments((prev) =>
-                                prev.filter((dep) => !(dep.staff_id === d.staff_id && dep.site_id === d.site_id))
-                              );
-                              setStatusMessage({
-                                type: 'success',
-                                text: `Removed ${d.employee_name} from ${d.site_name}`,
-                              });
+                            const res = await fetchWithRetry('/api/deployments', {
+                              method: 'DELETE',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                month_year: d.month_year,
+                                staff_id: d.staff_id,
+                                site_id: d.site_id,
+                              }),
+                            });
+                            if (!res.ok) {
+                              const errJson = await res.json().catch(() => ({}));
+                              alert(`Failed to remove: ${errJson.error || res.status}`);
+                              return;
                             }
+
+                            setDeployments((prev) =>
+                              prev.filter((dep) => !(dep.staff_id === d.staff_id && dep.site_id === d.site_id))
+                            );
+                            setStatusMessage({
+                              type: 'success',
+                              text: `Removed ${d.employee_name} from ${d.site_name}`,
+                            });
                           } catch (err: any) {
                             alert(`Error: ${err.message}`);
                           }

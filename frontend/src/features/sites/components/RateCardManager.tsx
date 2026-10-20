@@ -19,7 +19,6 @@ import {
   Banknote,
   MapPin,
 } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
 import { fetchWithRetry } from '@/lib/apiClient';
 import { toast } from '@/components/ui/toast';
 import { RateCardItem } from '@/features/sites/types';
@@ -161,16 +160,15 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
     setLoadingBilling(true);
     setBillingError(null);
     try {
-      const { data, error } = await supabase
-        .from('sites')
-        .select('id, rate_cards')
-        .eq('id', siteId)
-        .maybeSingle();
-
-      if (error) throw error;
-
-      if (data?.rate_cards && Array.isArray(data.rate_cards)) {
-        setBillingCards(data.rate_cards);
+      const res = await fetchWithRetry(`/api/sites/${siteId}`);
+      if (res.ok) {
+        const json = await res.json();
+        const site = json.data || json;
+        if (site?.rate_cards && Array.isArray(site.rate_cards)) {
+          setBillingCards(site.rate_cards);
+        } else {
+          setBillingCards([]);
+        }
       } else {
         setBillingCards([]);
       }
@@ -187,16 +185,14 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
     setLoadingPayroll(true);
     setPayrollError(null);
     try {
-      let query = supabase.from('rate_cards').select('*');
-      if (siteId) {
-        query = query.eq('site_id', siteId);
+      const q = siteId ? `site_id=${encodeURIComponent(siteId)}` : `site_name=${encodeURIComponent(siteName || '')}`;
+      const res = await fetchWithRetry(`/api/rate-cards?${q}`);
+      if (res.ok) {
+        const json = await res.json();
+        setPayrollCards(json.data || []);
       } else {
-        query = query.eq('site_name', siteName);
+        setPayrollCards([]);
       }
-
-      const { data, error } = await query.order('created_at', { ascending: false });
-      if (error) throw error;
-      setPayrollCards(data || []);
     } catch (err: any) {
       console.error('Fetch payroll rate cards failed:', err);
       setPayrollError(err.message || 'Failed to load payroll rate cards');
@@ -209,15 +205,10 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
     if (!siteId) return;
     setLoadingStaff(true);
     try {
-      const { data, error } = await supabase
-        .from('staff')
-        .select('id, employee_name, biometric_code, designation, rate_card_id, status, site_id')
-        .eq('site_id', siteId)
-        .order('employee_name', { ascending: true });
-
-      if (error) {
-        console.error('Could not fetch site staff for roster:', error.message);
-      } else if (data) {
+      const res = await fetchWithRetry(`/api/staff?site_id=${siteId}`);
+      if (res.ok) {
+        const json = await res.json();
+        const data = json.data || [];
         setSiteStaff(data.filter((s: any) => s.status !== 'Inactive'));
       }
     } catch (e) {
@@ -232,28 +223,28 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
     try {
       const roles = new Set<string>();
 
-      const { data: staffData } = await supabase
-        .from('staff')
-        .select('designation')
-        .eq('site_id', siteId);
+      const [staffRes, siteRes] = await Promise.all([
+        fetchWithRetry(`/api/staff?site_id=${siteId}`),
+        fetchWithRetry(`/api/sites/${siteId}`),
+      ]);
 
-      if (staffData) {
+      if (staffRes.ok) {
+        const staffJson = await staffRes.json();
+        const staffData = staffJson.data || [];
         staffData.forEach((s: any) => {
           if (s.designation?.trim()) roles.add(s.designation.trim());
         });
       }
 
-      const { data: siteRow } = await supabase
-        .from('sites')
-        .select('rate_cards')
-        .eq('id', siteId)
-        .maybeSingle();
-
-      if (siteRow?.rate_cards && Array.isArray(siteRow.rate_cards)) {
-        siteRow.rate_cards.forEach((rc: any) => {
-          const name = rc.roleName || rc.post_name || rc.designation;
-          if (name?.trim()) roles.add(name.trim());
-        });
+      if (siteRes.ok) {
+        const siteJson = await siteRes.json();
+        const siteRow = siteJson.data || siteJson;
+        if (siteRow?.rate_cards && Array.isArray(siteRow.rate_cards)) {
+          siteRow.rate_cards.forEach((rc: any) => {
+            const name = rc.roleName || rc.post_name || rc.designation;
+            if (name?.trim()) roles.add(name.trim());
+          });
+        }
       }
 
       setSiteDesignations(Array.from(roles));
@@ -354,12 +345,15 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
     }
 
     try {
-      const { error } = await supabase
-        .from('sites')
-        .update({ rate_cards: updatedList })
-        .eq('id', siteId);
-
-      if (error) throw error;
+      const res = await fetchWithRetry(`/api/sites/${siteId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rate_cards: updatedList }),
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to save billing rate card');
+      }
 
       setBillingCards(updatedList);
       setBillingSuccess(`Billing rate card for "${roleTrim}" saved successfully!`);
@@ -388,12 +382,15 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
     const updatedList = billingCards.filter((_, idx) => idx !== index);
 
     try {
-      const { error } = await supabase
-        .from('sites')
-        .update({ rate_cards: updatedList })
-        .eq('id', siteId);
-
-      if (error) throw error;
+      const res = await fetchWithRetry(`/api/sites/${siteId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rate_cards: updatedList }),
+      });
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to remove billing rate card');
+      }
 
       setBillingCards(updatedList);
       setBillingSuccess(`Billing rate card for "${card.roleName}" removed.`);
@@ -540,21 +537,30 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
     };
 
     try {
-      if (editingPayrollId) {
-        const { error } = await supabase
-          .from('rate_cards')
-          .update(payload)
-          .eq('id', editingPayrollId);
+      let saved = false;
+      const url = editingPayrollId ? `/api/rate-cards/${encodeURIComponent(editingPayrollId)}` : '/api/rate-cards';
+      const method = editingPayrollId ? 'PUT' : 'POST';
+      const response = await fetchWithRetry(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
 
-        if (error) throw error;
-        setPayrollSuccess(`Payroll rate card for "${effectivePostName}" updated successfully!`);
-        toast.success(`Payroll rate card for "${effectivePostName}" updated!`);
-      } else {
-        const { error } = await supabase.from('rate_cards').insert([payload]);
-        if (error) throw error;
-        setPayrollSuccess(`Payroll rate card for "${effectivePostName}" created successfully!`);
-        toast.success(`Payroll rate card for "${effectivePostName}" created!`);
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to save payroll rate card');
       }
+
+      setPayrollSuccess(
+        editingPayrollId
+          ? `Payroll rate card for "${effectivePostName}" updated successfully!`
+          : `Payroll rate card for "${effectivePostName}" created successfully!`
+      );
+      toast.success(
+        editingPayrollId
+          ? `Payroll rate card for "${effectivePostName}" updated!`
+          : `Payroll rate card for "${effectivePostName}" created!`
+      );
 
       resetPayrollForm();
       fetchPayrollCards();
@@ -574,44 +580,13 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
     setPayrollError(null);
     setPayrollSuccess(null);
 
-    try {
-      const [{ count: staffCount, error: staffErr }, { count: payrollCount, error: payrollErr }] =
-        await Promise.all([
-          supabase.from('staff').select('id', { count: 'exact', head: true }).eq('rate_card_id', id),
-          supabase.from('payroll_records').select('id', { count: 'exact', head: true }).eq('rate_card_id', id),
-        ]);
-
-      if (staffErr) console.warn('Staff count error:', staffErr.message);
-      if (payrollErr) console.warn('Payroll count error:', payrollErr.message);
-
-      const assignedStaff = staffCount || 0;
-      const linkedPayrolls = payrollCount || 0;
-
-      if (assignedStaff > 0 || linkedPayrolls > 0) {
-        const msg = `Can't delete this rate card — ${assignedStaff} staff assigned and/or ${linkedPayrolls} past payroll record(s) reference it. Reassign staff first.`;
-        setPayrollError(msg);
-        toast.error(msg);
-        return;
-      }
-    } catch (checkErr: any) {
-      console.error('FK pre-check error:', checkErr);
-    }
-
     if (!confirm('Are you sure you want to delete this Payroll Rate Card?')) return;
 
     try {
-      const { error } = await supabase.from('rate_cards').delete().eq('id', id);
-
-      if (error) {
-        if (error.code === '23503' || error.message.includes('foreign key constraint')) {
-          const friendlyMsg = "Can't delete — active staff members or payroll records still reference it.";
-          setPayrollError(friendlyMsg);
-          toast.error(friendlyMsg);
-        } else {
-          setPayrollError(`Delete failed: ${error.message}`);
-          toast.error(`Delete failed: ${error.message}`);
-        }
-        return;
+      const res = await fetchWithRetry(`/api/rate-cards/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to delete rate card via API');
       }
 
       setPayrollSuccess('Payroll rate card deleted successfully.');
@@ -621,8 +596,8 @@ export const RateCardManager: React.FC<RateCardManagerProps> = ({
       if (onRateCardUpdated) onRateCardUpdated();
     } catch (err: any) {
       console.error('Delete payroll rate card error:', err);
-      setPayrollError('Failed to delete payroll rate card.');
-      toast.error('Failed to delete payroll rate card.');
+      setPayrollError(err.message || 'Failed to delete payroll rate card.');
+      toast.error(err.message || 'Failed to delete payroll rate card.');
     }
   };
 

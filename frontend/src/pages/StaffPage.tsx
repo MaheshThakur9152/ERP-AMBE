@@ -25,7 +25,6 @@ import {
   Lock,
 } from 'lucide-react';
 import { StaffFormModal } from '@/features/staff/components/StaffFormModal';
-import { supabase } from '@/lib/supabase';
 import { DocumentViewerModal } from '@/components/DocumentViewerModal';
 import { toast } from '@/components/ui/toast';
 import { useAuth } from '@/features/auth/context/AuthContext';
@@ -222,23 +221,19 @@ export const StaffPage: React.FC = () => {
     }
     const staffId = offboardModalStaff.id;
     try {
-      // Note: staff table does NOT have updated_at column
-      const { error } = await supabase
-        .from('staff')
-        .update({
+      const response = await fetchWithRetry(`/api/staff/${staffId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           status: 'Inactive',
           left_date: offboardLeftDate,
           inactive_reason: offboardReason,
-        })
-        .eq('id', staffId);
+        }),
+      });
 
-      if (error) {
-        console.warn('Full offboard update failed, retrying status only:', error.message);
-        const { error: retryErr } = await supabase
-          .from('staff')
-          .update({ status: 'Inactive' })
-          .eq('id', staffId);
-        if (retryErr) throw retryErr;
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to set staff inactive');
       }
 
       toast.success(`${offboardModalStaff.employee_name || offboardModalStaff.name || 'Staff'} marked as Inactive`);
@@ -253,17 +248,19 @@ export const StaffPage: React.FC = () => {
   const handleReactivateStaff = async (staff: StaffMember) => {
     if (!staff.id) return;
     try {
-      const { error } = await supabase
-        .from('staff')
-        .update({
+      const response = await fetchWithRetry(`/api/staff/${staff.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           status: 'Active',
           left_date: null,
           inactive_reason: '',
-        })
-        .eq('id', staff.id);
+        }),
+      });
 
-      if (error) {
-        await supabase.from('staff').update({ status: 'Active' }).eq('id', staff.id);
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to reactivate staff');
       }
 
       toast.success(`${staff.employee_name || staff.name || 'Staff'} reactivated`);
@@ -489,15 +486,16 @@ export const StaffPage: React.FC = () => {
   // Fetch live staff data on mount & refresh
   useEffect(() => {
     const fetchStaff = async () => {
-      const { data, error } = await supabase
-        .from('staff')
-        .select('*, sites(site_name, code_name, companies(name)), rate_cards(*), employee_documents(*)')
-        .order('created_at', { ascending: false });
-
-      if (error) {
+      try {
+        const response = await fetchWithRetry('/api/staff');
+        if (response.ok) {
+          const json = await response.json();
+          setStaffList(json.data || json || []);
+        } else {
+          console.error('Error fetching staff: HTTP', response.status);
+        }
+      } catch (error) {
         console.error('Error fetching staff:', error);
-      } else if (data) {
-        setStaffList(data);
       }
     };
 
@@ -1032,12 +1030,7 @@ export const StaffPage: React.FC = () => {
                                 console.warn('API fetch failed for KYC documents, falling back:', e);
                               }
 
-                              const { data } = await supabase
-                                .from('employee_documents')
-                                .select('*')
-                                .eq('staff_id', staff.id)
-                                .order('uploaded_at', { ascending: false });
-                              setViewerDocs(data || staff.employee_documents || []);
+                              setViewerDocs(staff.employee_documents || []);
                               setIsViewerOpen(true);
                             }}
                             className={`flex items-center gap-1 px-2 py-1 text-xs font-medium border rounded-md transition-colors cursor-pointer ${

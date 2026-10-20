@@ -1,4 +1,3 @@
-import { supabase } from '@/lib/supabase';
 import { fetchWithRetry, setInMemoryToken, getApiUrl, getOrRefreshSession } from '@/lib/apiClient';
 import { UserProfile, UserRole } from '../types';
 
@@ -100,18 +99,21 @@ export async function fetchMeApi(): Promise<MeResponse | null> {
   }
 }
 
-export async function fetchUserProfile(userId: string): Promise<UserProfile | null> {
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', userId)
-    .single();
-
-  if (error) {
-    console.error('Error loading user profile:', error.message);
-    return null;
+export async function fetchUserProfile(_userId?: string): Promise<UserProfile | null> {
+  const me = await fetchMeApi();
+  if (me?.user) {
+    return {
+      id: me.user.id,
+      email: me.user.email,
+      full_name: me.user.email.split('@')[0],
+      role: me.user.role,
+      phone: null,
+      avatar_url: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
   }
-  return data;
+  return null;
 }
 
 export async function lockInvoiceApi(id: string, isLocked: boolean): Promise<any> {
@@ -155,4 +157,54 @@ export async function setEntityLockApi(
     throw new Error(json.error || `Failed to ${locked ? 'lock' : 'unlock'} ${entityType}`);
   }
   return json;
+}
+
+export async function inviteUserApi(email: string, role: string = 'admin', company_id?: string) {
+  const res = await fetchWithRetry(`${AUTH_API_BASE}/invite-user`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, role, company_id }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to send invitation');
+  return data;
+}
+
+export async function setInitialPasswordApi(token: string, password: string): Promise<LoginResponse> {
+  const res = await fetchWithRetry(`${AUTH_API_BASE}/set-initial-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, password }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to set password');
+  if (data.token || data.access_token) {
+    setInMemoryToken(data.token || data.access_token);
+  }
+  return data;
+}
+
+export async function forgotPasswordApi(email: string) {
+  const res = await fetchWithRetry(`${AUTH_API_BASE}/forgot-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to request reset');
+  return data;
+}
+
+export async function resetPasswordApi(token: string, password: string): Promise<LoginResponse> {
+  const res = await fetchWithRetry(`${AUTH_API_BASE}/reset-password`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, password }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to reset password');
+  if (data.token || data.access_token) {
+    setInMemoryToken(data.token || data.access_token);
+  }
+  return data;
 }
