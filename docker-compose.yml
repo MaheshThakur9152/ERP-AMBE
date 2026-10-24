@@ -145,8 +145,7 @@ services:
     networks:
       - erp_network
     depends_on:
-      backend:
-        condition: service_healthy
+      - backend
 
   # ============================================================================
   # 5. ERP Automated Backup & Recovery Drills Service
