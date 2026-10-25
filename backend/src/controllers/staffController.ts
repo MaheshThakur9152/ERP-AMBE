@@ -99,7 +99,15 @@ export const StaffController = {
       const query = `
         SELECT s.*,
                row_to_json(rc.*) AS rate_cards,
-               json_build_object('id', st.id, 'site_name', st.site_name, 'code_name', st.code_name, 'company_id', st.company_id) AS sites
+               json_build_object('id', st.id, 'site_name', st.site_name, 'code_name', st.code_name, 'company_id', st.company_id) AS sites,
+               COALESCE(
+                 (
+                   SELECT json_agg(ed.*)
+                   FROM public.employee_documents ed
+                   WHERE ed.staff_id = s.id
+                 ),
+                 '[]'::json
+               ) AS employee_documents
         FROM public.staff s
         LEFT JOIN public.rate_cards rc ON rc.id = s.rate_card_id
         LEFT JOIN public.sites st ON st.id = s.site_id
@@ -123,7 +131,15 @@ export const StaffController = {
       const query = `
         SELECT s.*,
                row_to_json(rc.*) AS rate_cards,
-               json_build_object('id', st.id, 'site_name', st.site_name, 'code_name', st.code_name) AS sites
+               json_build_object('id', st.id, 'site_name', st.site_name, 'code_name', st.code_name) AS sites,
+               COALESCE(
+                 (
+                   SELECT json_agg(ed.*)
+                   FROM public.employee_documents ed
+                   WHERE ed.staff_id = s.id
+                 ),
+                 '[]'::json
+               ) AS employee_documents
         FROM public.staff s
         LEFT JOIN public.rate_cards rc ON rc.id = s.rate_card_id
         LEFT JOIN public.sites st ON st.id = s.site_id
