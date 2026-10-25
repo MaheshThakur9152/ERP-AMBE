@@ -14,6 +14,38 @@ import { withTimeout } from '../utils/timeoutHelper';
 
 export class OracleStorageService {
   private static s3ClientInstance: S3Client | null = null;
+  private static publicS3ClientInstance: S3Client | null = null;
+
+  public static resetClients(): void {
+    this.s3ClientInstance = null;
+    this.publicS3ClientInstance = null;
+  }
+
+  public static getInternalClient(): S3Client {
+    return this.getClient();
+  }
+
+  public static getPublicClient(): S3Client {
+    if (!this.publicS3ClientInstance) {
+      validateMinioEnv();
+
+      let publicEndpoint = (env.MINIO_PUBLIC_ENDPOINT || process.env.MINIO_PUBLIC_ENDPOINT || env.MINIO_ENDPOINT).trim();
+      if (!/^https?:\/\//i.test(publicEndpoint)) {
+        publicEndpoint = 'https://' + publicEndpoint;
+      }
+
+      this.publicS3ClientInstance = new S3Client({
+        endpoint: publicEndpoint,
+        region: 'us-east-1',
+        credentials: {
+          accessKeyId: env.MINIO_ACCESS_KEY,
+          secretAccessKey: env.MINIO_SECRET_KEY,
+        },
+        forcePathStyle: true,
+      });
+    }
+    return this.publicS3ClientInstance;
+  }
 
   private static getClient(): S3Client {
     if (!this.s3ClientInstance) {
@@ -123,7 +155,7 @@ export class OracleStorageService {
   ): Promise<string> {
     try {
       if (!key) return '';
-      const client = this.getClient();
+      const client = this.getPublicClient();
       const bucket = this.getBucketName();
 
       const command = new GetObjectCommand({
@@ -131,27 +163,11 @@ export class OracleStorageService {
         Key: key,
       });
 
-      const rawUrl = await withTimeout(
+      return await withTimeout(
         getSignedUrl(client, command, { expiresIn: expiresInSeconds }),
         5000,
         `MinIO:getSignedReadUrl[${key}]`
       );
-
-      const publicEndpoint = process.env.MINIO_PUBLIC_ENDPOINT || process.env.MINIO_PUBLIC_URL;
-      if (publicEndpoint && rawUrl) {
-        try {
-          const parsed = new URL(rawUrl);
-          const pubParsed = new URL(publicEndpoint);
-          parsed.protocol = pubParsed.protocol;
-          parsed.host = pubParsed.host;
-          parsed.port = pubParsed.port;
-          return parsed.toString();
-        } catch {
-          return rawUrl;
-        }
-      }
-
-      return rawUrl;
     } catch (error: any) {
       console.error(`❌ MinIO getSignedReadUrl error for key [${key}]:`, error?.message || error);
       return '';

@@ -248,7 +248,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
   // Preview Modal state
   const [previewInvoice, setPreviewInvoice] = useState<InvoiceData | null>(null);
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState<boolean>(false);
-  const [viewingDoc, setViewingDoc] = useState<{ id?: string; fileName: string; title: string; url?: string } | null>(null);
+  const [viewingDoc, setViewingDoc] = useState<{ id?: string; fileName: string; title: string; url?: string; type?: string } | null>(null);
   const [colorMode, setColorMode] = useState<'color' | 'bw'>('color');
 
   // Stealth Print state
@@ -1222,6 +1222,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                               onClick={() =>
                                 setViewingDoc({
                                   id: inv.id,
+                                  type: 'certified',
                                   url: inv.certified_doc_view_url || inv.certified_doc_url || inv.certifiedDocUrl || (inv as any).view_url,
                                   fileName: `${inv.invoiceNo}_Certified.pdf`,
                                   title: `Invoice ${inv.invoiceNo} - Certified Attachment`,
@@ -1736,6 +1737,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                             e.stopPropagation();
                             setViewingDoc({
                               id: editingLegacyId,
+                              type: 'certified',
                               url: legacyExistingDocUrl,
                               fileName: `${legacyBillNumber || 'Legacy'}_Certified.pdf`,
                               title: `Legacy Bill - Document Preview`,
@@ -1950,6 +1952,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
         isOpen={!!viewingDoc}
         onClose={() => setViewingDoc(null)}
         documentId={viewingDoc?.id}
+        documentType={viewingDoc?.type}
         url={viewingDoc?.url}
         fileName={viewingDoc?.fileName}
         title={viewingDoc?.title}

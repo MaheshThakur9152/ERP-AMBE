@@ -149,33 +149,51 @@ export class InvoiceController {
       const { storageKey, viewUrl, fileName } = await InvoiceService.getInvoiceDocumentLocation(id, docType || 'bill');
 
       if (storageKey) {
-        const obj = await OracleStorageService.getObject(storageKey);
-        const ext = path.extname(storageKey || fileName).toLowerCase();
-        let contentType = obj.contentType || 'application/octet-stream';
-        if (ext === '.pdf') contentType = 'application/pdf';
-        else if (ext === '.png') contentType = 'image/png';
-        else if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
-        else if (ext === '.webp') contentType = 'image/webp';
+        try {
+          const obj = await OracleStorageService.getObject(storageKey);
+          const ext = path.extname(storageKey || fileName).toLowerCase();
+          let contentType = obj.contentType || 'application/octet-stream';
+          if (ext === '.pdf') contentType = 'application/pdf';
+          else if (ext === '.png') contentType = 'image/png';
+          else if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
+          else if (ext === '.webp') contentType = 'image/webp';
 
-        let buffer: Buffer;
-        if (obj.body && typeof obj.body.transformToByteArray === 'function') {
-          const bytes = await obj.body.transformToByteArray();
-          buffer = Buffer.from(bytes);
-        } else if (Buffer.isBuffer(obj.body)) {
-          buffer = obj.body;
-        } else {
-          buffer = Buffer.from(obj.body || '');
+          let buffer: Buffer;
+          if (obj.body && typeof obj.body.transformToByteArray === 'function') {
+            const bytes = await obj.body.transformToByteArray();
+            buffer = Buffer.from(bytes);
+          } else if (Buffer.isBuffer(obj.body)) {
+            buffer = obj.body;
+          } else {
+            buffer = Buffer.from(obj.body || '');
+          }
+
+          res.setHeader('Content-Type', contentType);
+          const baseName = path.basename(fileName);
+          const asciiFallback = baseName.replace(/[\x00-\x1f\x7f"\\;]/g, '_').replace(/[^\x20-\x7e]/g, '_');
+          const utf8Encoded = encodeURIComponent(baseName).replace(/['()]/g, escape).replace(/\*/g, '%2A');
+          res.setHeader('Content-Disposition', `inline; filename="${asciiFallback}"; filename*=UTF-8''${utf8Encoded}`);
+          res.setHeader('Content-Length', buffer.length);
+          res.setHeader('Accept-Ranges', 'bytes');
+          res.end(buffer);
+          return;
+        } catch (storageErr: any) {
+          const isNotFound =
+            storageErr?.name === 'NoSuchKey' ||
+            storageErr?.Code === 'NoSuchKey' ||
+            storageErr?.name === 'NotFound' ||
+            storageErr?.$metadata?.httpStatusCode === 404;
+
+          if (isNotFound) {
+            res.status(404).json({
+              error: 'File not found in object storage',
+              code: 'STORAGE_OBJECT_NOT_FOUND',
+              storageKey,
+            });
+            return;
+          }
+          throw storageErr;
         }
-
-        res.setHeader('Content-Type', contentType);
-        const baseName = path.basename(fileName);
-        const asciiFallback = baseName.replace(/[\x00-\x1f\x7f"\\;]/g, '_').replace(/[^\x20-\x7e]/g, '_');
-        const utf8Encoded = encodeURIComponent(baseName).replace(/['()]/g, escape).replace(/\*/g, '%2A');
-        res.setHeader('Content-Disposition', `inline; filename="${asciiFallback}"; filename*=UTF-8''${utf8Encoded}`);
-        res.setHeader('Content-Length', buffer.length);
-        res.setHeader('Accept-Ranges', 'bytes');
-        res.end(buffer);
-        return;
       }
 
       if (viewUrl) {
@@ -183,8 +201,21 @@ export class InvoiceController {
         return;
       }
 
-      res.status(404).json({ error: 'Document file location not found' });
+      res.status(404).json({
+        error: 'Document record exists but has no attached file storage key',
+        code: 'DOCUMENT_STORAGE_KEY_MISSING',
+        invoiceId: id,
+        docType,
+      });
     } catch (error: any) {
+      if (error?.message?.includes('Invoice not found')) {
+        res.status(404).json({
+          error: 'Invoice record not found in database',
+          code: 'INVOICE_RECORD_NOT_FOUND',
+          invoiceId: req.params.id,
+        });
+        return;
+      }
       console.error('[InvoiceController.viewDocument] Error:', error);
       next(error);
     }

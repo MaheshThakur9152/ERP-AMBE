@@ -759,7 +759,11 @@ export const viewDocumentProxy = async (req: Request, res: Response): Promise<vo
     }
 
     if (!docRecord) {
-      res.status(404).json({ error: 'Document not found' });
+      res.status(404).json({
+        error: 'Document record not found in database',
+        code: 'DOCUMENT_RECORD_NOT_FOUND',
+        documentId,
+      });
       return;
     }
 
@@ -830,8 +834,18 @@ export const viewDocumentProxy = async (req: Request, res: Response): Promise<vo
           }
           return;
         }
-        if (storageErr?.name === 'NoSuchKey' || storageErr?.Code === 'NoSuchKey') {
-          res.status(404).json({ error: 'File not found in object storage' });
+        const isNotFound =
+          storageErr?.name === 'NoSuchKey' ||
+          storageErr?.Code === 'NoSuchKey' ||
+          storageErr?.name === 'NotFound' ||
+          storageErr?.$metadata?.httpStatusCode === 404;
+
+        if (isNotFound) {
+          res.status(404).json({
+            error: 'File not found in object storage',
+            code: 'STORAGE_OBJECT_NOT_FOUND',
+            storageKey,
+          });
           return;
         }
         res.status(502).json({ error: 'Storage streaming error' });
@@ -843,7 +857,12 @@ export const viewDocumentProxy = async (req: Request, res: Response): Promise<vo
       return res.redirect(gcpFileUrl);
     }
 
-    res.status(404).json({ error: 'Document file storage target not found' });
+    res.status(404).json({
+      error: 'Document record exists but has no attached file storage key',
+      code: 'DOCUMENT_STORAGE_KEY_MISSING',
+      documentId,
+      table: foundTable,
+    });
   } catch (error: any) {
     console.error('viewDocumentProxy Error:', error);
     res.status(500).json({ error: 'Failed to view document', details: error?.message });

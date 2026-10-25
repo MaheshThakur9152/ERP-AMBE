@@ -6,6 +6,7 @@ export interface DocumentViewerModalProps {
   isOpen: boolean;
   onClose: () => void;
   documentId?: string;
+  documentType?: 'certified' | 'attendance' | 'generated' | string;
   url?: string;
   fileName?: string;
   title?: string;
@@ -16,6 +17,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
   isOpen,
   onClose,
   documentId,
+  documentType,
   url,
   fileName = 'Document',
   title,
@@ -31,8 +33,23 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
   const currentBlobUrlRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Prioritize direct url if provided, fallback to /api/documents/:documentId/view
-  const targetUrl = url || (documentId ? `/api/documents/${documentId}/view` : '');
+  // Construct dedicated authenticated backend view endpoint
+  const backendViewEndpoint = documentId
+    ? `/api/documents/${documentId}/view${documentType ? `?type=${encodeURIComponent(documentType)}` : ''}`
+    : '';
+
+  // Prevent Mixed Content: if page is loaded over HTTPS but URL is insecure HTTP, bypass directly to backend proxy
+  const isPageHttps = typeof window !== 'undefined' && window.location.protocol === 'https:';
+  const isInsecureDirectUrl = Boolean(
+    url &&
+    url.startsWith('http://') &&
+    !url.includes('localhost') &&
+    !url.includes('127.0.0.1')
+  );
+
+  const targetUrl = (isPageHttps && isInsecureDirectUrl && backendViewEndpoint)
+    ? backendViewEndpoint
+    : (url || backendViewEndpoint);
 
   useEffect(() => {
     // Abort any prior in-flight fetch
@@ -65,9 +82,9 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
             skipErrorToast: true,
           });
         } catch (fetchErr: any) {
-          if (documentId && targetUrl !== `/api/documents/${documentId}/view`) {
-            console.log(`[KYCPreview] Fetch error on direct URL, falling back to /api/documents/${documentId}/view`);
-            res = await fetchWithRetry(`/api/documents/${documentId}/view`, {
+          if (backendViewEndpoint && targetUrl !== backendViewEndpoint) {
+            console.log(`[KYCPreview] Direct URL fetch failed, falling back to ${backendViewEndpoint}`);
+            res = await fetchWithRetry(backendViewEndpoint, {
               method: 'GET',
               signal: abortController.signal,
               skipErrorToast: true,
@@ -80,9 +97,9 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
         console.log(`[KYCPreview] HTTP status: ${res.status} ${res.statusText}`);
 
         if (!res.ok) {
-          if (documentId && targetUrl !== `/api/documents/${documentId}/view`) {
-            console.log(`[KYCPreview] Direct URL returned ${res.status}, trying fallback /api/documents/${documentId}/view`);
-            const fallbackRes = await fetchWithRetry(`/api/documents/${documentId}/view`, {
+          if (backendViewEndpoint && targetUrl !== backendViewEndpoint) {
+            console.log(`[KYCPreview] Direct URL returned ${res.status}, trying fallback ${backendViewEndpoint}`);
+            const fallbackRes = await fetchWithRetry(backendViewEndpoint, {
               method: 'GET',
               signal: abortController.signal,
               skipErrorToast: true,
@@ -90,10 +107,20 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
             if (fallbackRes.ok) {
               res = fallbackRes;
             } else {
-              throw new Error(`Server returned HTTP ${res.status}: ${res.statusText}`);
+              let errMsg = `Server returned HTTP ${fallbackRes.status}: ${fallbackRes.statusText}`;
+              try {
+                const errJson = await fallbackRes.json();
+                if (errJson?.error) errMsg = errJson.error;
+              } catch (_) {}
+              throw new Error(errMsg);
             }
           } else {
-            throw new Error(`Server returned HTTP ${res.status}: ${res.statusText}`);
+            let errMsg = `Server returned HTTP ${res.status}: ${res.statusText}`;
+            try {
+              const errJson = await res.json();
+              if (errJson?.error) errMsg = errJson.error;
+            } catch (_) {}
+            throw new Error(errMsg);
           }
         }
 
@@ -146,7 +173,7 @@ export const DocumentViewerModal: React.FC<DocumentViewerModalProps> = ({
         abortControllerRef.current = null;
       }
     };
-  }, [isOpen, targetUrl, documentId, url, fileName, retryKey]);
+  }, [isOpen, targetUrl, backendViewEndpoint, documentId, documentType, url, fileName, retryKey]);
 
   // Clean up blob URL on modal unmount or close
   useEffect(() => {

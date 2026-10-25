@@ -70,7 +70,7 @@ export const InvoiceTracker: React.FC = () => {
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [creatingRevisionId, setCreatingRevisionId] = useState<string | null>(null);
   const [togglingLockId, setTogglingLockId] = useState<string | null>(null);
-  const [viewingDoc, setViewingDoc] = useState<{ id?: string; fileName: string; title: string; url?: string; onDelete?: () => void } | null>(null);
+  const [viewingDoc, setViewingDoc] = useState<{ id?: string; fileName: string; title: string; url?: string; type?: string; onDelete?: () => void } | null>(null);
 
   const loadInvoices = async () => {
     setIsLoading(true);
@@ -919,6 +919,7 @@ export const InvoiceTracker: React.FC = () => {
                                 onClick={() =>
                                   setViewingDoc({
                                     id: inv.id,
+                                    type: 'generated',
                                     url: `/api/invoices/${inv.id}/document/generated/view`,
                                     fileName: `${inv.invoiceNo}_Generated.pdf`,
                                     title: `Invoice ${inv.invoiceNo} - Generated Copy`,
@@ -970,6 +971,7 @@ export const InvoiceTracker: React.FC = () => {
                                         onClick={() =>
                                           setViewingDoc({
                                             id: inv.id,
+                                            type: 'certified',
                                             url: `/api/invoices/${inv.id}/document/bill/view`,
                                             fileName: `${inv.invoiceNo}_Certified_Bill.pdf`,
                                             title: `Invoice ${inv.invoiceNo} - Certified Bill`,
@@ -1076,6 +1078,7 @@ export const InvoiceTracker: React.FC = () => {
                                         onClick={() =>
                                           setViewingDoc({
                                             id: inv.id,
+                                            type: 'attendance',
                                             url: `/api/invoices/${inv.id}/document/attendance/view`,
                                             fileName: `${inv.invoiceNo}_Certified_Attendance.pdf`,
                                             title: `Invoice ${inv.invoiceNo} - Certified Attendance`,
@@ -1216,6 +1219,7 @@ export const InvoiceTracker: React.FC = () => {
         isOpen={!!viewingDoc}
         onClose={() => setViewingDoc(null)}
         documentId={viewingDoc?.id}
+        documentType={viewingDoc?.type}
         url={viewingDoc?.url}
         fileName={viewingDoc?.fileName}
         title={viewingDoc?.title}
