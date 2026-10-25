@@ -131,11 +131,27 @@ export class OracleStorageService {
         Key: key,
       });
 
-      return await withTimeout(
+      const rawUrl = await withTimeout(
         getSignedUrl(client, command, { expiresIn: expiresInSeconds }),
         5000,
         `MinIO:getSignedReadUrl[${key}]`
       );
+
+      const publicEndpoint = process.env.MINIO_PUBLIC_ENDPOINT || process.env.MINIO_PUBLIC_URL;
+      if (publicEndpoint && rawUrl) {
+        try {
+          const parsed = new URL(rawUrl);
+          const pubParsed = new URL(publicEndpoint);
+          parsed.protocol = pubParsed.protocol;
+          parsed.host = pubParsed.host;
+          parsed.port = pubParsed.port;
+          return parsed.toString();
+        } catch {
+          return rawUrl;
+        }
+      }
+
+      return rawUrl;
     } catch (error: any) {
       console.error(`❌ MinIO getSignedReadUrl error for key [${key}]:`, error?.message || error);
       return '';
