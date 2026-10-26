@@ -181,6 +181,29 @@ services:
       minio:
         condition: service_healthy
 
+  # ============================================================================
+  # 6. pgAdmin 4 PostgreSQL Web Administration UI (Profile: admin-tools)
+  # ============================================================================
+  pgadmin:
+    image: dpage/pgadmin4:9.18
+    container_name: erp-pgadmin
+    restart: unless-stopped
+    profiles:
+      - admin-tools
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:?PGADMIN_DEFAULT_EMAIL must be configured in environment}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:?PGADMIN_DEFAULT_PASSWORD must be configured in environment}
+      PGADMIN_CONFIG_SERVER_MODE: ${PGADMIN_CONFIG_SERVER_MODE:-True}
+    ports:
+      - "127.0.0.1:${PGADMIN_PORT:-5050}:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - erp_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 # ==============================================================================
 # Persistent Named Volumes (Survives container teardown and restarts)
 # ==============================================================================
@@ -195,6 +218,8 @@ volumes:
     name: erp_backups_volume
   redis_data:
     name: erp_redis_volume
+  pgadmin_data:
+    name: erp_pgadmin_data
 
 # ==============================================================================
 # Isolated Internal Network
