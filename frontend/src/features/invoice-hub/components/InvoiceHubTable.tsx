@@ -29,7 +29,7 @@ import {
   Unlock,
   FileText,
 } from 'lucide-react';
-import { formatCurrency, computeInvoiceCalculations } from '@/features/invoices/utils/invoiceCalculator';
+import { formatCurrency, computeInvoiceCalculations, formatInvoiceDisplayDate } from '@/features/invoices/utils/invoiceCalculator';
 import { InvoiceData } from '@/features/invoices/types/invoice';
 import { InvoiceTemplate } from '@/features/invoices/components/InvoiceTemplate';
 import { MaterialInvoiceTemplate } from '@/features/invoices/components/MaterialInvoiceTemplate';
@@ -191,7 +191,7 @@ const convertRecordToInvoiceData = (inv: InvoiceRecord): InvoiceData => {
     },
     meta: {
       invoiceNo: inv.invoiceNo,
-      invoiceDate: inv.date,
+      invoiceDate: formatInvoiceDisplayDate(inv.date),
       billingPeriod: inv.monthYear || inv.billing_period || '',
       invoiceType: inv.type,
     },

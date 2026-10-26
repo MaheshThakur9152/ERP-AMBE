@@ -1,7 +1,7 @@
 import React from 'react';
 import { InvoiceData } from '../types/invoice';
 import { computeMaterialCalculations } from '../utils/materialCalculator';
-import { formatCurrency } from '../utils/invoiceCalculator';
+import { formatCurrency, formatInvoiceDisplayDate } from '../utils/invoiceCalculator';
 
 interface MaterialInvoiceTemplateProps {
   data: InvoiceData;
@@ -100,7 +100,7 @@ export const MaterialInvoiceTemplate: React.FC<MaterialInvoiceTemplateProps> = (
                   Invoice No.: <span className="font-bold">{data.meta.invoiceNo}</span>
                 </td>
                 <td className="border-b border-black p-1 font-medium" style={{ width: '25%' }}>
-                  Dated : <span className="font-bold">{data.meta.invoiceDate}</span>
+                  Dated : <span className="font-bold">{formatInvoiceDisplayDate(data.meta.invoiceDate)}</span>
                 </td>
               </tr>
               <tr>
@@ -109,7 +109,7 @@ export const MaterialInvoiceTemplate: React.FC<MaterialInvoiceTemplateProps> = (
               </tr>
               <tr>
                 <td className="border-r border-b border-black p-1">Challan Date :</td>
-                <td className="border-b border-black p-1 font-bold">{challanDate}</td>
+                <td className="border-b border-black p-1 font-bold">{formatInvoiceDisplayDate(challanDate)}</td>
               </tr>
               <tr>
                 <td className="border-r border-b border-black p-1">Reference No &amp; Date</td>

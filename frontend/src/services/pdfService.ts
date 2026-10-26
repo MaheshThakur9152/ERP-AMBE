@@ -7,6 +7,7 @@ import {
   computeInvoiceCalculations,
   formatCurrency,
   formatInteger,
+  formatInvoiceDisplayDate,
 } from '@/features/invoices/utils/invoiceCalculator';
 import {
   computeMaterialCalculations,
@@ -238,7 +239,7 @@ export const pdfService = {
             <div style="flex: 1; padding: 8px 10px; border-left: 1px solid #000; display: flex; flex-direction: column; justify-content: space-between;">
               <div>
                 <p style="margin: 2px 0;">Invoice No : ${invoiceData.meta.invoiceNo}</p>
-                <p style="margin: 2px 0;">Date: ${invoiceData.meta.invoiceDate}</p>
+                <p style="margin: 2px 0;">Date: ${formatInvoiceDisplayDate(invoiceData.meta.invoiceDate)}</p>
               </div>
               <p style="margin: 15px 0 2px 0;">Billing Period: ${invoiceData.meta.billingPeriod}</p>
             </div>
@@ -519,7 +520,7 @@ export const pdfService = {
               <table style="width: 100%; border-collapse: collapse; font-size: 10px;">
                 <tr style="border-bottom: 1px solid #000;">
                   <td style="padding: 4px 6px; border-right: 1px solid #000; width: 50%;">Invoice No.: <strong>${invoiceData.meta.invoiceNo}</strong></td>
-                  <td style="padding: 4px 6px;">Dated : <strong>${invoiceData.meta.invoiceDate}</strong></td>
+                  <td style="padding: 4px 6px;">Dated : <strong>${formatInvoiceDisplayDate(invoiceData.meta.invoiceDate)}</strong></td>
                 </tr>
                 <tr style="border-bottom: 1px solid #000;">
                   <td style="padding: 4px 6px; border-right: 1px solid #000;">Challan No :</td>
@@ -527,7 +528,7 @@ export const pdfService = {
                 </tr>
                 <tr style="border-bottom: 1px solid #000;">
                   <td style="padding: 4px 6px; border-right: 1px solid #000;">Challan Date :</td>
-                  <td style="padding: 4px 6px; font-weight: bold;">${challanDate}</td>
+                  <td style="padding: 4px 6px; font-weight: bold;">${formatInvoiceDisplayDate(challanDate)}</td>
                 </tr>
                 <tr style="border-bottom: 1px solid #000;">
                   <td style="padding: 4px 6px; border-right: 1px solid #000;">Reference No &amp; Date</td>

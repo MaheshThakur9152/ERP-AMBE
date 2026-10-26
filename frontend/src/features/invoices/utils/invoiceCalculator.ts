@@ -141,3 +141,64 @@ export function formatInteger(num: number): string {
   if (isNaN(num) || !num) return '';
   return Math.round(num).toLocaleString('en-IN');
 }
+
+const MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
+/**
+ * Formats date into business display format (e.g. "27 October 2026")
+ */
+export function formatInvoiceDisplayDate(dateStr?: string | null): string {
+  if (!dateStr || !dateStr.trim()) return '';
+  const trimmed = dateStr.trim();
+
+  // Match YYYY-MM-DD
+  const ymdMatch = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (ymdMatch) {
+    const year = parseInt(ymdMatch[1], 10);
+    const month = parseInt(ymdMatch[2], 10) - 1;
+    const day = parseInt(ymdMatch[3], 10);
+    if (month >= 0 && month < 12 && day >= 1 && day <= 31) {
+      return `${day} ${MONTH_NAMES[month]} ${year}`;
+    }
+  }
+
+  // Match DD-MM-YYYY or DD/MM/YYYY
+  const dmyMatch = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  if (dmyMatch) {
+    const day = parseInt(dmyMatch[1], 10);
+    const month = parseInt(dmyMatch[2], 10) - 1;
+    const year = parseInt(dmyMatch[3], 10);
+    if (month >= 0 && month < 12 && day >= 1 && day <= 31) {
+      return `${day} ${MONTH_NAMES[month]} ${year}`;
+    }
+  }
+
+  // If already in "DD Month YYYY" format
+  const textMatch = trimmed.match(/^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/);
+  if (textMatch) {
+    return trimmed;
+  }
+
+  const d = new Date(trimmed);
+  if (!isNaN(d.getTime())) {
+    const day = d.getDate();
+    const month = d.getMonth();
+    const year = d.getFullYear();
+    return `${day} ${MONTH_NAMES[month]} ${year}`;
+  }
+
+  return trimmed;
+}

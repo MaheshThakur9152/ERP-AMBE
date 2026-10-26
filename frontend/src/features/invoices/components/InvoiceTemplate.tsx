@@ -1,6 +1,6 @@
 import React from 'react';
 import { InvoiceData } from '../types/invoice';
-import { computeInvoiceCalculations, formatCurrency, formatInteger } from '../utils/invoiceCalculator';
+import { computeInvoiceCalculations, formatCurrency, formatInteger, formatInvoiceDisplayDate } from '../utils/invoiceCalculator';
 import { formatCleanCompanyAddress } from '@/services/pdfService';
 
 interface InvoiceTemplateProps {
@@ -138,7 +138,7 @@ export const InvoiceTemplate: React.FC<InvoiceTemplateProps> = ({
                 <p className="text-zinc-900">
                   Invoice No : <span>{data.meta.invoiceNo}</span>
                 </p>
-                <p className="text-zinc-900">Date: {data.meta.invoiceDate}</p>
+                <p className="text-zinc-900">Date: {formatInvoiceDisplayDate(data.meta.invoiceDate)}</p>
               </div>
               <p className="text-zinc-900 font-normal mt-auto pt-4">
                 Billing Period: {data.meta.billingPeriod}
