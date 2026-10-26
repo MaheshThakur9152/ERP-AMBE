@@ -1,0 +1,71 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: Build & Verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install & Build Backend
+        run: |
+          cd backend
+          npm ci
+          npm run build
+
+      - name: Install & Build Frontend
+        run: |
+          cd frontend
+          npm ci
+          npm run build
+
+  deploy:
+    name: Deploy to Oracle Server
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Execute Remote Deployment via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: true
+          script: |
+            set -e
+            echo "🚀 Starting Deployment on Production Server..."
+            cd /var/www/ambeservice/ERP-AMBE
+
+            # Ensure git repo is clean and pull latest master
+            git fetch origin master
+            git reset --hard origin/master
+
+            # Ensure root .env exists
+            if [ ! -f .env ] && [ -f backend/.env ]; then
+              cp backend/.env .env
+            fi
+
+            # Rebuild and restart application containers
+            docker compose up -d --build backend frontend
+
+            # Clean dangling images to preserve VPS disk space
+            docker image prune -f
+
+            echo "✅ Deployment completed successfully!"
