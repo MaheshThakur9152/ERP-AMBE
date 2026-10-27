@@ -521,10 +521,17 @@ export class InvoiceQueryService {
       for (const item of rawLineItems) {
         const qty = Number(item.quantity ?? item.persons ?? 1);
         const rate = Number(item.unit_rate ?? item.rate ?? item.monthlyRate ?? 0);
-        const days = Number(item.working_days ?? item.workingDays ?? 30);
-        // Integer-safe minor units
-        const lineAmountPaisa = Math.round(qty * rate * 100);
-        const lineAmount = lineAmountPaisa / 100;
+        const days = Number(item.working_days ?? item.workingDays ?? 0);
+        
+        let lineAmount = 0;
+        if (item.amount !== undefined && item.amount !== null && !isNaN(Number(item.amount))) {
+          lineAmount = Math.round(Number(item.amount) * 100) / 100;
+        } else if (days > 0 && rate > 0) {
+          lineAmount = Math.round(((rate / 31) * days) * 100) / 100;
+        } else {
+          lineAmount = 0;
+        }
+        const lineAmountPaisa = Math.round(lineAmount * 100);
 
         const cgstAmtPaisa = cgstRate > 0 ? Math.round((lineAmountPaisa * cgstRate) / 100) : 0;
         const sgstAmtPaisa = sgstRate > 0 ? Math.round((lineAmountPaisa * sgstRate) / 100) : 0;
@@ -558,10 +565,19 @@ export class InvoiceQueryService {
       // Taxable additional charges under Section 15 CGST Act: management fee, machinery, material
       const additionalTaxablePaisa = Math.round((mgmtFee + machineryCharges + materialCharges) * 100);
       const additionalTaxPaisa = Math.round((additionalTaxablePaisa * (cgstRate + sgstRate + igstRate)) / 100);
-      const finalTaxTotal = (Math.round(calculatedTaxTotal * 100) + additionalTaxPaisa) / 100;
+      const fallbackTaxTotal = (Math.round(calculatedTaxTotal * 100) + additionalTaxPaisa) / 100;
+      const fallbackSubTotal = Math.round(calculatedSubTotal * 100) / 100;
+      const fallbackGrandTotal = Math.floor(calculatedSubTotal + (additionalTaxablePaisa / 100) + fallbackTaxTotal);
 
-      const finalSubTotal = Math.round((calculatedSubTotal + mgmtFee + machineryCharges + materialCharges) * 100) / 100;
-      const finalGrandTotal = Math.round((finalSubTotal + finalTaxTotal) * 100) / 100;
+      const finalSubTotal = payload.sub_total !== undefined && !isNaN(Number(payload.sub_total))
+        ? Number(payload.sub_total)
+        : fallbackSubTotal;
+      const finalTaxTotal = payload.tax_total !== undefined && !isNaN(Number(payload.tax_total))
+        ? Number(payload.tax_total)
+        : fallbackTaxTotal;
+      const finalGrandTotal = payload.grand_total !== undefined && !isNaN(Number(payload.grand_total))
+        ? Number(payload.grand_total)
+        : fallbackGrandTotal;
 
       // 6. Sequence allocation
       const isRevision = Boolean(

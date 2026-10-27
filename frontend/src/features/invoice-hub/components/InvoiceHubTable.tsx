@@ -78,14 +78,6 @@ const convertRecordToInvoiceData = (inv: InvoiceRecord): InvoiceData => {
   const itemsList = inv.payload?.items || inv.line_items || [];
   const targetAmount = Number(inv.amount || (inv as any).grand_total || inv.payload?.meta?.amount || 0);
 
-  if (machineryCharges === 0 && materialCharges === 0 && targetAmount > 0 && itemsList.length > 0) {
-    const basicCalc = computeInvoiceCalculations(itemsList, mgmtPercent, 9, 9, 0, 0);
-    const diff = targetAmount - basicCalc.grandTotal;
-    if (diff > 5) {
-      materialCharges = Math.round(diff / 1.18);
-    }
-  }
-
   const additionalCharges = inv.payload?.additionalCharges || inv.payload?.additional_charges || (inv as any).additionalCharges || (inv as any).additional_charges || (
     (machineryCharges > 0 || materialCharges > 0)
       ? [
