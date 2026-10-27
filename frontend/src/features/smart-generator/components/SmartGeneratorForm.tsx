@@ -937,10 +937,28 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
                 </div>
               ))}
             </div>
-            <div className="flex justify-between items-center py-1 text-slate-600 border-b border-slate-100">
-              <span className="font-medium">Tax (CGST 9% + SGST 9%)</span>
-              <span className="font-mono font-semibold text-slate-900 text-sm">
-                ₹{formatCurrency(calc.cgstAmount + calc.sgstAmount)}
+            <div className="flex justify-between items-center py-1 text-slate-700 font-semibold bg-slate-100/70 px-2 rounded border border-slate-200/60">
+              <span>Total (Taxable Value)</span>
+              <span className="font-mono text-slate-900 text-sm">₹{formatCurrency(calc.totalBeforeTax)}</span>
+            </div>
+            <div className="space-y-1 py-1 text-slate-600 border-b border-slate-100">
+              <div className="flex justify-between items-center">
+                <span>Add CGST @ {calc.cgstPercent}%</span>
+                <span className="font-mono font-medium text-slate-800">₹{formatCurrency(calc.cgstAmount)}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span>Add SGST @ {calc.sgstPercent}%</span>
+                <span className="font-mono font-medium text-slate-800">₹{formatCurrency(calc.sgstAmount)}</span>
+              </div>
+            </div>
+            <div className="flex justify-between items-center py-0.5 text-slate-600">
+              <span>Total with Tax</span>
+              <span className="font-mono font-medium text-slate-800">₹{formatCurrency(calc.totalWithTax)}</span>
+            </div>
+            <div className="flex justify-between items-center py-0.5 text-slate-500">
+              <span>Round off (+-)</span>
+              <span className="font-mono">
+                {calc.roundOff >= 0 ? `+${calc.roundOff.toFixed(2)}` : calc.roundOff.toFixed(2)}
               </span>
             </div>
             <div className="flex justify-between items-center pt-2.5 text-base font-bold text-teal-700 border-t border-slate-200">
