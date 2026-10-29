@@ -591,7 +591,18 @@ export class InvoiceQueryService {
 
       if (!invoiceNo) {
         if (isProforma) {
-          const nextSeq = (Number(company.proforma_sequence) || 0) + 1;
+          const maxRes = await client.query(
+            `SELECT MAX(SUBSTRING(i.invoice_no FROM '([0-9]+)$')::integer) AS max_num
+             FROM public.invoices i
+             WHERE (i.company_id = $1 OR (
+               $2 != '' AND i.invoice_no LIKE $2 || '%'
+             ))
+             AND (i.type = 'Proforma Invoice' OR i.type = 'Proforma')
+             AND i.invoice_no ~ '([0-9]+)$'`,
+            [companyId, company.proforma_prefix || '']
+          );
+          const currentMax = Number(maxRes.rows[0]?.max_num) || 0;
+          const nextSeq = Math.max(Number(company.proforma_sequence) || 0, currentMax) + 1;
           const prefix = company.proforma_prefix || 'AS/P/26-27/';
           invoiceNo = `${prefix}${String(nextSeq).padStart(3, '0')}`;
           await client.query(
@@ -599,7 +610,18 @@ export class InvoiceQueryService {
             [nextSeq, companyId]
           );
         } else {
-          const nextSeq = (Number(company.tax_sequence) || 0) + 1;
+          const maxRes = await client.query(
+            `SELECT MAX(SUBSTRING(i.invoice_no FROM '([0-9]+)$')::integer) AS max_num
+             FROM public.invoices i
+             WHERE (i.company_id = $1 OR (
+               $2 != '' AND i.invoice_no LIKE $2 || '%'
+             ))
+             AND i.type = 'Tax Invoice'
+             AND i.invoice_no ~ '([0-9]+)$'`,
+            [companyId, company.tax_prefix || '']
+          );
+          const currentMax = Number(maxRes.rows[0]?.max_num) || 0;
+          const nextSeq = Math.max(Number(company.tax_sequence) || 0, currentMax) + 1;
           const prefix = company.tax_prefix || 'AS/26-27/';
           invoiceNo = `${prefix}${String(nextSeq).padStart(3, '0')}`;
           await client.query(
@@ -773,26 +795,30 @@ export class InvoiceQueryService {
       const isProforma = inv.type === 'Proforma Invoice' || inv.type === 'Proforma';
       if (isProforma) {
         await pool.query(
-          `UPDATE public.companies
+          `UPDATE public.companies c
            SET proforma_sequence = COALESCE(
-             (SELECT MAX(SUBSTRING(invoice_no FROM '([0-9]+)$')::integer)
-              FROM public.invoices
-              WHERE company_id = $1 AND (type = 'Proforma Invoice' OR type = 'Proforma') AND invoice_no ~ '([0-9]+)$'),
+             (SELECT MAX(SUBSTRING(i.invoice_no FROM '([0-9]+)$')::integer)
+              FROM public.invoices i
+              WHERE (i.company_id = c.id OR (c.proforma_prefix IS NOT NULL AND c.proforma_prefix != '' AND i.invoice_no LIKE c.proforma_prefix || '%'))
+                AND (i.type = 'Proforma Invoice' OR i.type = 'Proforma')
+                AND i.invoice_no ~ '([0-9]+)$'),
              0
            )
-           WHERE id = $1;`,
+           WHERE c.id = $1;`,
           [inv.company_id]
         );
       } else {
         await pool.query(
-          `UPDATE public.companies
+          `UPDATE public.companies c
            SET tax_sequence = COALESCE(
-             (SELECT MAX(SUBSTRING(invoice_no FROM '([0-9]+)$')::integer)
-              FROM public.invoices
-              WHERE company_id = $1 AND type = 'Tax Invoice' AND invoice_no ~ '([0-9]+)$'),
+             (SELECT MAX(SUBSTRING(i.invoice_no FROM '([0-9]+)$')::integer)
+              FROM public.invoices i
+              WHERE (i.company_id = c.id OR (c.tax_prefix IS NOT NULL AND c.tax_prefix != '' AND i.invoice_no LIKE c.tax_prefix || '%'))
+                AND i.type = 'Tax Invoice'
+                AND i.invoice_no ~ '([0-9]+)$'),
              0
            )
-           WHERE id = $1;`,
+           WHERE c.id = $1;`,
           [inv.company_id]
         );
       }
@@ -1063,7 +1089,18 @@ export class InvoiceQueryService {
       }
       const company = compRes.rows[0];
 
-      const nextSeq = (Number(company.tax_sequence) || 0) + 1;
+      const maxTaxRes = await client.query(
+        `SELECT MAX(SUBSTRING(i.invoice_no FROM '([0-9]+)$')::integer) AS max_num
+         FROM public.invoices i
+         WHERE (i.company_id = $1 OR (
+           $2 != '' AND i.invoice_no LIKE $2 || '%'
+         ))
+         AND i.type = 'Tax Invoice'
+         AND i.invoice_no ~ '([0-9]+)$'`,
+        [companyId, company.tax_prefix || '']
+      );
+      const currentMaxTax = Number(maxTaxRes.rows[0]?.max_num) || 0;
+      const nextSeq = Math.max(Number(company.tax_sequence) || 0, currentMaxTax) + 1;
       const taxPrefix = company.tax_prefix || 'AS/26-27/';
       const nextTaxInvoiceNo = `${taxPrefix}${String(nextSeq).padStart(3, '0')}`;
 
