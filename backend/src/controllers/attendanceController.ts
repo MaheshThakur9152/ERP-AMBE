@@ -86,7 +86,14 @@ export class AttendanceController {
     try {
       const { pool } = await import('../db/pool');
       const { site_id, start_date, end_date, month, year } = req.query;
-      let query = 'SELECT * FROM public.attendance_records WHERE 1=1';
+      let query = `
+        SELECT 
+          id, staff_id, site_id, record_date::text AS record_date,
+          shift_type, status, in_time, out_time, duration_hours, duration,
+          remarks, created_at, updated_at
+        FROM public.attendance_records 
+        WHERE 1=1
+      `;
       const params: any[] = [];
 
       if (site_id && site_id !== 'all') {
@@ -114,7 +121,11 @@ export class AttendanceController {
 
       query += ' ORDER BY record_date ASC, staff_id ASC';
       const result = await pool.query(query, params);
-      res.status(200).json({ success: true, data: result.rows || [] });
+      const normalizedRows = (result.rows || []).map((row: any) => ({
+        ...row,
+        record_date: row.record_date ? String(row.record_date).split('T')[0].split(' ')[0] : row.record_date,
+      }));
+      res.status(200).json({ success: true, data: normalizedRows });
     } catch (error: any) {
       console.error('❌ Controller error fetching attendance records:', error.message);
       res.status(500).json({ error: error.message });

@@ -54,7 +54,8 @@ export function mapDbToAttendanceTemplate(
     if (!attendanceByEmployee.has(r.employeeId)) {
       attendanceByEmployee.set(r.employeeId, new Map());
     }
-    attendanceByEmployee.get(r.employeeId)!.set(r.date, r);
+    const normalizedDate = (r.date || (r as any).record_date || '').split('T')[0].split(' ')[0];
+    attendanceByEmployee.get(r.employeeId)!.set(normalizedDate, r);
   }
 
   const mappedEmployees = employees.map((emp, idx) => {

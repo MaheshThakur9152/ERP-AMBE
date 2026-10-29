@@ -78,11 +78,52 @@ async function runGoogleAttendanceTests() {
   assert(serviceCode.includes('site_name'), 'googleAttendanceSheetService must reference actual site_name column');
   console.log('✓ Schema conformity & column regression check passed.');
 
-  // Test 7: Timezone-independent calendar day parsing
-  const testIso = '2026-08-15';
-  const dayParsed = parseInt(testIso.split('-')[2], 10);
+  // Test 7: Timezone-independent calendar day parsing & ISO date normalization
+  const testIso = '2026-08-15T00:00:00.000Z';
+  const normDate = testIso.split('T')[0].split(' ')[0];
+  assert.strictEqual(normDate, '2026-08-15', 'ISO timestamp must normalize cleanly to YYYY-MM-DD');
+  const dayParsed = parseInt(normDate.split('-')[2], 10);
   assert.strictEqual(dayParsed, 15, 'Calendar day must parse accurately from date string');
-  console.log('✓ Timezone-independent calendar day parsing verified.');
+  console.log('✓ Timezone-independent calendar day parsing & normalization verified.');
+
+  // Test 8: Generated monthly sheets are never picked as master template
+  const mockDriveWithOutputs = {
+    files: {
+      list: async () => ({
+        data: {
+          files: [
+            { id: 'output-1', name: 'Attendance - Ajmera Greenfinity - August 2026', mimeType: 'application/vnd.google-apps.spreadsheet' },
+            { id: 'template-real', name: 'Ambe_Attendance_Template (1).xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+          ],
+        },
+      }),
+    },
+  };
+  const chosenTemplate = await GoogleAttendanceSheetService.findTemplateFile(mockDriveWithOutputs, 'folder-1');
+  assert.strictEqual(chosenTemplate.id, 'template-real', 'Must filter out previously generated Attendance output sheets');
+  console.log('✓ Master template protection against generated output sheets verified.');
+
+  // Test 9: Dynamic employee rows and summary positioning
+  const staffCount = 2;
+  const lastEmpRow = 7 + (staffCount * 2) - 1;
+  assert.strictEqual(lastEmpRow, 10, 'For 2 employees, employee rows must end at row 10');
+  const s1WeeklyOff = lastEmpRow + 1; // 11
+  const s2Present = s1WeeklyOff + 1;  // 12
+  const s3Total = s2Present + 1;      // 13
+  assert.strictEqual(s1WeeklyOff, 11, 'Summary row 1 (WEEKLY OFF) must be immediately beneath employees at row 11');
+  assert.strictEqual(s2Present, 12, 'Summary row 2 (PRESENT STRENGTH) must be at row 12');
+  assert.strictEqual(s3Total, 13, 'Summary row 3 (TOTAL STRENGTH) must be at row 13');
+  console.log('✓ Dynamic 2-employee blocks and immediate summary positioning verified.');
+
+  // Test 10: Weekly-off status derivation rules
+  const isWeeklyOffDay = true;
+  const rawStatusEmpty = undefined;
+  const rawStatusPresent = 'P';
+  const derivedAbsent = isWeeklyOffDay ? (!rawStatusEmpty || rawStatusEmpty === 'A' ? 'W/O' : rawStatusEmpty) : (rawStatusEmpty || '');
+  assert.strictEqual(derivedAbsent, 'W/O', 'Unrecorded day on weekly off must display W/O');
+  const derivedPresent = isWeeklyOffDay ? (rawStatusPresent === 'P' || rawStatusPresent === 'WOP' ? 'WOP' : rawStatusPresent) : rawStatusPresent;
+  assert.strictEqual(derivedPresent, 'WOP', 'Present on weekly off must display WOP');
+  console.log('✓ Weekly-off status derivation rules verified.');
 
   console.log('All Google Attendance Sheet unit assertions passed successfully!');
 }

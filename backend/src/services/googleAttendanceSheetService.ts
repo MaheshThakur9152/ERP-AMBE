@@ -14,6 +14,7 @@ export interface GoogleSheetSyncResult {
   year: string;
   lastSyncedAt: string;
   status: string;
+  missingBiometricStaff?: string[];
 }
 
 export class GoogleAttendanceSheetService {
@@ -250,8 +251,22 @@ export class GoogleAttendanceSheetService {
 
         const files = (res.data.files || []).filter((f: any) => !f.name?.startsWith('Attendance -'));
 
-        // Look specifically for approved master template files
-        const preferred = files.find((f: any) => {
+        // Prioritize native Google Sheet master template first
+        const preferredNative = files.find((f: any) => {
+          const n = (f.name || '').toLowerCase();
+          const matches =
+            n.includes('template') ||
+            n.includes('ajmera september') ||
+            n.includes('ambe_attendance') ||
+            n.includes('master');
+          return matches && f.mimeType === 'application/vnd.google-apps.spreadsheet';
+        });
+        if (preferredNative) {
+          return { id: preferredNative.id!, name: preferredNative.name!, isNative: true };
+        }
+
+        // Then look for matching XLSX master template files
+        const preferredXlsx = files.find((f: any) => {
           const n = (f.name || '').toLowerCase();
           return (
             n.includes('template') ||
@@ -261,11 +276,11 @@ export class GoogleAttendanceSheetService {
           );
         });
 
-        if (preferred) {
+        if (preferredXlsx) {
           return {
-            id: preferred.id!,
-            name: preferred.name!,
-            isNative: preferred.mimeType === 'application/vnd.google-apps.spreadsheet',
+            id: preferredXlsx.id!,
+            name: preferredXlsx.name!,
+            isNative: preferredXlsx.mimeType === 'application/vnd.google-apps.spreadsheet',
           };
         }
 
@@ -539,7 +554,15 @@ export class GoogleAttendanceSheetService {
     );
     const staffList = staffRes.rows || [];
 
-    // 4. Fetch attendance records for the month
+    // Track any missing biometric codes for reporting
+    const missingBiometricStaff: string[] = [];
+    for (const emp of staffList) {
+      if (!emp.biometric_code || emp.biometric_code.trim() === '') {
+        missingBiometricStaff.push(emp.employee_name || emp.id);
+      }
+    }
+
+    // 4. Fetch attendance records for the month with canonical date string
     const mPadded = String(monthNum).padStart(2, '0');
     const startDate = `${yearNum}-${mPadded}-01`;
     const daysInMonth = new Date(yearNum, monthNum, 0).getDate();
@@ -552,38 +575,82 @@ export class GoogleAttendanceSheetService {
       [siteId, startDate, endDate]
     );
 
-    // Build attendance lookup: staffId -> Map(dayNumber -> status)
-    const attMap = new Map<string, Map<number, string>>();
+    // Build separated attendance lookups: staffId -> Map(dayNumber -> status)
+    const regularMap = new Map<string, Map<number, string>>();
+    const overtimeMap = new Map<string, Map<number, string>>();
+
     for (const r of recRes.rows || []) {
       const sId = r.staff_id;
-      const d = parseInt(String(r.record_date).split('-')[2], 10);
+      const rawDate = String(r.record_date).split('T')[0].split(' ')[0];
+      const d = parseInt(rawDate.split('-')[2], 10);
       if (!isNaN(d)) {
-        if (!attMap.has(sId)) {
-          attMap.set(sId, new Map());
+        const isOvertime = r.shift_type === 'overtime';
+        const targetMap = isOvertime ? overtimeMap : regularMap;
+        if (!targetMap.has(sId)) {
+          targetMap.set(sId, new Map());
         }
-        attMap.get(sId)!.set(d, r.status);
+        targetMap.get(sId)!.set(d, r.status);
       }
     }
 
-    // 5. Inspect spreadsheet metadata to get target sheet title
+    // 5. Inspect spreadsheet metadata to choose the correct site worksheet
     const metaRes = await sheets.spreadsheets.get({ spreadsheetId });
-    const firstSheetTitle = metaRes.data.sheets?.[0]?.properties?.title || 'Sheet1';
+    const sheetsList = metaRes.data.sheets || [];
 
-    // 6. Build batch value updates
-    const monthName = new Date(2000, monthNum - 1, 1).toLocaleString('default', { month: 'long' });
+    const normSite = siteName.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    // Select matching sheet tab (e.g. GREENFINITY, MANHATTAN, HK, etc.)
+    let targetSheet = sheetsList.find((s: any) => {
+      const title = (s.properties?.title || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      return title.includes(normSite) || (normSite.length > 3 && normSite.includes(title));
+    });
+
+    if (!targetSheet && normSite.includes('greenfinity')) {
+      targetSheet = sheetsList.find((s: any) => {
+        const title = (s.properties?.title || '').toLowerCase();
+        return title.includes('greenfinity');
+      });
+    }
+
+    if (!targetSheet && (normSite.includes('manhattan') || normSite.includes('hk'))) {
+      targetSheet = sheetsList.find((s: any) => {
+        const title = (s.properties?.title || '').toLowerCase();
+        return title.includes('hk') || title.includes('manhattan');
+      });
+    }
+
+    if (!targetSheet) {
+      targetSheet = sheetsList[0];
+    }
+
+    const targetSheetTitle = targetSheet?.properties?.title || 'Sheet1';
+    const targetSheetId = targetSheet?.properties?.sheetId || 0;
+
+    // 6. CLEAR STALE TEMPLATE DATA in dynamic range before writing fresh data
+    try {
+      await sheets.spreadsheets.values.clear({
+        spreadsheetId,
+        range: `'${targetSheetTitle}'!B7:AN120`,
+      });
+    } catch (clearErr: any) {
+      console.warn('⚠️ Clear range warning:', clearErr.message);
+    }
+
+    // 7. Build batch value updates
+    const monthName = new Date(yearNum, monthNum - 1, 1).toLocaleString('default', { month: 'long' });
     const valueUpdates: Array<{ range: string; values: any[][] }> = [];
 
-    // Top headers
+    // Top headers (Rows 2, 3, 4)
     valueUpdates.push({
-      range: `'${firstSheetTitle}'!B2:D2`,
+      range: `'${targetSheetTitle}'!B2:D2`,
       values: [[companyName, '', '']],
     });
     valueUpdates.push({
-      range: `'${firstSheetTitle}'!B3:D3`,
+      range: `'${targetSheetTitle}'!B3:D3`,
       values: [[`SITE - ${siteName.toUpperCase()}`, '', '']],
     });
     valueUpdates.push({
-      range: `'${firstSheetTitle}'!B4:D4`,
+      range: `'${targetSheetTitle}'!B4:D4`,
       values: [[`ATTENDANCE FOR THE MONTH OF ${monthName.toUpperCase()}-${yearNum}`, '', '']],
     });
 
@@ -593,67 +660,197 @@ export class GoogleAttendanceSheetService {
       dayNumbersRow.push(d <= daysInMonth ? d : '');
     }
     valueUpdates.push({
-      range: `'${firstSheetTitle}'!F5:AJ5`,
+      range: `'${targetSheetTitle}'!F5:AJ5`,
       values: [dayNumbersRow],
     });
 
     // Weekdays (Row 6, Cols F to AJ)
     const weekdaysRow: any[] = [];
+    const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     for (let d = 1; d <= 31; d++) {
       if (d <= daysInMonth) {
         const dt = new Date(yearNum, monthNum - 1, d);
-        weekdaysRow.push(dt.toLocaleDateString('en-US', { weekday: 'short' }));
+        weekdaysRow.push(DAY_NAMES[dt.getDay()]);
       } else {
         weekdaysRow.push('');
       }
     }
     valueUpdates.push({
-      range: `'${firstSheetTitle}'!F6:AJ6`,
+      range: `'${targetSheetTitle}'!F6:AJ6`,
       values: [weekdaysRow],
     });
 
-    // Employee rows (Starting row 7, 2 rows per employee)
+    // 8. Employee rows (Starting row 7, exactly 2 rows per employee)
     for (let i = 0; i < staffList.length; i++) {
       const emp = staffList[i];
       const r = 7 + (i * 2);
       const sr = i + 1;
-      const empMap = attMap.get(emp.id) || new Map();
+      const empRegMap = regularMap.get(emp.id) || new Map<number, string>();
+      const empOtMap = overtimeMap.get(emp.id) || new Map<number, string>();
 
-      // Attendance values for Days 1 to 31
+      const offDays = (emp.weekly_off || 'Sunday')
+        .toLowerCase()
+        .split(/[,/&]+/)
+        .map((s: string) => s.trim());
+
+      const isWeeklyOffForDay = (d: number): boolean => {
+        if (!emp.weekly_off || emp.weekly_off === 'None') return false;
+        const dt = new Date(yearNum, monthNum - 1, d);
+        const dayName = DAY_NAMES[dt.getDay()].toLowerCase();
+        return offDays.includes(dayName);
+      };
+
+      // Attendance values for Days 1 to 31 (Regular shift: row r)
       const dayValues: any[] = [];
+      // Overtime values for Days 1 to 31 (Overtime shift: row r+1)
+      const otValues: any[] = [];
+
       for (let d = 1; d <= 31; d++) {
         if (d <= daysInMonth) {
-          dayValues.push(empMap.get(d) || '');
+          const isWo = isWeeklyOffForDay(d);
+          const rawStatus = empRegMap.get(d);
+          let finalStatus = rawStatus;
+
+          if (isWo) {
+            if (!rawStatus || rawStatus === 'A') {
+              finalStatus = 'W/O';
+            } else if (rawStatus === 'P' || rawStatus === 'WOP') {
+              finalStatus = 'WOP';
+            }
+          }
+
+          dayValues.push(finalStatus || '');
+
+          const rawOt = empOtMap.get(d);
+          otValues.push(rawOt || '');
         } else {
           dayValues.push('');
+          otValues.push('');
         }
       }
 
-      // Metadata (Cols B to E)
+      // Metadata (Cols B to E) on row r
       valueUpdates.push({
-        range: `'${firstSheetTitle}'!B${r}:E${r}`,
+        range: `'${targetSheetTitle}'!B${r}:E${r}`,
         values: [[sr, emp.biometric_code || '', emp.employee_name || '', emp.weekly_off || 'Sunday']],
       });
 
-      // Attendance cells (Cols F to AJ)
+      // Regular shift attendance cells (Cols F to AJ)
       valueUpdates.push({
-        range: `'${firstSheetTitle}'!F${r}:AJ${r}`,
+        range: `'${targetSheetTitle}'!F${r}:AJ${r}`,
         values: [dayValues],
       });
 
-      // Summary formulas (Cols AK to AN)
+      // Regular shift summary formulas (Cols AK to AN)
       valueUpdates.push({
-        range: `'${firstSheetTitle}'!AK${r}:AN${r}`,
+        range: `'${targetSheetTitle}'!AK${r}:AN${r}`,
         values: [[
           `=COUNTIF(F${r}:AJ${r},"P")+COUNTIF(F${r}:AJ${r},"WOP")`,
           `=COUNTIF(F${r}:AJ${r},"W/O")+COUNTIF(F${r}:AJ${r},"WO")`,
           `=COUNTIF(F${r}:AJ${r},"HD")`,
-          `=AK${r}+AL${r}+(AM${r}*0.5)`,
+          `=AK${r}+AL${r}+(AM${r}*0.5)+AK${r + 1}`,
         ]],
+      });
+
+      // Overtime shift attendance cells (Cols F to AJ on row r+1)
+      valueUpdates.push({
+        range: `'${targetSheetTitle}'!F${r + 1}:AJ${r + 1}`,
+        values: [otValues],
+      });
+
+      // Overtime present count (Col AK on row r+1)
+      valueUpdates.push({
+        range: `'${targetSheetTitle}'!AK${r + 1}:AN${r + 1}`,
+        values: [[`=COUNTIF(F${r + 1}:AJ${r + 1},"P")`, '-', '-', '-']],
       });
     }
 
-    // 7. Execute batch value update
+    // 9. Summary Rows (Positioned directly under the final employee block)
+    const lastEmpRow = staffList.length > 0 ? 7 + (staffList.length * 2) - 1 : 6;
+    const s1 = lastEmpRow + 1; // WEEKLY OFF
+    const s2 = s1 + 1;         // PRESENT STRENGTH
+    const s3 = s2 + 1;         // TOTAL STRENGTH
+
+    if (staffList.length > 0) {
+      // Summary Row 1: WEEKLY OFF
+      const s1Cols: any[] = [];
+      for (let d = 1; d <= 31; d++) {
+        if (d <= daysInMonth) {
+          const colL = GoogleAttendanceSheetService.getColumnLetter(5 + d);
+          s1Cols.push(`=COUNTIF(${colL}7:${colL}${lastEmpRow},"W/O")+COUNTIF(${colL}7:${colL}${lastEmpRow},"WO")`);
+        } else {
+          s1Cols.push('');
+        }
+      }
+
+      valueUpdates.push({
+        range: `'${targetSheetTitle}'!B${s1}:E${s1}`,
+        values: [['', '', '', 'WEEKLY OFF']],
+      });
+      valueUpdates.push({
+        range: `'${targetSheetTitle}'!F${s1}:AJ${s1}`,
+        values: [s1Cols],
+      });
+      valueUpdates.push({
+        range: `'${targetSheetTitle}'!AK${s1}:AN${s1}`,
+        values: [[
+          `=SUM(AK7:AK${lastEmpRow})`,
+          `=SUM(AL7:AL${lastEmpRow})`,
+          '-',
+          `=SUM(AN7:AN${lastEmpRow})`,
+        ]],
+      });
+
+      // Summary Row 2: PRESENT STRENGTH
+      const s2Cols: any[] = [];
+      for (let d = 1; d <= 31; d++) {
+        if (d <= daysInMonth) {
+          const colL = GoogleAttendanceSheetService.getColumnLetter(5 + d);
+          s2Cols.push(`=COUNTIF(${colL}7:${colL}${lastEmpRow},"P")+COUNTIF(${colL}7:${colL}${lastEmpRow},"WOP")+(COUNTIF(${colL}7:${colL}${lastEmpRow},"HD")*0.5)`);
+        } else {
+          s2Cols.push('');
+        }
+      }
+
+      valueUpdates.push({
+        range: `'${targetSheetTitle}'!B${s2}:E${s2}`,
+        values: [['', '', '', 'PRESENT STRENGTH']],
+      });
+      valueUpdates.push({
+        range: `'${targetSheetTitle}'!F${s2}:AJ${s2}`,
+        values: [s2Cols],
+      });
+      valueUpdates.push({
+        range: `'${targetSheetTitle}'!AK${s2}:AN${s2}`,
+        values: [[`=SUM(AK7:AK${lastEmpRow})`, 'Good Day', '', '']],
+      });
+
+      // Summary Row 3: TOTAL STRENGTH
+      const s3Cols: any[] = [];
+      for (let d = 1; d <= 31; d++) {
+        if (d <= daysInMonth) {
+          const colL = GoogleAttendanceSheetService.getColumnLetter(5 + d);
+          s3Cols.push(`=${colL}${s1}+${colL}${s2}`);
+        } else {
+          s3Cols.push('');
+        }
+      }
+
+      valueUpdates.push({
+        range: `'${targetSheetTitle}'!B${s3}:E${s3}`,
+        values: [['', '', '', 'TOTAL STRENGTH']],
+      });
+      valueUpdates.push({
+        range: `'${targetSheetTitle}'!F${s3}:AJ${s3}`,
+        values: [s3Cols],
+      });
+      valueUpdates.push({
+        range: `'${targetSheetTitle}'!AK${s3}:AN${s3}`,
+        values: [[`=AN${s1}`, '', '', '']],
+      });
+    }
+
+    // 10. Execute batch value updates
     try {
       await sheets.spreadsheets.values.batchUpdate({
         spreadsheetId,
@@ -663,7 +860,53 @@ export class GoogleAttendanceSheetService {
         },
       });
 
-      // Update sync status in DB
+      // 11. Format weekdays vertical rotation & row heights
+      try {
+        await sheets.spreadsheets.batchUpdate({
+          spreadsheetId,
+          requestBody: {
+            requests: [
+              // Row 6 (0-indexed 5) Weekdays vertical text rotation
+              {
+                repeatCell: {
+                  range: {
+                    sheetId: targetSheetId,
+                    startRowIndex: 5,
+                    endRowIndex: 6,
+                    startColumnIndex: 5,
+                    endColumnIndex: 36,
+                  },
+                  cell: {
+                    userEnteredFormat: {
+                      textRotation: { vertical: true },
+                      horizontalAlignment: 'CENTER',
+                      verticalAlignment: 'MIDDLE',
+                    },
+                  },
+                  fields: 'userEnteredFormat(textRotation,horizontalAlignment,verticalAlignment)',
+                },
+              },
+              // Row 6 height 60px
+              {
+                updateDimensionProperties: {
+                  range: {
+                    sheetId: targetSheetId,
+                    dimension: 'ROWS',
+                    startIndex: 5,
+                    endIndex: 6,
+                  },
+                  properties: { pixelSize: 60 },
+                  fields: 'pixelSize',
+                },
+              },
+            ],
+          },
+        });
+      } catch (fmtErr: any) {
+        console.warn('⚠️ Weekdays text rotation format warning:', fmtErr.message);
+      }
+
+      // 12. Update sync status in DB
       await pool.query(
         `UPDATE public.google_attendance_sheets
          SET sync_status = 'synced', last_synced_at = NOW(), last_error = NULL, updated_at = NOW()
@@ -680,9 +923,9 @@ export class GoogleAttendanceSheetService {
         year: yearStr,
         lastSyncedAt: new Date().toISOString(),
         status: 'synced',
+        missingBiometricStaff: missingBiometricStaff.length > 0 ? missingBiometricStaff : undefined,
       };
     } catch (apiErr: any) {
-      // Record failure in DB
       const safeErrorMsg = (apiErr.message || 'Unknown Google Sheets API error')
         .replace(/(Bearer\s+)[A-Za-z0-9_.-]+/gi, '$1[REDACTED]')
         .replace(/key=[A-Za-z0-9_.-]+/gi, 'key=[REDACTED]');

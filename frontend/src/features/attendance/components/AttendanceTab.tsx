@@ -599,7 +599,7 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
           const mappedRecords: AttendanceRecord[] = dbRecords.map((r: any) => ({
             id: r.id,
             employeeId: r.staff_id || r.employee_id || r.employeeId || r.staffId || '',
-            date: r.record_date || r.date,
+            date: (r.record_date || r.date || '').split('T')[0].split(' ')[0],
             status: r.status,
             overtimeStatus: r.shift_type === 'overtime' ? 'P' : (r.overtime_status || ''),
             remarks: r.remarks || '',
