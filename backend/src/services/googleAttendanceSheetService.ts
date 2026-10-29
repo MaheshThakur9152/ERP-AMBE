@@ -367,48 +367,69 @@ export class GoogleAttendanceSheetService {
     const monthName = !isNaN(monthNum)
       ? new Date(2000, monthNum - 1, 1).toLocaleString('default', { month: 'long' })
       : monthStr;
-    const cleanSiteName = (site.name || 'Site').trim();
+    const cleanSiteName = (site.site_name || site.name || 'Site').trim();
     const sheetTitle = `Attendance - ${cleanSiteName} - ${monthName} ${yearStr}`;
 
     let createdId = '';
     let webViewLink = '';
+    let isExistingInDrive = false;
 
-    if (template.isNative) {
-      // Copy native Google Sheet template
-      const copyRes = await drive.files.copy({
-        fileId: template.id,
-        requestBody: {
-          name: sheetTitle,
-          parents: [folderId],
-        },
-        fields: 'id, name, webViewLink',
+    // Check if sheet already exists in Drive folder to avoid duplicate creation
+    try {
+      const existingInDrive = await drive.files.list({
+        q: `'${folderId}' in parents and name = '${sheetTitle.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`,
+        fields: 'files(id, name, webViewLink)',
         supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
       });
-      createdId = copyRes.data.id!;
-      webViewLink = copyRes.data.webViewLink || `https://docs.google.com/spreadsheets/d/${createdId}/edit`;
-    } else {
-      // Convert / import XLSX template into a native Google Sheet
-      const xlsxBuffer = await drive.files.get(
-        { fileId: template.id, alt: 'media', supportsAllDrives: true },
-        { responseType: 'arraybuffer' }
-      );
-      const stream = Readable.from(Buffer.from(xlsxBuffer.data as ArrayBuffer));
+      if (existingInDrive.data.files && existingInDrive.data.files.length > 0) {
+        const found = existingInDrive.data.files[0];
+        createdId = found.id!;
+        webViewLink = found.webViewLink || `https://docs.google.com/spreadsheets/d/${createdId}/edit`;
+        isExistingInDrive = true;
+      }
+    } catch {
+      // Ignore search error, fallback to create
+    }
 
-      const createRes = await drive.files.create({
-        requestBody: {
-          name: sheetTitle,
-          mimeType: 'application/vnd.google-apps.spreadsheet',
-          parents: [folderId],
-        },
-        media: {
-          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          body: stream,
-        },
-        fields: 'id, name, webViewLink',
-        supportsAllDrives: true,
-      });
-      createdId = createRes.data.id!;
-      webViewLink = createRes.data.webViewLink || `https://docs.google.com/spreadsheets/d/${createdId}/edit`;
+    if (!createdId) {
+      if (template.isNative) {
+        // Copy native Google Sheet template
+        const copyRes = await drive.files.copy({
+          fileId: template.id,
+          requestBody: {
+            name: sheetTitle,
+            parents: [folderId],
+          },
+          fields: 'id, name, webViewLink',
+          supportsAllDrives: true,
+        });
+        createdId = copyRes.data.id!;
+        webViewLink = copyRes.data.webViewLink || `https://docs.google.com/spreadsheets/d/${createdId}/edit`;
+      } else {
+        // Convert / import XLSX template into a native Google Sheet
+        const xlsxBuffer = await drive.files.get(
+          { fileId: template.id, alt: 'media', supportsAllDrives: true },
+          { responseType: 'arraybuffer' }
+        );
+        const stream = Readable.from(Buffer.from(xlsxBuffer.data as ArrayBuffer));
+
+        const createRes = await drive.files.create({
+          requestBody: {
+            name: sheetTitle,
+            mimeType: 'application/vnd.google-apps.spreadsheet',
+            parents: [folderId],
+          },
+          media: {
+            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            body: stream,
+          },
+          fields: 'id, name, webViewLink',
+          supportsAllDrives: true,
+        });
+        createdId = createRes.data.id!;
+        webViewLink = createRes.data.webViewLink || `https://docs.google.com/spreadsheets/d/${createdId}/edit`;
+      }
     }
 
     // Persist mapping with conflict guard
@@ -428,7 +449,7 @@ export class GoogleAttendanceSheetService {
     return {
       spreadsheetId: createdId,
       spreadsheetUrl: webViewLink,
-      isNew: true,
+      isNew: !isExistingInDrive,
       templateFileId: template.id,
     };
   }
@@ -463,12 +484,13 @@ export class GoogleAttendanceSheetService {
     const site = siteRes.rows[0];
 
     let companyName = 'AMBE SERVICE FACILITY PVT. LTD.';
-    if (site.company_id) {
-      const compRes = await pool.query('SELECT name, legal_name FROM public.companies WHERE id = $1 LIMIT 1;', [site.company_id]);
-      if (compRes.rows?.[0]) {
-        companyName = compRes.rows[0].legal_name || compRes.rows[0].name || companyName;
+    if (site?.company_id) {
+      const compRes = await pool.query('SELECT name FROM public.companies WHERE id = $1 LIMIT 1;', [site.company_id]);
+      if (compRes.rows?.[0]?.name) {
+        companyName = compRes.rows[0].name;
       }
     }
+    const siteName = (site?.site_name || site?.name || 'Site').trim();
 
     // 3. Fetch active staff members for this site
     const staffRes = await pool.query(
@@ -487,7 +509,7 @@ export class GoogleAttendanceSheetService {
     const endDate = `${yearNum}-${mPadded}-${String(daysInMonth).padStart(2, '0')}`;
 
     const recRes = await pool.query(
-      `SELECT staff_id, record_date, status, shift_type, in_time, out_time, duration_hours
+      `SELECT staff_id, record_date::text AS record_date, status, shift_type, in_time, out_time, duration_hours
        FROM public.attendance_records
        WHERE site_id = $1 AND record_date >= $2 AND record_date <= $3;`,
       [siteId, startDate, endDate]
@@ -497,11 +519,13 @@ export class GoogleAttendanceSheetService {
     const attMap = new Map<string, Map<number, string>>();
     for (const r of recRes.rows || []) {
       const sId = r.staff_id;
-      const d = new Date(r.record_date).getUTCDate();
-      if (!attMap.has(sId)) {
-        attMap.set(sId, new Map());
+      const d = parseInt(String(r.record_date).split('-')[2], 10);
+      if (!isNaN(d)) {
+        if (!attMap.has(sId)) {
+          attMap.set(sId, new Map());
+        }
+        attMap.get(sId)!.set(d, r.status);
       }
-      attMap.get(sId)!.set(d, r.status);
     }
 
     // 5. Inspect spreadsheet metadata to get target sheet title
@@ -519,7 +543,7 @@ export class GoogleAttendanceSheetService {
     });
     valueUpdates.push({
       range: `'${firstSheetTitle}'!B3:D3`,
-      values: [[`SITE - ${(site.name || '').toUpperCase()}`, '', '']],
+      values: [[`SITE - ${siteName.toUpperCase()}`, '', '']],
     });
     valueUpdates.push({
       range: `'${firstSheetTitle}'!B4:D4`,
@@ -584,10 +608,10 @@ export class GoogleAttendanceSheetService {
       valueUpdates.push({
         range: `'${firstSheetTitle}'!AK${r}:AN${r}`,
         values: [[
-          `=COUNTIF(F${r}:AJ${r},"P")`,
-          `=COUNTIF(F${r}:AJ${r},"W/O")`,
+          `=COUNTIF(F${r}:AJ${r},"P")+COUNTIF(F${r}:AJ${r},"WOP")`,
+          `=COUNTIF(F${r}:AJ${r},"W/O")+COUNTIF(F${r}:AJ${r},"WO")`,
           `=COUNTIF(F${r}:AJ${r},"HD")`,
-          `=SUM(AK${r}:AM${r + 1})`,
+          `=AK${r}+AL${r}+(AM${r}*0.5)`,
         ]],
       });
     }
@@ -614,7 +638,7 @@ export class GoogleAttendanceSheetService {
         spreadsheetId,
         spreadsheetUrl,
         isNew,
-        siteName: site.name || 'Site',
+        siteName,
         month: monthStr,
         year: yearStr,
         lastSyncedAt: new Date().toISOString(),

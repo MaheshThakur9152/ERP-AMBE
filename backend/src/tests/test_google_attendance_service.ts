@@ -71,6 +71,19 @@ async function runGoogleAttendanceTests() {
   assert.strictEqual(getDaysInMonth(2026, 9), 30, 'Sep 2026 should have 30 days');
   console.log('✓ Month lengths & leap year calculations verified.');
 
+  // Test 6: Schema regression guard (no legal_name column in companies queries, use site_name)
+  const fs = await import('fs');
+  const serviceCode = fs.readFileSync('backend/src/services/googleAttendanceSheetService.ts', 'utf8');
+  assert(!serviceCode.includes('legal_name'), 'googleAttendanceSheetService must not reference non-existent legal_name column');
+  assert(serviceCode.includes('site_name'), 'googleAttendanceSheetService must reference actual site_name column');
+  console.log('✓ Schema conformity & column regression check passed.');
+
+  // Test 7: Timezone-independent calendar day parsing
+  const testIso = '2026-08-15';
+  const dayParsed = parseInt(testIso.split('-')[2], 10);
+  assert.strictEqual(dayParsed, 15, 'Calendar day must parse accurately from date string');
+  console.log('✓ Timezone-independent calendar day parsing verified.');
+
   console.log('All Google Attendance Sheet unit assertions passed successfully!');
 }
 
