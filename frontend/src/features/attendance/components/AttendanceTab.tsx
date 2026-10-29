@@ -17,7 +17,9 @@ import {
   Trash2,
   Calculator,
   Loader2,
+  ExternalLink,
 } from 'lucide-react';
+import { toast } from '@/components/ui/toast';
 import {
   AttendanceRecord,
   AttendanceStatus,
@@ -68,6 +70,19 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
   const [refreshKey, setRefreshKey] = useState<number>(0);
   const [isGeneratingMinervaPdf, setIsGeneratingMinervaPdf] = useState<boolean>(false);
   const [printMode, setPrintMode] = useState<'standard' | 'minerva'>('standard');
+
+  // Google Sheets Integration state
+  const [isSyncingGoogleSheet, setIsSyncingGoogleSheet] = useState<boolean>(false);
+  const [googleSheetInfo, setGoogleSheetInfo] = useState<{
+    spreadsheetId: string;
+    spreadsheetUrl: string;
+    lastSyncedAt?: string;
+  } | null>(null);
+  const [googleAuthModal, setGoogleAuthModal] = useState<{
+    isOpen: boolean;
+    authUrl?: string;
+    message?: string;
+  }>({ isOpen: false });
 
   // Modals & Controls
   const [showAutoInvoiceDropdown, setShowAutoInvoiceDropdown] = useState<boolean>(false);
@@ -633,6 +648,96 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
     }, 150);
   };
 
+  // Check URL for Google OAuth callback parameters
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('google_auth') === 'success') {
+      toast.success('Google Drive authorized successfully!');
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (params.get('google_auth_error')) {
+      toast.error(`Google authorization failed: ${params.get('google_auth_error')}`);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
+
+  // Fetch persistent Google Sheet status for currently selected site and month
+  useEffect(() => {
+    if (selectedSiteFilter === 'all') {
+      setGoogleSheetInfo(null);
+      return;
+    }
+    let isCancelled = false;
+    const checkSheet = async () => {
+      try {
+        const res = await fetchWithRetry(
+          `/api/attendance/google-sheet?siteId=${selectedSiteFilter}&month=${selectedMonth}&year=${selectedYear}`,
+          { skipErrorToast: true }
+        );
+        if (res.ok) {
+          const json = await res.json();
+          if (!isCancelled && json.data) {
+            setGoogleSheetInfo(json.data);
+          }
+        }
+      } catch {
+        if (!isCancelled) setGoogleSheetInfo(null);
+      }
+    };
+    checkSheet();
+    return () => {
+      isCancelled = true;
+    };
+  }, [selectedSiteFilter, selectedMonth, selectedYear]);
+
+  // Handle Google Sheet Synchronization
+  const handleSyncGoogleSheet = async () => {
+    if (selectedSiteFilter === 'all') {
+      toast.info('Please select a specific site location to generate or sync its Google Sheet.');
+      return;
+    }
+
+    setIsSyncingGoogleSheet(true);
+    try {
+      const res = await fetchWithRetry('/api/attendance/google-sheet/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          siteId: selectedSiteFilter,
+          month: selectedMonth,
+          year: selectedYear,
+        }),
+      });
+
+      const json = await res.json();
+      if (res.ok && json.data) {
+        setGoogleSheetInfo(json.data);
+        toast.success(
+          json.data.isNew
+            ? 'Created and synchronized new Google Sheet!'
+            : 'Synchronized attendance to Google Sheet!'
+        );
+        if (json.data.spreadsheetUrl) {
+          window.open(json.data.spreadsheetUrl, '_blank', 'noopener,noreferrer');
+        }
+      } else if (json.requiresAuth && json.authUrl) {
+        setGoogleAuthModal({
+          isOpen: true,
+          authUrl: json.authUrl,
+          message: json.error || 'Google Drive authorization is required to create or sync attendance spreadsheets.',
+        });
+      } else if (json.consoleUrl) {
+        toast.error('Google Sheets API is disabled in your Google Cloud Project. Please enable it in GCP console.');
+      } else {
+        toast.error(json.error || 'Failed to sync with Google Sheets');
+      }
+    } catch (err: any) {
+      console.error('Google Sheet sync error:', err);
+      toast.error(err.message || 'Failed to sync with Google Sheets');
+    } finally {
+      setIsSyncingGoogleSheet(false);
+    }
+  };
+
   const handlePrintStandardSheet = () => {
     setPrintMode('standard');
     setTimeout(() => {
@@ -806,6 +911,49 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
               <FileSpreadsheet size={15} />
               <span>Minerva Sheet</span>
             </button>
+
+            {/* Google Sheet Action */}
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                disabled={isSyncingGoogleSheet}
+                onClick={handleSyncGoogleSheet}
+                className="bg-[#0F9D58] hover:bg-emerald-700 disabled:opacity-60 text-white px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs text-xs font-bold transition-all cursor-pointer"
+                title={
+                  selectedSiteFilter === 'all'
+                    ? 'Select a specific site to create or open Google Sheet'
+                    : googleSheetInfo
+                    ? 'Sync latest attendance data to persistent Google Sheet'
+                    : 'Create and sync persistent Google Sheet for this site and month'
+                }
+              >
+                {isSyncingGoogleSheet ? (
+                  <Loader2 size={15} className="animate-spin" />
+                ) : (
+                  <FileSpreadsheet size={15} />
+                )}
+                <span>
+                  {isSyncingGoogleSheet
+                    ? 'Syncing Sheet...'
+                    : googleSheetInfo
+                    ? 'Sync Google Sheet'
+                    : 'Google Sheet'}
+                </span>
+              </button>
+
+              {googleSheetInfo?.spreadsheetUrl && (
+                <a
+                  href={googleSheetInfo.spreadsheetUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 px-2.5 py-1.5 rounded-lg flex items-center gap-1 text-xs font-bold transition-all shadow-2xs"
+                  title="Open existing Google Sheet in new tab"
+                >
+                  <ExternalLink size={13} />
+                  <span>Open Sheet</span>
+                </a>
+              )}
+            </div>
 
             {/* Stats pills matching Screenshot 2 with Weekly Off awareness */}
             <div className="flex items-center gap-2 border-l border-gray-200 pl-2">
@@ -1417,6 +1565,53 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
               >
                 Cancel
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Google OAuth Re-Authorization Modal */}
+      {googleAuthModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 text-left animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100">
+              <h3 className="font-bold text-gray-900 text-base flex items-center gap-2">
+                <FileSpreadsheet className="text-emerald-600" size={20} />
+                Connect Google Account
+              </h3>
+              <button
+                type="button"
+                onClick={() => setGoogleAuthModal({ isOpen: false })}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="py-4 text-sm text-gray-600 space-y-2">
+              <p>
+                {googleAuthModal.message || 'Google Drive authorization is required to create and synchronize attendance spreadsheets.'}
+              </p>
+              <p className="text-xs text-gray-500">
+                Click below to authorize your Google account with Drive and Sheets permissions.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 pt-3 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={() => setGoogleAuthModal({ isOpen: false })}
+                className="px-3.5 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              {googleAuthModal.authUrl && (
+                <a
+                  href={googleAuthModal.authUrl}
+                  className="px-4 py-1.5 text-xs font-bold bg-[#0F9D58] hover:bg-emerald-700 text-white rounded-lg transition-all shadow-xs flex items-center gap-1.5"
+                >
+                  <ExternalLink size={14} />
+                  <span>Authorize with Google</span>
+                </a>
+              )}
             </div>
           </div>
         </div>

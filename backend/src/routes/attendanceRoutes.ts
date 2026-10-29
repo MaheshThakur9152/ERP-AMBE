@@ -1,8 +1,15 @@
 import { Router } from 'express';
 import { AttendanceController } from '../controllers/attendanceController';
+import { GoogleAttendanceSheetController } from '../controllers/googleAttendanceSheetController';
 import { requireAuth, requireAdmin, checkLockBouncer } from '../middlewares/authMiddleware';
 
 const router = Router();
+
+// Google Sheets Attendance Integration routes
+router.get('/google-sheet/auth', requireAuth, requireAdmin, GoogleAttendanceSheetController.getAuthUrl);
+router.get('/google-sheet/callback', GoogleAttendanceSheetController.handleAuthCallback);
+router.get('/google-sheet', requireAuth, GoogleAttendanceSheetController.getOrCreateSheet);
+router.post('/google-sheet/sync', requireAuth, requireAdmin, GoogleAttendanceSheetController.syncSheet);
 
 router.get('/records', requireAuth, AttendanceController.getRecords);
 router.post('/records', requireAuth, requireAdmin, AttendanceController.upsertRecords);
