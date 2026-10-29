@@ -6,6 +6,7 @@ validateJwtConfig();
 import { pool, checkDbHealth } from './db/pool';
 import { OracleStorageService } from './services/oracleStorageService';
 import { CompanyService } from './services/companyService';
+import { GoogleAttendanceSheetService } from './services/googleAttendanceSheetService';
 import { withTimeout } from './utils/timeoutHelper';
 
 const PORT = parseInt(env.PORT, 10) || 5000;
@@ -33,6 +34,12 @@ async function warmupConnections() {
     await CompanyService.syncCompanySequences();
   } catch (err: any) {
     console.warn('⚠️ Sequence sync warning:', err.message);
+  }
+
+  try {
+    await GoogleAttendanceSheetService.ensureTablesExist();
+  } catch (err: any) {
+    console.warn('⚠️ Google attendance tables init warning:', err.message);
   }
 
   try {

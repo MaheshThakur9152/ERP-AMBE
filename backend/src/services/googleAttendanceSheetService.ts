@@ -17,6 +17,57 @@ export interface GoogleSheetSyncResult {
 }
 
 export class GoogleAttendanceSheetService {
+  private static tablesInitialized = false;
+
+  public static getEffectiveRedirectUri(): string {
+    if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
+    if (env.GOOGLE_REDIRECT_URI && env.GOOGLE_REDIRECT_URI !== 'https://developers.google.com/oauthplayground') {
+      return env.GOOGLE_REDIRECT_URI;
+    }
+    const base = (env.FRONTEND_URL || env.CLIENT_URL || 'https://admin.ambeservice.com').replace(/\/+$/, '');
+    return `${base}/api/attendance/google-sheet/callback`;
+  }
+
+  public static async ensureTablesExist(): Promise<void> {
+    if (this.tablesInitialized) return;
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS public.google_attendance_sheets (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          company_id uuid REFERENCES public.companies(id) ON DELETE CASCADE,
+          site_id uuid REFERENCES public.sites(id) ON DELETE CASCADE,
+          month text NOT NULL,
+          year text NOT NULL,
+          spreadsheet_id text NOT NULL,
+          spreadsheet_url text NOT NULL,
+          template_file_id text,
+          sync_status text NOT NULL DEFAULT 'synced',
+          last_synced_at timestamptz DEFAULT NOW(),
+          last_error text,
+          metadata jsonb DEFAULT '{}'::jsonb,
+          created_at timestamptz DEFAULT NOW(),
+          updated_at timestamptz DEFAULT NOW(),
+          CONSTRAINT uq_google_attendance_site_month_year UNIQUE (site_id, month, year)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_google_att_sheets_lookup ON public.google_attendance_sheets(site_id, month, year);
+
+        CREATE TABLE IF NOT EXISTS public.google_integration_tokens (
+          id text PRIMARY KEY DEFAULT 'attendance_oauth',
+          refresh_token text NOT NULL,
+          access_token text,
+          expiry_date bigint,
+          scope text,
+          created_at timestamptz DEFAULT NOW(),
+          updated_at timestamptz DEFAULT NOW()
+        );
+      `);
+      this.tablesInitialized = true;
+    } catch (err: any) {
+      console.warn('⚠️ Auto-init google_attendance_sheets warning:', err.message);
+    }
+  }
+
   /**
    * Resolve an authorized OAuth2 or Service Account client.
    * Priority:
@@ -35,7 +86,7 @@ export class GoogleAttendanceSheetService {
         const oauth2Client = new google.auth.OAuth2(
           env.GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID,
           env.GOOGLE_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET,
-          env.GOOGLE_REDIRECT_URI || process.env.GOOGLE_REDIRECT_URI || 'https://developers.google.com/oauthplayground'
+          this.getEffectiveRedirectUri()
         );
         oauth2Client.setCredentials({ refresh_token: tokenRes.rows[0].refresh_token });
         return { auth: oauth2Client, type: 'oauth' };
@@ -50,7 +101,7 @@ export class GoogleAttendanceSheetService {
       const oauth2Client = new google.auth.OAuth2(
         env.GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID,
         env.GOOGLE_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET,
-        env.GOOGLE_REDIRECT_URI || process.env.GOOGLE_REDIRECT_URI || 'https://developers.google.com/oauthplayground'
+        this.getEffectiveRedirectUri()
       );
       oauth2Client.setCredentials({ refresh_token: envRefreshToken });
       return { auth: oauth2Client, type: 'oauth' };
@@ -81,7 +132,7 @@ export class GoogleAttendanceSheetService {
   public static getAuthUrl(state = ''): string {
     const clientId = env.GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
     const clientSecret = env.GOOGLE_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET;
-    const redirectUri = env.GOOGLE_REDIRECT_URI || process.env.GOOGLE_REDIRECT_URI || 'https://developers.google.com/oauthplayground';
+    const redirectUri = this.getEffectiveRedirectUri();
 
     if (!clientId || !clientSecret) {
       throw new Error('GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be configured to generate an authorization URL.');
@@ -106,7 +157,7 @@ export class GoogleAttendanceSheetService {
   public static async handleOAuthCallback(code: string): Promise<void> {
     const clientId = env.GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
     const clientSecret = env.GOOGLE_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET;
-    const redirectUri = env.GOOGLE_REDIRECT_URI || process.env.GOOGLE_REDIRECT_URI || 'https://developers.google.com/oauthplayground';
+    const redirectUri = this.getEffectiveRedirectUri();
 
     const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
     const { tokens } = await oauth2Client.getToken(code);
@@ -188,37 +239,42 @@ export class GoogleAttendanceSheetService {
     yearStr: string,
     user?: AuthUser
   ): Promise<{ spreadsheetId: string; spreadsheetUrl: string; lastSyncedAt?: string; status?: string } | null> {
-    const siteRes = await pool.query('SELECT company_id FROM public.sites WHERE id = $1 LIMIT 1;', [siteId]);
-    if (!siteRes.rows || siteRes.rows.length === 0) {
+    try {
+      await this.ensureTablesExist();
+
+      const siteRes = await pool.query('SELECT company_id FROM public.sites WHERE id = $1 LIMIT 1;', [siteId]);
+      if (!siteRes.rows || siteRes.rows.length === 0) {
+        return null;
+      }
+      const site = siteRes.rows[0];
+
+      const userCompanyId = user?.company_id || user?.companyId;
+      if (user && user.role !== 'superadmin' && userCompanyId && site.company_id && site.company_id !== userCompanyId) {
+        return null;
+      }
+
+      const existingRes = await pool.query(
+        `SELECT spreadsheet_id, spreadsheet_url, last_synced_at, sync_status
+         FROM public.google_attendance_sheets
+         WHERE site_id = $1 AND month = $2 AND year = $3 LIMIT 1;`,
+        [siteId, monthStr, yearStr]
+      );
+
+      if (existingRes.rows && existingRes.rows.length > 0) {
+        const row = existingRes.rows[0];
+        return {
+          spreadsheetId: row.spreadsheet_id,
+          spreadsheetUrl: row.spreadsheet_url,
+          lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at).toISOString() : undefined,
+          status: row.sync_status,
+        };
+      }
+
+      return null;
+    } catch (err: any) {
+      console.warn('⚠️ getExistingSpreadsheet safe fallback to null:', err.message);
       return null;
     }
-    const site = siteRes.rows[0];
-
-    const userCompanyId = user?.company_id || user?.companyId;
-    if (user && user.role !== 'superadmin' && userCompanyId && site.company_id && site.company_id !== userCompanyId) {
-      const err: any = new Error('Access denied: Unauthorized site access');
-      err.statusCode = 403;
-      throw err;
-    }
-
-    const existingRes = await pool.query(
-      `SELECT spreadsheet_id, spreadsheet_url, last_synced_at, sync_status
-       FROM public.google_attendance_sheets
-       WHERE site_id = $1 AND month = $2 AND year = $3 LIMIT 1;`,
-      [siteId, monthStr, yearStr]
-    );
-
-    if (existingRes.rows && existingRes.rows.length > 0) {
-      const row = existingRes.rows[0];
-      return {
-        spreadsheetId: row.spreadsheet_id,
-        spreadsheetUrl: row.spreadsheet_url,
-        lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at).toISOString() : undefined,
-        status: row.sync_status,
-      };
-    }
-
-    return null;
   }
 
   /**
