@@ -97,6 +97,8 @@ services:
       dockerfile: Dockerfile
     container_name: erp-backend
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 5000
@@ -112,6 +114,15 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       CLIENT_URL: ${CLIENT_URL:-http://localhost,http://localhost:5173}
       FRONTEND_URL: ${FRONTEND_URL:-http://localhost,http://localhost:5173}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-https://admin.ambeservice.com/api/attendance/google-sheet/callback}
+      GOOGLE_REFRESH_TOKEN: ${GOOGLE_REFRESH_TOKEN:-}
+      DRIVE_ATTENDANCE_FOLDER_ID: ${DRIVE_ATTENDANCE_FOLDER_ID:-13-QiXNmxhFrvS3GCzfPU4U_4EcO4VhzS}
+      GOOGLE_ATTENDANCE_TEMPLATE_SPREADSHEET_ID: ${GOOGLE_ATTENDANCE_TEMPLATE_SPREADSHEET_ID:-}
+      GCP_CLIENT_EMAIL: ${GCP_CLIENT_EMAIL:-}
+      GCP_PRIVATE_KEY: ${GCP_PRIVATE_KEY:-}
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID:-}
     ports:
       - "5000:5000"
     networks:

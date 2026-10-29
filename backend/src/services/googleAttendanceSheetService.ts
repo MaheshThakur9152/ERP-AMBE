@@ -20,13 +20,18 @@ export class GoogleAttendanceSheetService {
   private static tablesInitialized = false;
 
   public static getEffectiveRedirectUri(): string {
-    if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
-    if (env.GOOGLE_REDIRECT_URI && env.GOOGLE_REDIRECT_URI !== 'https://developers.google.com/oauthplayground') {
-      return env.GOOGLE_REDIRECT_URI;
+    const directUri = process.env.GOOGLE_REDIRECT_URI || env.GOOGLE_REDIRECT_URI;
+    if (directUri && directUri !== 'https://developers.google.com/oauthplayground') {
+      return directUri.trim();
     }
-    const raw = env.FRONTEND_URL || env.CLIENT_URL || 'https://admin.ambeservice.com';
-    const firstOrigin = raw.split(',')[0].trim().replace(/\/+$/, '');
-    return `${firstOrigin}/api/attendance/google-sheet/callback`;
+    const raw = env.FRONTEND_URL || env.CLIENT_URL || '';
+    const origins = raw.split(',').map((s) => s.trim().replace(/\/+$/, '')).filter(Boolean);
+    const primary =
+      origins.find((o) => o.includes('admin.ambeservice.com')) ||
+      origins.find((o) => o.startsWith('https://')) ||
+      origins[0] ||
+      'https://admin.ambeservice.com';
+    return `${primary}/api/attendance/google-sheet/callback`;
   }
 
   public static async ensureTablesExist(): Promise<void> {
@@ -66,6 +71,15 @@ export class GoogleAttendanceSheetService {
       this.tablesInitialized = true;
     } catch (err: any) {
       console.warn('⚠️ Auto-init google_attendance_sheets warning:', err.message);
+    }
+  }
+
+  public static async clearStoredToken(): Promise<void> {
+    try {
+      await pool.query('DELETE FROM public.google_integration_tokens WHERE id = $1;', ['attendance_oauth']);
+      console.log('🧹 Purged invalid Google OAuth token from DB');
+    } catch (err: any) {
+      console.warn('⚠️ [GoogleAuth] Failed to purge stored token:', err.message);
     }
   }
 

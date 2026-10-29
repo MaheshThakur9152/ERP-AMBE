@@ -2,6 +2,8 @@ import dotenv from 'dotenv';
 import path from 'path';
 
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 export const env = {
   PORT: process.env.PORT || '5000',
@@ -20,7 +22,7 @@ export const env = {
   GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || '',
   GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET || '',
   GOOGLE_REFRESH_TOKEN: process.env.GOOGLE_REFRESH_TOKEN || '',
-  GOOGLE_REDIRECT_URI: process.env.GOOGLE_REDIRECT_URI || 'https://developers.google.com/oauthplayground',
+  GOOGLE_REDIRECT_URI: process.env.GOOGLE_REDIRECT_URI || 'https://admin.ambeservice.com/api/attendance/google-sheet/callback',
   MINIO_ENDPOINT: process.env.MINIO_ENDPOINT || '',
   MINIO_PUBLIC_ENDPOINT: process.env.MINIO_PUBLIC_ENDPOINT || process.env.MINIO_PUBLIC_URL || '',
   MINIO_ACCESS_KEY: process.env.MINIO_ACCESS_KEY || '',

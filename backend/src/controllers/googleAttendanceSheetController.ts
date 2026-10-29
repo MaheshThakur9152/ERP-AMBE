@@ -21,6 +21,9 @@ function parseGoogleError(error: any): { status: number; message: string; requir
     error?.code === 401 ||
     error?.code === 'AUTH_REQUIRED'
   ) {
+    if (fullMsg.includes('invalid_grant') || fullMsg.includes('Token has been expired or revoked')) {
+      GoogleAttendanceSheetService.clearStoredToken().catch(() => {});
+    }
     let authUrl: string | undefined;
     try {
       authUrl = GoogleAttendanceSheetService.getAuthUrl('/attendance');
@@ -147,14 +150,24 @@ export class GoogleAttendanceSheetController {
 
       await GoogleAttendanceSheetService.handleOAuthCallback(code);
 
-      const rawFrontend = env.FRONTEND_URL || env.CLIENT_URL || 'https://admin.ambeservice.com';
-      const frontendUrl = rawFrontend.split(',')[0].trim().replace(/\/+$/, '');
+      const rawFrontend = env.FRONTEND_URL || env.CLIENT_URL || '';
+      const origins = rawFrontend.split(',').map((s) => s.trim().replace(/\/+$/, '')).filter(Boolean);
+      const frontendUrl =
+        origins.find((o) => o.includes('admin.ambeservice.com')) ||
+        origins.find((o) => o.startsWith('https://')) ||
+        origins[0] ||
+        'https://admin.ambeservice.com';
       const redirectTarget = `${frontendUrl}${state.startsWith('/') ? state : `/${state}`}?google_auth=success`;
       res.redirect(redirectTarget);
     } catch (error: any) {
       console.error('❌ Google OAuth callback error:', error.message);
-      const rawFrontend = env.FRONTEND_URL || env.CLIENT_URL || 'https://admin.ambeservice.com';
-      const frontendUrl = rawFrontend.split(',')[0].trim().replace(/\/+$/, '');
+      const rawFrontend = env.FRONTEND_URL || env.CLIENT_URL || '';
+      const origins = rawFrontend.split(',').map((s) => s.trim().replace(/\/+$/, '')).filter(Boolean);
+      const frontendUrl =
+        origins.find((o) => o.includes('admin.ambeservice.com')) ||
+        origins.find((o) => o.startsWith('https://')) ||
+        origins[0] ||
+        'https://admin.ambeservice.com';
       res.redirect(`${frontendUrl}/attendance?google_auth_error=${encodeURIComponent(error.message)}`);
     }
   }
