@@ -143,13 +143,14 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
     const selectedCompany = companies.find((c) => c.id === selectedCompanyId) || companies[0];
     if (!selectedCompany) return;
 
+    const isAsf = selectedCompany.entity_code === 'ASF' || selectedCompany.name?.includes('ASF') || selectedCompany.name?.includes('AMBE SERVICE FACILITIES');
     if (invoiceType === 'Proforma Invoice') {
-      const prefix = selectedCompany.proforma_prefix || 'AS/P/26-27/';
+      const prefix = selectedCompany.proforma_prefix || (isAsf ? 'ASF/P/26-27/' : 'AS/P/26-27/');
       const seq = (selectedCompany.proforma_sequence ?? 0) + 1;
       const formattedSeq = String(seq).padStart(3, '0');
       setInvoiceNo(`${prefix}${formattedSeq}`);
     } else {
-      const prefix = selectedCompany.tax_prefix || 'AS/26-27/';
+      const prefix = selectedCompany.tax_prefix || (isAsf ? 'ASF/26-27/' : 'AS/26-27/');
       const seq = (selectedCompany.tax_sequence ?? 0) + 1;
       const formattedSeq = String(seq).padStart(3, '0');
       setInvoiceNo(`${prefix}${formattedSeq}`);

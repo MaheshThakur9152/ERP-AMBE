@@ -205,11 +205,25 @@ export class GoogleAttendanceSheetService {
   }
 
   /**
+   * Helper: Column index to A1 notation letter
+   */
+  public static getColumnLetter(colIndex1Based: number): string {
+    let temp = colIndex1Based;
+    let letter = '';
+    while (temp > 0) {
+      const mod = (temp - 1) % 26;
+      letter = String.fromCharCode(65 + mod) + letter;
+      temp = Math.floor((temp - mod) / 26);
+    }
+    return letter;
+  }
+
+  /**
    * Helper: Find template file in the attendance folder
    */
   public static async findTemplateFile(drive: any, folderId: string): Promise<{ id: string; name: string; isNative: boolean }> {
     // 1. Check if configured explicitly
-    const explicitTemplateId = process.env.GOOGLE_ATTENDANCE_TEMPLATE_SPREADSHEET_ID;
+    const explicitTemplateId = process.env.GOOGLE_ATTENDANCE_TEMPLATE_SPREADSHEET_ID || env.GOOGLE_ATTENDANCE_TEMPLATE_SPREADSHEET_ID;
     if (explicitTemplateId) {
       try {
         const meta = await drive.files.get({ fileId: explicitTemplateId, fields: 'id, name, mimeType', supportsAllDrives: true });
@@ -218,40 +232,63 @@ export class GoogleAttendanceSheetService {
           name: meta.data.name!,
           isNative: meta.data.mimeType === 'application/vnd.google-apps.spreadsheet',
         };
-      } catch {
-        // Fallback to searching the folder
+      } catch (err: any) {
+        console.warn('⚠️ Explicit template ID check failed, falling back to folder search:', err.message);
       }
     }
 
-    // 2. Search folder for native sheet or xlsx
-    const res = await drive.files.list({
-      q: `'${folderId}' in parents and trashed = false`,
-      fields: 'files(id, name, mimeType, modifiedTime)',
-      supportsAllDrives: true,
-      includeItemsFromAllDrives: true,
-    });
+    // 2. Search folder (and fallback reference folder) excluding generated monthly sheets
+    const searchFolders = [folderId, '1F8dSiX-kDjyNnGjWc83rrV8wiTkwJVZf'].filter(Boolean);
+    for (const fId of searchFolders) {
+      try {
+        const res = await drive.files.list({
+          q: `'${fId}' in parents and trashed = false`,
+          fields: 'files(id, name, mimeType, modifiedTime)',
+          supportsAllDrives: true,
+          includeItemsFromAllDrives: true,
+        });
 
-    const files = res.data.files || [];
-    // Prefer native sheet template first
-    const nativeSheet = files.find((f: any) => f.mimeType === 'application/vnd.google-apps.spreadsheet');
-    if (nativeSheet) {
-      return { id: nativeSheet.id!, name: nativeSheet.name!, isNative: true };
+        const files = (res.data.files || []).filter((f: any) => !f.name?.startsWith('Attendance -'));
+
+        // Look specifically for approved master template files
+        const preferred = files.find((f: any) => {
+          const n = (f.name || '').toLowerCase();
+          return (
+            n.includes('template') ||
+            n.includes('ajmera september') ||
+            n.includes('ambe_attendance') ||
+            n.includes('master')
+          );
+        });
+
+        if (preferred) {
+          return {
+            id: preferred.id!,
+            name: preferred.name!,
+            isNative: preferred.mimeType === 'application/vnd.google-apps.spreadsheet',
+          };
+        }
+
+        // Native Google Sheet that is not an output file
+        const nativeSheet = files.find((f: any) => f.mimeType === 'application/vnd.google-apps.spreadsheet');
+        if (nativeSheet) {
+          return { id: nativeSheet.id!, name: nativeSheet.name!, isNative: true };
+        }
+
+        // XLSX template file
+        const xlsxFile = files.find((f: any) =>
+          f.mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+          f.name?.endsWith('.xlsx')
+        );
+        if (xlsxFile) {
+          return { id: xlsxFile.id!, name: xlsxFile.name!, isNative: false };
+        }
+      } catch (fErr: any) {
+        console.warn(`⚠️ Search in folder ${fId} warning:`, fErr.message);
+      }
     }
 
-    // Otherwise use xlsx template
-    const xlsxFile = files.find((f: any) =>
-      f.name?.toLowerCase().includes('attendance') ||
-      f.mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    );
-    if (xlsxFile) {
-      return { id: xlsxFile.id!, name: xlsxFile.name!, isNative: false };
-    }
-
-    if (files.length > 0) {
-      return { id: files[0].id!, name: files[0].name!, isNative: false };
-    }
-
-    throw new Error(`No attendance template found in Google Drive folder: ${folderId}`);
+    throw new Error(`No attendance template found in Google Drive folders (${searchFolders.join(', ')})`);
   }
 
   /**
