@@ -90,7 +90,7 @@ export class AttendanceController {
         SELECT 
           id, staff_id, site_id, record_date::text AS record_date,
           shift_type, status, in_time, out_time, duration_hours, duration,
-          remarks, created_at, updated_at
+          '' AS remarks, created_at, updated_at
         FROM public.attendance_records 
         WHERE 1=1
       `;
