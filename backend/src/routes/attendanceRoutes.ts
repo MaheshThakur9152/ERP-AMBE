@@ -8,7 +8,7 @@ const router = Router();
 // Google Sheets Attendance Integration routes
 router.get('/google-sheet/auth', requireAuth, requireAdmin, GoogleAttendanceSheetController.getAuthUrl);
 router.get('/google-sheet/callback', GoogleAttendanceSheetController.handleAuthCallback);
-router.get('/google-sheet', requireAuth, GoogleAttendanceSheetController.getOrCreateSheet);
+router.get('/google-sheet', requireAuth, GoogleAttendanceSheetController.getExistingSheet);
 router.post('/google-sheet/sync', requireAuth, requireAdmin, GoogleAttendanceSheetController.syncSheet);
 
 router.get('/records', requireAuth, AttendanceController.getRecords);

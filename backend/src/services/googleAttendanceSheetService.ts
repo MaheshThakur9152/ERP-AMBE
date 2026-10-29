@@ -179,6 +179,49 @@ export class GoogleAttendanceSheetService {
   }
 
   /**
+   * Fast DB-only lookup to check if a spreadsheet is already registered for this site/period.
+   * Does NOT call Google APIs and never throws 500 on passive page view.
+   */
+  public static async getExistingSpreadsheet(
+    siteId: string,
+    monthStr: string,
+    yearStr: string,
+    user?: AuthUser
+  ): Promise<{ spreadsheetId: string; spreadsheetUrl: string; lastSyncedAt?: string; status?: string } | null> {
+    const siteRes = await pool.query('SELECT company_id FROM public.sites WHERE id = $1 LIMIT 1;', [siteId]);
+    if (!siteRes.rows || siteRes.rows.length === 0) {
+      return null;
+    }
+    const site = siteRes.rows[0];
+
+    const userCompanyId = user?.company_id || user?.companyId;
+    if (user && user.role !== 'superadmin' && userCompanyId && site.company_id && site.company_id !== userCompanyId) {
+      const err: any = new Error('Access denied: Unauthorized site access');
+      err.statusCode = 403;
+      throw err;
+    }
+
+    const existingRes = await pool.query(
+      `SELECT spreadsheet_id, spreadsheet_url, last_synced_at, sync_status
+       FROM public.google_attendance_sheets
+       WHERE site_id = $1 AND month = $2 AND year = $3 LIMIT 1;`,
+      [siteId, monthStr, yearStr]
+    );
+
+    if (existingRes.rows && existingRes.rows.length > 0) {
+      const row = existingRes.rows[0];
+      return {
+        spreadsheetId: row.spreadsheet_id,
+        spreadsheetUrl: row.spreadsheet_url,
+        lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at).toISOString() : undefined,
+        status: row.sync_status,
+      };
+    }
+
+    return null;
+  }
+
+  /**
    * Find or create persistent Google Spreadsheet for a given (siteId, month, year)
    */
   public static async getOrCreateSpreadsheet(
