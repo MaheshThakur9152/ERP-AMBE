@@ -24,8 +24,9 @@ export class GoogleAttendanceSheetService {
     if (env.GOOGLE_REDIRECT_URI && env.GOOGLE_REDIRECT_URI !== 'https://developers.google.com/oauthplayground') {
       return env.GOOGLE_REDIRECT_URI;
     }
-    const base = (env.FRONTEND_URL || env.CLIENT_URL || 'https://admin.ambeservice.com').replace(/\/+$/, '');
-    return `${base}/api/attendance/google-sheet/callback`;
+    const raw = env.FRONTEND_URL || env.CLIENT_URL || 'https://admin.ambeservice.com';
+    const firstOrigin = raw.split(',')[0].trim().replace(/\/+$/, '');
+    return `${firstOrigin}/api/attendance/google-sheet/callback`;
   }
 
   public static async ensureTablesExist(): Promise<void> {
