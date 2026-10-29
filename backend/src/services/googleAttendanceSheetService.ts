@@ -92,16 +92,19 @@ export class GoogleAttendanceSheetService {
         oauth2Client.setCredentials({ refresh_token: tokenRes.rows[0].refresh_token });
         return { auth: oauth2Client, type: 'oauth' };
       }
-    } catch {
-      // Ignore table read error, fallback to env
+    } catch (err: any) {
+      console.warn('⚠️ [GoogleAuth] Failed to query google_integration_tokens table:', err.message);
     }
 
     // 2. Check environment variable GOOGLE_REFRESH_TOKEN
     const envRefreshToken = env.GOOGLE_REFRESH_TOKEN || process.env.GOOGLE_REFRESH_TOKEN;
-    if (envRefreshToken && (env.GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID)) {
+    const clientId = env.GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = env.GOOGLE_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET;
+
+    if (envRefreshToken && clientId) {
       const oauth2Client = new google.auth.OAuth2(
-        env.GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID,
-        env.GOOGLE_CLIENT_SECRET || process.env.GOOGLE_CLIENT_SECRET,
+        clientId,
+        clientSecret,
         this.getEffectiveRedirectUri()
       );
       oauth2Client.setCredentials({ refresh_token: envRefreshToken });
@@ -122,6 +125,13 @@ export class GoogleAttendanceSheetService {
         ],
       });
       return { auth: jwtClient, type: 'service_account' };
+    }
+
+    // 4. If OAuth credentials exist but no refresh token is stored, require OAuth authorization
+    if (clientId && clientSecret) {
+      const err: any = new Error('Google OAuth authorization required. Please connect your Google account.');
+      err.code = 'AUTH_REQUIRED';
+      throw err;
     }
 
     throw new Error('Google Drive integration is not configured. OAuth credentials or Service Account required.');

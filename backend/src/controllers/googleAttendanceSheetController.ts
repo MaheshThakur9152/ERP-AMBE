@@ -16,13 +16,24 @@ function parseGoogleError(error: any): { status: number; message: string; requir
     fullMsg.includes('No refresh token') ||
     fullMsg.includes('Token has been expired or revoked') ||
     fullMsg.includes('unauthorized_client') ||
-    error?.code === 401
+    fullMsg.includes('OAuth authorization required') ||
+    fullMsg.includes('Google Drive integration is not configured') ||
+    error?.code === 401 ||
+    error?.code === 'AUTH_REQUIRED'
   ) {
+    let authUrl: string | undefined;
+    try {
+      authUrl = GoogleAttendanceSheetService.getAuthUrl('/attendance');
+    } catch {
+      // client credentials missing
+    }
     return {
       status: 401,
-      message: 'Google OAuth authorization required or token expired. Please connect your Google account.',
-      requiresAuth: true,
-      authUrl: GoogleAttendanceSheetService.getAuthUrl('/attendance'),
+      message: authUrl
+        ? 'Google Drive / Sheets authorization required. Please connect your Google account.'
+        : 'Google Drive integration is not configured. Google Client ID and Secret are required.',
+      requiresAuth: Boolean(authUrl),
+      authUrl,
     };
   }
 
@@ -35,11 +46,15 @@ function parseGoogleError(error: any): { status: number; message: string; requir
   }
 
   if (fullMsg.includes('storage quota') || fullMsg.includes('quota has been exceeded')) {
+    let authUrl: string | undefined;
+    try {
+      authUrl = GoogleAttendanceSheetService.getAuthUrl('/attendance');
+    } catch {}
     return {
       status: 403,
       message: "Drive storage quota exceeded: Google Service Accounts cannot create files in personal My Drive folders. Please connect via OAuth (click 'Authorize with Google') or use a Google Workspace Shared Drive.",
-      requiresAuth: true,
-      authUrl: GoogleAttendanceSheetService.getAuthUrl('/attendance'),
+      requiresAuth: Boolean(authUrl),
+      authUrl,
     };
   }
 
@@ -132,13 +147,15 @@ export class GoogleAttendanceSheetController {
 
       await GoogleAttendanceSheetService.handleOAuthCallback(code);
 
-      const frontendUrl = env.FRONTEND_URL || env.CLIENT_URL || 'http://localhost:5173';
-      const redirectTarget = `${frontendUrl.replace(/\/+$/, '')}${state.startsWith('/') ? state : `/${state}`}?google_auth=success`;
+      const rawFrontend = env.FRONTEND_URL || env.CLIENT_URL || 'https://admin.ambeservice.com';
+      const frontendUrl = rawFrontend.split(',')[0].trim().replace(/\/+$/, '');
+      const redirectTarget = `${frontendUrl}${state.startsWith('/') ? state : `/${state}`}?google_auth=success`;
       res.redirect(redirectTarget);
     } catch (error: any) {
       console.error('❌ Google OAuth callback error:', error.message);
-      const frontendUrl = env.FRONTEND_URL || env.CLIENT_URL || 'http://localhost:5173';
-      res.redirect(`${frontendUrl.replace(/\/+$/, '')}/attendance?google_auth_error=${encodeURIComponent(error.message)}`);
+      const rawFrontend = env.FRONTEND_URL || env.CLIENT_URL || 'https://admin.ambeservice.com';
+      const frontendUrl = rawFrontend.split(',')[0].trim().replace(/\/+$/, '');
+      res.redirect(`${frontendUrl}/attendance?google_auth_error=${encodeURIComponent(error.message)}`);
     }
   }
 }
