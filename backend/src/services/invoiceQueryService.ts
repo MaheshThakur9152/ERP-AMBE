@@ -1055,8 +1055,11 @@ export class InvoiceQueryService {
         throw new Error(`Only Proforma invoices can be converted to Tax Invoice. Current type: ${proforma.type}`);
       }
 
-      if (proforma.status !== 'Approved') {
-        throw new Error(`Only Approved Proforma invoices can be converted to Tax Invoice. Current status: ${proforma.status}`);
+      if (proforma.status === 'Cancelled') {
+        throw new Error(`Cannot convert cancelled Proforma invoice: ${proforma.invoice_no}`);
+      }
+      if (proforma.status === 'Converted') {
+        throw new Error(`Tax Invoice has already been generated from Proforma invoice #${proforma.invoice_no}`);
       }
 
       // Concurrency guard: Verify that a Tax Invoice has not already been created for this proforma

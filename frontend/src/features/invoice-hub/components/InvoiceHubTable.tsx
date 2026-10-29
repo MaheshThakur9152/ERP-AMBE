@@ -662,9 +662,12 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
     if (!matchesSite) return false;
 
     // 3. Status filter check
-    const status = inv.status || 'Unpaid';
+    const rawStatus = inv.status || 'Unpaid';
+    const normalizedStatus = (rawStatus === 'Pending') ? 'Unpaid' : rawStatus;
     const matchesStatus =
-      filterStatus === 'all' || status.toLowerCase() === filterStatus.toLowerCase();
+      filterStatus === 'all' ||
+      rawStatus.toLowerCase() === filterStatus.toLowerCase() ||
+      normalizedStatus.toLowerCase() === filterStatus.toLowerCase();
 
     if (!matchesStatus) return false;
 
@@ -831,8 +834,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
     try {
       const res = await convertToTaxInvoiceApi(inv.id);
       const newTaxInvoiceNo = res.data?.invoice_no || 'New Tax Invoice';
-      toast.success(`Converted to Tax Invoice ${newTaxInvoiceNo}`);
-      setActiveTab('Tax');
+      toast.success(`Converted to Tax Invoice ${newTaxInvoiceNo}. Proforma retained.`);
       await loadInvoicesFromApi();
     } catch (err: any) {
       console.error('Convert to tax error:', err);
@@ -995,7 +997,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
               <option value="all">All Status</option>
               <option value="Paid">Paid</option>
               <option value="Unpaid">Unpaid</option>
-              <option value="Approved">Approved</option>
+              <option value="Converted">Converted</option>
               <option value="Cancelled">Cancelled</option>
             </select>
 
@@ -1199,9 +1201,9 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                           <span className="bg-slate-100 text-slate-700 border border-slate-300 rounded-full text-xs font-semibold px-3 py-1 inline-block">
                             Cancelled
                           </span>
-                        ) : inv.type === 'Proforma Invoice' ? (
-                          <span className="bg-red-50 text-red-600 border border-red-100 rounded-md text-[11px] font-semibold px-3 py-1 inline-block">
-                            Submit for Approval
+                        ) : inv.status === 'Converted' ? (
+                          <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-xs font-semibold px-3 py-1 inline-block">
+                            Converted
                           </span>
                         ) : inv.status === 'Paid' ? (
                           <span className="bg-green-100 text-green-700 rounded-full text-xs font-semibold px-3 py-1 inline-block">
@@ -1231,12 +1233,17 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
                               </button>
                               <button
                                 type="button"
+                                disabled={inv.status === 'Converted'}
                                 onClick={() => handleConvertToTax(inv)}
-                                className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-colors shadow-2xs cursor-pointer"
-                                title="Convert Proforma to Tax Invoice"
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-colors shadow-2xs ${
+                                  inv.status === 'Converted'
+                                    ? 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed'
+                                    : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 cursor-pointer'
+                                }`}
+                                title={inv.status === 'Converted' ? 'Tax invoice already generated' : 'Convert Proforma to Tax Invoice'}
                               >
                                 <FileCheck size={13} />
-                                <span>Convert</span>
+                                <span>{inv.status === 'Converted' ? 'Converted' : 'Convert'}</span>
                               </button>
                             </>
                           )}
