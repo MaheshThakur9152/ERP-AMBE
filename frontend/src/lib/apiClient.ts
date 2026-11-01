@@ -252,8 +252,9 @@ export async function fetchWithRetry(
         }
       }
 
-      // Retry on 5xx server errors (e.g. transient gateway / service unavailable)
-      if (!response.ok && response.status >= 500 && attempt < retries) {
+      // Retry only transient 5xx: gateway/unavailable always; plain 500 only for GET (deterministic on writes).
+      const retryableStatus = [502, 503, 504].includes(response.status) || (response.status >= 500 && method === 'GET');
+      if (retryableStatus && attempt < retries) {
         attempt++;
         const delay = backoffMs * Math.pow(2, attempt - 1);
         console.warn(

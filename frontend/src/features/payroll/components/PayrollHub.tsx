@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { getApiUrl, fetchWithRetry } from '@/lib/apiClient';
 import {
   DollarSign,
@@ -250,7 +250,7 @@ export const PayrollHub: React.FC = () => {
         const id_card = Number(saved?.id_card || 0);
         const other_amt = Number(saved?.other_amt || 0);
         const remark = saved?.remark || '';
-        const adv_date = saved?.adv_date || '';
+        const adv_date = saved?.adv_date ? String(saved.adv_date).slice(0, 10) : '';
         const itemSum = adv_amt + shirt + pant + shoes + id_card + other_amt;
         const adv_total = Number(saved?.adv_total || (itemSum > 0 ? itemSum : (saved?.advances ?? 0)));
         const in_this_mth = saved?.in_this_mth !== undefined && saved?.in_this_mth !== null ? Number(saved.in_this_mth) : (saved?.advances ?? adv_total);
@@ -438,7 +438,16 @@ export const PayrollHub: React.FC = () => {
   }, [selectedMonth, selectedYear, selectedSiteId, daysInMonth]);
 
   // Instant Auto-Save onBlur Handler matching DB unique constraint (staff_id, month_year)
-  const handleAutoSave = async (row: EmployeePayrollRow) => {
+  // Serialize saves per row so overlapping blur/modal saves never race on the same (staff_id, month_year).
+  const saveChains = useRef(new Map<string, Promise<void>>());
+  const handleAutoSave = (row: EmployeePayrollRow) => {
+    const key = `${row.id}|${row.siteId}`;
+    const next = (saveChains.current.get(key) ?? Promise.resolve()).then(() => saveRow(row));
+    saveChains.current.set(key, next);
+    return next;
+  };
+
+  const saveRow = async (row: EmployeePayrollRow) => {
     if (!row.calc) return;
     try {
       const systemPt = row.calc.pt;
@@ -495,7 +504,7 @@ export const PayrollHub: React.FC = () => {
         id_card: row.id_card ?? 0,
         other_amt: row.other_amt ?? 0,
         remark: row.remark ?? '',
-        adv_date: row.adv_date ?? '',
+        adv_date: row.adv_date || null,
         adv_total: row.adv_total ?? (row.advances || 0),
         in_this_mth: row.in_this_mth ?? row.advances,
         in_next_mth: row.in_next_mth ?? 0,
@@ -727,7 +736,7 @@ export const PayrollHub: React.FC = () => {
           id_card: r.id_card ?? 0,
           other_amt: r.other_amt ?? 0,
           remark: r.remark ?? '',
-          adv_date: r.adv_date ?? '',
+          adv_date: r.adv_date || null,
           adv_total: r.adv_total ?? (r.advances || 0),
           in_this_mth: r.in_this_mth ?? r.advances,
           in_next_mth: r.in_next_mth ?? 0,

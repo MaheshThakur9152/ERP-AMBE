@@ -130,7 +130,7 @@ export const AdvancesHub: React.FC = () => {
   const openModal = (r: any) => {
     setActiveRecord(r);
     const aAmt = Number(r.adv_amt || 0);
-    const aDate = r.adv_date || '';
+    const aDate = r.adv_date ? String(r.adv_date).slice(0, 10) : '';
     const sh = Number(r.shirt || 0);
     const pa = Number(r.pant || 0);
     const shs = Number(r.shoes || 0);
@@ -199,7 +199,7 @@ export const AdvancesHub: React.FC = () => {
       const payload = {
         ...activeRecord,
         adv_amt: advAmt,
-        adv_date: advDate,
+        adv_date: advDate || null,
         shirt,
         pant,
         shoes,
