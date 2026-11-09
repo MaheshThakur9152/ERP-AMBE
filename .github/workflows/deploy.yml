@@ -1,13 +1,24 @@
 name: Deploy to Production
 
-# Deploys run only when an operator supplies the exact commit to release.
 on:
+  push:
+    branches:
+      - master
   workflow_dispatch:
     inputs:
       commit:
         description: 'Full 40-character commit SHA on master to deploy'
         required: true
         type: string
+      rollback:
+        description: 'Allow deploying a commit older than the one on the server'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  DEPLOY_SHA: ${{ github.event_name == 'push' && github.sha || inputs.commit }}
+  DEPLOY_ROLLBACK: ${{ inputs.rollback || 'false' }}
 
 jobs:
   verify:
@@ -17,7 +28,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.commit }}
+          ref: ${{ env.DEPLOY_SHA }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -43,39 +54,76 @@ jobs:
   deploy:
     name: Deploy to Oracle Server
     needs: verify
+    # A push only verifies, unless the owner sets repository variable AUTO_DEPLOY_ON_PUSH=true.
+    if: github.event_name == 'workflow_dispatch' || vars.AUTO_DEPLOY_ON_PUSH == 'true'
     runs-on: ubuntu-latest
     # Add required reviewers to this GitHub environment to enforce human approval.
     environment: production
     steps:
       - name: Execute Remote Deployment via SSH
         uses: appleboy/ssh-action@v1.2.0
-        env:
-          DEPLOY_SHA: ${{ inputs.commit }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          envs: DEPLOY_SHA
+          envs: DEPLOY_SHA,DEPLOY_ROLLBACK
           script: |
             set -euo pipefail
+            DEPLOY_ROOT="${DEPLOY_ROOT:-/var/www/ambeservice/ERP-AMBE}"
+            DEPLOY_HISTORY="${DEPLOY_HISTORY:-/var/www/ambeservice/.deploy-history}"
+            PREVIOUS=""
+            STARTED=""
+            DONE=""
             fail() { echo "DEPLOY ABORTED: $*" >&2; exit 1; }
-            echo "Starting deployment of ${DEPLOY_SHA}"
-            cd /var/www/ambeservice/ERP-AMBE
+            on_exit() {
+              if [ -n "$STARTED" ] && [ -z "$DONE" ]; then
+                echo "$(date -u +%FT%TZ) FAILED ${PREVIOUS} ${DEPLOY_SHA}" >> "$DEPLOY_HISTORY"
+                echo "Rollback: run this workflow with commit=${PREVIOUS} and rollback=true" >&2
+              fi
+            }
+            trap on_exit EXIT
 
+            cd "$DEPLOY_ROOT"
+            echo "Starting deployment of ${DEPLOY_SHA}"
             [[ "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]] || fail "commit must be a full 40-character SHA"
-            [ "$(git branch --show-current)" = master ] || fail "server is not on master"
+
+            # Validate the requested commit before touching the working tree.
+            git fetch origin master
+            git cat-file -e "${DEPLOY_SHA}^{commit}" 2>/dev/null || fail "commit does not exist"
+            git merge-base --is-ancestor "$DEPLOY_SHA" origin/master || fail "commit is not on origin/master"
+
+            # Inspect the current server state.
             if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
               git status --short --untracked-files=no
               fail "uncommitted changes on the server would be lost; commit or remove them first"
             fi
-
-            git fetch origin master
-            git merge-base --is-ancestor "$DEPLOY_SHA" origin/master || fail "commit is not on origin/master"
+            BRANCH="$(git branch --show-current)"
+            [ "$BRANCH" = master ] || [ -z "$BRANCH" ] || fail "server is on branch ${BRANCH}, expected master"
             PREVIOUS="$(git rev-parse HEAD)"
-            git merge-base --is-ancestor "$PREVIOUS" "$DEPLOY_SHA" || fail "server history is not an ancestor of this commit"
-            echo "$(date -u +%FT%TZ) ${PREVIOUS} ${DEPLOY_SHA}" >> /var/www/ambeservice/.deploy-history
-            git merge --ff-only "$DEPLOY_SHA"
+            git merge-base --is-ancestor "$PREVIOUS" origin/master || fail "server has commits that are not on origin/master"
+
+            if [ "$PREVIOUS" = "$DEPLOY_SHA" ]; then
+              echo "Server is already at ${DEPLOY_SHA}; nothing to deploy."
+              exit 0
+            fi
+            if git merge-base --is-ancestor "$PREVIOUS" "$DEPLOY_SHA"; then
+              git merge-base --is-ancestor master "$DEPLOY_SHA" || fail "local master is ahead of this commit"
+              MODE=forward
+            elif [ "${DEPLOY_ROLLBACK:-false}" = true ] && git merge-base --is-ancestor "$DEPLOY_SHA" "$PREVIOUS"; then
+              MODE=rollback
+            else
+              fail "commit is older than the server or unrelated; set rollback=true for a rollback"
+            fi
+
+            echo "$(date -u +%FT%TZ) START ${PREVIOUS} ${DEPLOY_SHA} ${MODE}" >> "$DEPLOY_HISTORY"
+            STARTED=1
+            if [ "$MODE" = rollback ]; then
+              git checkout -q --detach "$DEPLOY_SHA"
+            else
+              [ -n "$BRANCH" ] || git checkout -q master
+              git merge --ff-only "$DEPLOY_SHA"
+            fi
 
             # Ensure root .env exists
             if [ ! -f .env ] && [ -f backend/.env ]; then
@@ -86,14 +134,14 @@ jobs:
 
             CHANGED="$(git diff --name-only "$PREVIOUS" "$DEPLOY_SHA")"
             SERVICES=""
-            grep -q '^backend/' <<<"$CHANGED" && SERVICES="$SERVICES backend"
-            grep -q '^frontend/' <<<"$CHANGED" && SERVICES="$SERVICES frontend"
-            grep -q '^infra/backup/' <<<"$CHANGED" && SERVICES="$SERVICES backup"
+            if grep -q '^backend/' <<<"$CHANGED"; then SERVICES="$SERVICES backend"; fi
+            if grep -q '^frontend/' <<<"$CHANGED"; then SERVICES="$SERVICES frontend"; fi
+            if grep -q '^infra/backup/' <<<"$CHANGED"; then SERVICES="$SERVICES backup"; fi
             if grep -q '^infra/postgres/' <<<"$CHANGED"; then
               echo "WARNING: infra/postgres changed; the database is NOT restarted automatically."
             fi
 
-            # Rebuild only the application services this commit touches. Never removes volumes.
+            # Rebuild only the services this commit touches. Never removes volumes.
             if [ -n "$SERVICES" ]; then
               docker compose up -d --build --no-deps $SERVICES
             fi
@@ -103,19 +151,20 @@ jobs:
             fi
 
             # Health gate
-            rollback_hint() { echo "Rollback: git checkout --detach ${PREVIOUS} && docker compose up -d --build --no-deps${SERVICES}" >&2; }
             for svc in $SERVICES; do
               ok=""
               for _ in $(seq 1 60); do
-                [ "$(docker inspect -f '{{.State.Health.Status}}' "erp-${svc}")" = healthy ] && ok=1 && break
+                if [ "$(docker inspect -f '{{.State.Health.Status}}' "erp-${svc}")" = healthy ]; then ok=1; break; fi
                 sleep 3
               done
-              [ -n "$ok" ] || { rollback_hint; fail "erp-${svc} did not become healthy"; }
+              [ -n "$ok" ] || fail "erp-${svc} did not become healthy"
             done
-            curl -fsS -m 10 -o /dev/null http://127.0.0.1:5000/api/health || { rollback_hint; fail "backend health failed"; }
-            curl -fsS -m 10 -o /dev/null http://127.0.0.1:3000/ || { rollback_hint; fail "frontend health failed"; }
+            curl -fsS -m 10 -o /dev/null http://127.0.0.1:5000/api/health || fail "backend health failed"
+            curl -fsS -m 10 -o /dev/null http://127.0.0.1:3000/ || fail "frontend health failed"
 
             # Clean dangling images to preserve VPS disk space
             docker image prune -f
 
+            DONE=1
+            echo "$(date -u +%FT%TZ) OK ${PREVIOUS} ${DEPLOY_SHA} ${MODE}" >> "$DEPLOY_HISTORY"
             echo "Deployment of ${DEPLOY_SHA} completed. Previous commit: ${PREVIOUS}"

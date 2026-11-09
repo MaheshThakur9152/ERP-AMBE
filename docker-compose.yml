@@ -16,7 +16,8 @@ services:
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
       DR_S3_BUCKET: ${DR_S3_BUCKET:-erp-backups}
       DR_S3_PREFIX: ${DR_S3_PREFIX:-wal}
-      ENABLE_WAL_ARCHIVING: ${ENABLE_WAL_ARCHIVING:-true}
+      # Recovery uses nightly logical dumps; archived WAL without a base backup cannot be replayed.
+      ENABLE_WAL_ARCHIVING: "false"
       AWS_ACCESS_KEY_ID: ${MINIO_ACCESS_KEY:-minioadmin}
       AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be configured in environment}
       AWS_DEFAULT_REGION: us-east-1
@@ -186,8 +187,12 @@ services:
       AWS_SECRET_ACCESS_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY must be configured in environment}
       AWS_DEFAULT_REGION: us-east-1
       GPG_PASSPHRASE: ${GPG_PASSPHRASE:?GPG_PASSPHRASE must be configured in environment}
+      # Optional. Receives a JSON POST when a backup job fails.
+      BACKUP_ALERT_WEBHOOK_URL: ${BACKUP_ALERT_WEBHOOK_URL:-}
     volumes:
       - backups_data:/backups
+      # Holds only the public encryption key. The private key stays offline.
+      - /etc/erp-backup:/etc/erp-backup:ro
     networks:
       - erp_network
     depends_on:

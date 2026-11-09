@@ -42,8 +42,11 @@ EXIT_CODE=0
 END_TIME=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
 if [[ ${EXIT_CODE} -eq 0 ]]; then
   STATUS="SUCCESS"
+elif [[ ${EXIT_CODE} -eq 78 ]]; then
+  STATUS="SKIPPED"
 else
   STATUS="FAILED"
+  /usr/local/bin/erp_backup.py alert "${JOB_NAME}" "${EXIT_CODE}" || true
 fi
 
 echo "${END_TIME} [AUDIT] [${JOB_NAME}] ${STATUS}: exit_code=${EXIT_CODE}" | tee -a "${LOG_FILE}"

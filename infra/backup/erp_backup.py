@@ -2,26 +2,32 @@
 """ERP-AMBE backups: PostgreSQL logical dump, MinIO object snapshot, retention.
 
 Usage: erp_backup.py nightly [--dry-run-retention] | retention [--apply] |
-       restore-check | latest-pg | health
+       restore-check | latest-pg | health | alert <job> <exit-code> | encryption-selftest
 Credentials come only from the container environment and are never logged.
 """
 import datetime as dt
 import hashlib
+import io
 import json
 import os
 import re
 import secrets
 import subprocess
+import socket
 import sys
+import tarfile
 import tempfile
 import urllib.request
 from zoneinfo import ZoneInfo
 
-JOB_VERSION = "2.0.0"
+JOB_VERSION = "2.1.0"
 BUCKET = os.environ.get("DR_S3_BUCKET", "erp-backups")
 SOURCE_BUCKET = "ambeuploads"
 ENDPOINT = os.environ.get("S3_ENDPOINT_URL", "http://minio:9000")
 STATUS_FILE = "/backups/last-status.json"
+PUBLIC_KEY_FILE = os.environ.get("BACKUP_PUBLIC_KEY_FILE", "/etc/erp-backup/backup-public.asc")
+RESTORE_VERIFIED_MARKER = "config/encrypted-restore-verified"
+EXIT_SKIPPED = 78
 RETENTION = {"daily": 14, "weekly": 8, "monthly": 12}
 KINDS = ("postgresql", "minio-objects")
 MAX_STATUS_AGE_HOURS = 26
@@ -119,6 +125,31 @@ def put_manifest(prefix, manifest):
                     Body=json.dumps(manifest, indent=2, sort_keys=True).encode())
 
 
+def inspect_public_key(path):
+    """Return the key's fingerprint, refusing any file that holds private key material."""
+    with tempfile.TemporaryDirectory() as home:
+        listing = run(["gpg", "--homedir", home, "--batch", "--with-colons", "--show-keys", path])
+    if re.search(r"^(sec|ssb):", listing, re.M):
+        raise RuntimeError(f"{path} contains private key material; install only the public key")
+    match = re.search(r"^fpr:+([0-9A-F]+):", listing, re.M)
+    if not re.search(r"^pub:", listing, re.M) or not match:
+        raise RuntimeError(f"{path} is not a usable public key")
+    return match.group(1)
+
+
+def encryption_key():
+    """(path, fingerprint) when a public key is installed, else None. An invalid key raises, failing the run."""
+    if not os.path.exists(PUBLIC_KEY_FILE):
+        return None
+    return PUBLIC_KEY_FILE, inspect_public_key(PUBLIC_KEY_FILE)
+
+
+def encrypt_file(src, dest, key_path):
+    with tempfile.TemporaryDirectory() as home:
+        run(["gpg", "--homedir", home, "--batch", "--yes", "--trust-model", "always",
+             "--recipient-file", key_path, "--output", dest, "--encrypt", src])
+
+
 def backup_postgres(run_id, stamp):
     prefix = run_prefix("postgresql", "daily", stamp, run_id)
     m = {"type": "postgresql", "run_id": run_id, "job_version": JOB_VERSION, "timestamp_utc": iso(stamp),
@@ -159,10 +190,22 @@ def backup_postgres(run_id, stamp):
                                for l in sql("select extname,extversion from pg_extension order by 1").splitlines()]
             m["row_counts"] = {t: int(sql(f"select count(*) from {t}")) for t in tables}
 
-            for name, local in (("database.dump", dump), ("globals.sql", globs)):
+            key = encryption_key()
+            artifacts = [("database.dump", dump), ("globals.sql", globs)]
+            m["encryption"] = {"mode": "none"}
+            if key:
+                m["encryption"] = {"mode": "gpg-public-key", "fingerprint": key[1]}
+                encrypted = []
+                for name, local in artifacts:
+                    encrypt_file(local, f"{local}.gpg", key[0])
+                    encrypted.append((f"{name}.gpg", f"{local}.gpg"))
+                artifacts = encrypted
+                m["encrypted_sha256"] = {name: sha256_file(local) for name, local in artifacts}
+                m["encrypted_size_bytes"] = {name: os.path.getsize(local) for name, local in artifacts}
+            for name, local in artifacts:
                 s3().upload_file(local, BUCKET, prefix + name)
             v["uploaded"] = True
-            for name, local in (("database.dump", dump), ("globals.sql", globs)):
+            for name, local in artifacts:
                 check = f"{work}/verify-{name}"
                 s3().download_file(BUCKET, prefix + name, check)
                 if sha256_file(check) != sha256_file(local):
@@ -180,6 +223,57 @@ def backup_postgres(run_id, stamp):
     return m
 
 
+def build_snapshot_tar(source, tar_path):
+    """Write every source object to a tar, then re-read the tar to prove its contents."""
+    objects = []
+    with tarfile.open(tar_path, "w") as tar:
+        for key in sorted(source):
+            obj = s3().get_object(Bucket=SOURCE_BUCKET, Key=key)
+            # shortcut: holds one object in memory at a time, stream to disk if objects reach several GiB.
+            data = obj["Body"].read()
+            info = tarfile.TarInfo(key)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+            objects.append({"key": key, "size": len(data), "etag": source[key]["etag"],
+                            "sha256": hashlib.sha256(data).hexdigest(),
+                            "content_type": obj.get("ContentType"), "metadata": obj.get("Metadata")})
+    bad = []
+    with tarfile.open(tar_path) as tar:
+        for o in objects:
+            if hashlib.sha256(tar.extractfile(o["key"]).read()).hexdigest() != o["sha256"]:
+                bad.append({"key": o["key"], "problem": "sha256 in tar"})
+    return objects, bad
+
+
+def encrypted_snapshot(m, prefix, source, key):
+    m["encryption"] = {"mode": "gpg-public-key", "fingerprint": key[1]}
+    with tempfile.TemporaryDirectory() as work:
+        tar_path, listing = f"{work}/ambeuploads.tar", f"{work}/objects.json"
+        objects, bad = build_snapshot_tar(source, tar_path)
+        m["discrepancies"].extend(bad)
+        with open(listing, "w") as f:
+            json.dump(objects, f, indent=2, sort_keys=True)
+        # Object keys contain personal names, so the listing is encrypted as well.
+        artifacts = {"ambeuploads.tar.gpg": tar_path, "objects.json.gpg": listing}
+        m["encrypted_sha256"], m["encrypted_size_bytes"] = {}, {}
+        for name, local in artifacts.items():
+            out = f"{local}.gpg"
+            encrypt_file(local, out, key[0])
+            m["encrypted_sha256"][name], m["encrypted_size_bytes"][name] = sha256_file(out), os.path.getsize(out)
+            s3().upload_file(out, BUCKET, prefix + name)
+            s3().download_file(BUCKET, prefix + name, f"{out}.verify")
+            if sha256_file(f"{out}.verify") != m["encrypted_sha256"][name]:
+                raise RuntimeError(f"SHA-256 mismatch after download of {name}")
+    m["source_object_count"], m["dest_object_count"] = len(source), len(objects)
+    m["source_total_bytes"] = sum(o["size"] for o in source.values())
+    m["dest_total_bytes"] = sum(o["size"] for o in objects)
+    m["verification"] = "plaintext tar re-read and hashed before encryption; ciphertext SHA-256 compared after download"
+    if not bad and m["source_total_bytes"] == m["dest_total_bytes"]:
+        m["status"] = "SUCCESS"
+    else:
+        m["errors"].append(f"{len(bad)} discrepancies")
+
+
 def snapshot_minio(run_id, stamp):
     prefix = run_prefix("minio-objects", "daily", stamp, run_id)
     dest_root = prefix + SOURCE_BUCKET + "/"
@@ -189,6 +283,13 @@ def snapshot_minio(run_id, stamp):
     try:
         require_new_prefix(prefix)
         source = list_objects(SOURCE_BUCKET)
+        key = encryption_key()
+        if key:
+            log(f"minio: encrypting snapshot of {len(source)} objects")
+            encrypted_snapshot(m, prefix, source, key)
+            put_manifest(prefix, m)
+            return m
+        m["encryption"] = {"mode": "none"}
         log(f"minio: copying {len(source)} objects")
         for key in source:
             # shortcut: CopyObject caps at 5 GiB per object, add multipart copy if uploads ever reach that.
@@ -273,7 +374,7 @@ def plan_retention(runs, keep):
 
 
 def discover_runs(kind, tier):
-    runs = {}
+    runs, plaintext = {}, set()
     for key in list_objects(BUCKET, f"{kind}/{tier}/"):
         if not MANAGED_KEY.match(key):
             continue
@@ -283,19 +384,32 @@ def discover_runs(kind, tier):
     for run_id, run_dir in runs.items():
         try:
             body = s3().get_object(Bucket=BUCKET, Key=run_dir + "manifest.json")["Body"].read()
-            ok = json.loads(body).get("status") == "SUCCESS"
+            manifest = json.loads(body)
+            ok = manifest.get("status") == "SUCCESS"
+            if manifest.get("encryption", {}).get("mode", "none") == "none":
+                plaintext.add(run_id)
         except s3().exceptions.NoSuchKey:
             ok = False
         states.append((run_id, ok))
-    return runs, states
+    return runs, states, plaintext
+
+
+def keep_plaintext_runs():
+    """Unencrypted runs stay until the owner proves an encrypted restore and writes the marker."""
+    if not encryption_key():
+        return False
+    return not list_objects(BUCKET, RESTORE_VERIFIED_MARKER)
 
 
 def retention(apply):
     report = []
+    protect_plaintext = keep_plaintext_runs()
     for kind in KINDS:
         for tier, keep in RETENTION.items():
-            runs, states = discover_runs(kind, tier)
+            runs, states, plaintext = discover_runs(kind, tier)
             doomed = plan_retention(states, keep)
+            if protect_plaintext:
+                doomed = [r for r in doomed if r not in plaintext]
             log(f"retention {'APPLY' if apply else 'DRY-RUN'} {kind}/{tier}: runs={len(states)} "
                 f"successful={sum(ok for _, ok in states)} keep={keep} delete={len(doomed)}")
             for run_id in doomed:
@@ -359,42 +473,119 @@ def nightly(dry_run_retention):
         f"postgresql={pg['status']} minio={mi['status']} errors={len(status['errors'])}")
     for err in status["errors"]:
         log(f"ERROR {err}")
+    print(json.dumps({"event": "backup_run", "run_id": run_id, "status": status["status"],
+                      "postgresql": pg["status"], "minio_objects": mi["status"],
+                      "encrypted": pg.get("encryption", {}).get("mode", "none") != "none",
+                      "duration_seconds": status["duration_seconds"], "error_count": len(status["errors"])}), flush=True)
     return 0 if status["status"] == "SUCCESS" else 1
 
 
 def latest_success(kind):
-    runs, states = discover_runs(kind, "daily")
+    runs, states, plaintext = discover_runs(kind, "daily")
     good = sorted((r for r, ok in states if ok), reverse=True)
     if not good:
         raise SystemExit(f"no successful {kind} backup found")
+    if good[0] not in plaintext:
+        print(f"SKIPPED: newest {kind} backup is encrypted; restore it with the offline private key", file=sys.stderr)
+        raise SystemExit(EXIT_SKIPPED)
     return runs[good[0]]
 
 
 def restore_check():
-    """Restore representative objects from the newest snapshot into a temp dir, never over production."""
+    """Restore every object of the newest snapshot into a temp dir and verify it. Never touches production."""
     prefix = latest_success("minio-objects")
     manifest = json.loads(s3().get_object(Bucket=BUCKET, Key=prefix + "manifest.json")["Body"].read())
-    objects = sorted(manifest["objects"], key=lambda o: o["size"])
-    by_area = {o["key"].split("/")[0]: o for o in objects}
-    sample = {o["key"]: o for o in [objects[0], objects[-1], *by_area.values()]}
-    failures = 0
+    root = prefix + SOURCE_BUCKET + "/"
+    objects = manifest["objects"]
+    stored = {k[len(root):]: v for k, v in list_objects(BUCKET, root).items()}
+    failures = [f"key {k}" for k in sorted(set(stored) ^ {o["key"] for o in objects})]
     with tempfile.TemporaryDirectory() as work:
-        for i, o in enumerate(sample.values()):
-            key = prefix + SOURCE_BUCKET + "/" + o["key"]
+        for i, o in enumerate(objects):
+            key = root + o["key"]
             local = f"{work}/{i}"
             s3().download_file(BUCKET, key, local)
             head = s3().head_object(Bucket=BUCKET, Key=key)
             url = s3().generate_presigned_url("get_object", Params={"Bucket": BUCKET, "Key": key}, ExpiresIn=60)
             with urllib.request.urlopen(url, timeout=30) as resp:
-                served = resp.read()
-                served_type = resp.headers.get("Content-Type")
-            ok = (os.path.getsize(local) == o["size"] and sha256_file(local) == o["sha256"]
-                  and hashlib.sha256(served).hexdigest() == o["sha256"] and served_type == o["content_type"]
-                  and head.get("Metadata") == o["metadata"])
-            failures += not ok
-            log(f"restore-check {'OK' if ok else 'FAILED'} area={o['key'].split('/')[0]} size={o['size']} type={served_type}")
-    log(f"restore-check from {prefix}: {len(sample)} objects, {failures} failures")
+                served, served_type = resp.read(), resp.headers.get("Content-Type")
+            problems = [name for name, good in (
+                ("size", os.path.getsize(local) == o["size"] and stored.get(o["key"], {}).get("size") == o["size"]),
+                ("sha256", sha256_file(local) == o["sha256"]),
+                ("served-content", hashlib.sha256(served).hexdigest() == o["sha256"]),
+                ("content-type", served_type == o["content_type"]),
+                ("metadata", head.get("Metadata") == o["metadata"]),
+            ) if not good]
+            if problems:
+                failures.append(f"object #{i} area={o['key'].split('/')[0]}: {','.join(problems)}")
+    for failure in failures:
+        log(f"restore-check FAILED {failure}")
+    log(f"restore-check from {prefix}: objects={len(objects)} bytes={sum(o['size'] for o in objects)} "
+        f"checked=keys,size,sha256,content,content-type,metadata failures={len(failures)}")
     return 1 if failures else 0
+
+
+def encryption_selftest():
+    """Round-trip real data through the encryption code with a throwaway key pair.
+
+    Nothing is uploaded, and the key pair is destroyed on exit: it is not a backup key.
+    """
+    with tempfile.TemporaryDirectory() as work:
+        home = f"{work}/gnupg"
+        os.mkdir(home, 0o700)
+        gpg = ["gpg", "--homedir", home, "--batch", "--pinentry-mode", "loopback", "--passphrase", ""]
+        run([*gpg, "--quick-generate-key", "erp-backup-selftest", "default", "default", "never"])
+        public, private = f"{work}/public.asc", f"{work}/private.asc"
+        run([*gpg, "--armor", "--output", public, "--export"])
+        run([*gpg, "--armor", "--output", private, "--export-secret-keys"])
+        inspect_public_key(public)
+        try:
+            inspect_public_key(private)
+            raise AssertionError("private key was accepted")
+        except RuntimeError:
+            log("selftest: private key file correctly rejected")
+
+        dump, tar_path = f"{work}/database.dump", f"{work}/ambeuploads.tar"
+        run(["pg_dump", *pg_args(), "-d", pg_db(), "-Fc", "-f", dump])
+        objects, bad = build_snapshot_tar(list_objects(SOURCE_BUCKET), tar_path)
+        assert not bad, bad
+        for path in (dump, tar_path):
+            encrypt_file(path, f"{path}.gpg", public)
+            with open(f"{path}.gpg", "rb") as f:
+                assert f.read(4096) != open(path, "rb").read(4096), "ciphertext equals plaintext"
+            run([*gpg, "--output", f"{path}.out", "--decrypt", f"{path}.gpg"])
+            assert sha256_file(f"{path}.out") == sha256_file(path), f"round trip changed {path}"
+        run(["pg_restore", "--list", f"{dump}.out"])
+        with tarfile.open(f"{tar_path}.out") as tar:
+            for o in objects:
+                assert hashlib.sha256(tar.extractfile(o["key"]).read()).hexdigest() == o["sha256"], "object changed"
+        log(f"selftest PASSED: dump and {len(objects)} objects decrypted byte-identical")
+    return 0
+
+
+def alert(job, code):
+    """POST a failure notice to BACKUP_ALERT_WEBHOOK_URL. The URL itself is never logged."""
+    payload = {"event": "backup_failure", "job": job, "exit_code": int(code), "host": socket.gethostname(),
+               "timestamp_utc": iso(now())}
+    try:
+        with open(STATUS_FILE) as f:
+            status = json.load(f)
+        payload.update(run_id=status.get("run_id"), status=status.get("status"), errors=status.get("errors", [])[:5])
+    except (OSError, ValueError):
+        pass
+    print(json.dumps(payload), flush=True)
+    url = os.environ.get("BACKUP_ALERT_WEBHOOK_URL")
+    if not url:
+        log("alert channel not configured; failure recorded in logs and container health only")
+        return 0
+    try:
+        req = urllib.request.Request(url, data=json.dumps(payload).encode(),
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            log(f"alert delivered, HTTP {resp.status}")
+    except Exception as e:
+        log(f"alert delivery FAILED: {type(e).__name__}")
+        return 1
+    return 0
 
 
 def health():
@@ -424,6 +615,10 @@ def main(argv):
         return 0
     if cmd == "health":
         return health()
+    if cmd == "alert":
+        return alert(argv[2], argv[3])
+    if cmd == "encryption-selftest":
+        return encryption_selftest()
     print(__doc__, file=sys.stderr)
     return 2
 
