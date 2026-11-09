@@ -13,7 +13,7 @@ JOB_NAME="$1"
 shift
 CMD=("$@")
 
-LOG_FILE="/var/log/backup-jobs.log"
+LOG_FILE="/backups/backup-jobs.log"
 LOCK_FILE="/tmp/job_${JOB_NAME}.lock"
 mkdir -p "$(dirname "$LOG_FILE")"
 

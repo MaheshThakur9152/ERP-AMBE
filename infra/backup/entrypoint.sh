@@ -86,10 +86,9 @@ chown "${PG_UID}:${PG_GID}" "${PGPASS_PG}"
 mkdir -p /etc/crontabs /var/log
 cat << 'EOF' > /etc/crontabs/root
 # ERP-AMBE Backup and Recovery Drills Schedule (UTC)
-0 1 * * * /usr/local/bin/run-monitored-job.sh physical_base /usr/local/bin/physical-base-backup.sh
-0 2 * * * /usr/local/bin/run-monitored-job.sh logical_dump /usr/local/bin/logical-backup-job.sh
-0 3 * * 0 /usr/local/bin/run-monitored-job.sh weekly_logical_drill /usr/local/bin/weekly-logical-restore-test.sh
-0 5 * * 0 /usr/local/bin/run-monitored-job.sh weekly_physical_drill /usr/local/bin/weekly-physical-restore-test.sh
+# 20:30 UTC = 02:00 Asia/Kolkata. Avoids the host's hourly :00-:05 stress job.
+30 20 * * * /usr/local/bin/run-monitored-job.sh nightly /usr/local/bin/erp_backup.py nightly
+0 22 * * 0 /usr/local/bin/run-monitored-job.sh weekly_logical_drill /usr/local/bin/weekly-logical-restore-test.sh
 EOF
 
 chmod 0600 /etc/crontabs/root

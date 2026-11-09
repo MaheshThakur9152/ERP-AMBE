@@ -1,33 +1,27 @@
-# ==============================================================================
-# Enterprise Facility Management ERP — Host Nginx Dual Reverse Proxy
-# Target: /etc/nginx/sites-available/default
-# ==============================================================================
-
-# 1. FRONTEND: admin.ambeservice.com & Fallback -> Docker Port 3000
 server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
-    server_name admin.ambeservice.com app.ambeservice.com _;
-
-    client_max_body_size 50M;
-
-    gzip on;
-    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+    server_name api.ambeservice.com;
+    client_max_body_size 100M;
 
     location / {
-        proxy_pass http://127.0.0.1:3000;
+        proxy_pass http://127.0.0.1:5000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
     }
+
+    listen 443 ssl; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/api.ambeservice.com/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/api.ambeservice.com/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+
 }
 
-# 2. BACKEND API: api.ambeservice.com -> Docker Port 5000
 server {
     listen 80;
     listen [::]:80;

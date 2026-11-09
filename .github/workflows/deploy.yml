@@ -1,10 +1,13 @@
 name: Deploy to Production
 
+# Deploys run only when an operator supplies the exact commit to release.
 on:
-  push:
-    branches:
-      - master
   workflow_dispatch:
+    inputs:
+      commit:
+        description: 'Full 40-character commit SHA on master to deploy'
+        required: true
+        type: string
 
 jobs:
   verify:
@@ -13,6 +16,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -39,33 +44,78 @@ jobs:
     name: Deploy to Oracle Server
     needs: verify
     runs-on: ubuntu-latest
+    # Add required reviewers to this GitHub environment to enforce human approval.
+    environment: production
     steps:
       - name: Execute Remote Deployment via SSH
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          DEPLOY_SHA: ${{ inputs.commit }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          script_stop: true
+          envs: DEPLOY_SHA
           script: |
-            set -e
-            echo "🚀 Starting Deployment on Production Server..."
+            set -euo pipefail
+            fail() { echo "DEPLOY ABORTED: $*" >&2; exit 1; }
+            echo "Starting deployment of ${DEPLOY_SHA}"
             cd /var/www/ambeservice/ERP-AMBE
 
-            # Ensure git repo is clean and pull latest master
+            [[ "$DEPLOY_SHA" =~ ^[0-9a-f]{40}$ ]] || fail "commit must be a full 40-character SHA"
+            [ "$(git branch --show-current)" = master ] || fail "server is not on master"
+            if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+              git status --short --untracked-files=no
+              fail "uncommitted changes on the server would be lost; commit or remove them first"
+            fi
+
             git fetch origin master
-            git reset --hard origin/master
+            git merge-base --is-ancestor "$DEPLOY_SHA" origin/master || fail "commit is not on origin/master"
+            PREVIOUS="$(git rev-parse HEAD)"
+            git merge-base --is-ancestor "$PREVIOUS" "$DEPLOY_SHA" || fail "server history is not an ancestor of this commit"
+            echo "$(date -u +%FT%TZ) ${PREVIOUS} ${DEPLOY_SHA}" >> /var/www/ambeservice/.deploy-history
+            git merge --ff-only "$DEPLOY_SHA"
 
             # Ensure root .env exists
             if [ ! -f .env ] && [ -f backend/.env ]; then
               cp backend/.env .env
             fi
 
-            # Rebuild and restart application containers
-            docker compose up -d --build backend frontend
+            docker compose config --quiet
+
+            CHANGED="$(git diff --name-only "$PREVIOUS" "$DEPLOY_SHA")"
+            SERVICES=""
+            grep -q '^backend/' <<<"$CHANGED" && SERVICES="$SERVICES backend"
+            grep -q '^frontend/' <<<"$CHANGED" && SERVICES="$SERVICES frontend"
+            grep -q '^infra/backup/' <<<"$CHANGED" && SERVICES="$SERVICES backup"
+            if grep -q '^infra/postgres/' <<<"$CHANGED"; then
+              echo "WARNING: infra/postgres changed; the database is NOT restarted automatically."
+            fi
+
+            # Rebuild only the application services this commit touches. Never removes volumes.
+            if [ -n "$SERVICES" ]; then
+              docker compose up -d --build --no-deps $SERVICES
+            fi
+            # Compose recreates only containers whose configuration changed.
+            if grep -q '^docker-compose.yml$' <<<"$CHANGED"; then
+              docker compose up -d --no-build
+            fi
+
+            # Health gate
+            rollback_hint() { echo "Rollback: git checkout --detach ${PREVIOUS} && docker compose up -d --build --no-deps${SERVICES}" >&2; }
+            for svc in $SERVICES; do
+              ok=""
+              for _ in $(seq 1 60); do
+                [ "$(docker inspect -f '{{.State.Health.Status}}' "erp-${svc}")" = healthy ] && ok=1 && break
+                sleep 3
+              done
+              [ -n "$ok" ] || { rollback_hint; fail "erp-${svc} did not become healthy"; }
+            done
+            curl -fsS -m 10 -o /dev/null http://127.0.0.1:5000/api/health || { rollback_hint; fail "backend health failed"; }
+            curl -fsS -m 10 -o /dev/null http://127.0.0.1:3000/ || { rollback_hint; fail "frontend health failed"; }
 
             # Clean dangling images to preserve VPS disk space
             docker image prune -f
 
-            echo "✅ Deployment completed successfully!"
+            echo "Deployment of ${DEPLOY_SHA} completed. Previous commit: ${PREVIOUS}"

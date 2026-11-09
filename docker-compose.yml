@@ -25,7 +25,7 @@ services:
       - postgres_data_v16:/var/lib/postgresql/data
       - ./backend/src/db/migrations:/docker-entrypoint-initdb.d:ro
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     networks:
       - erp_network
     healthcheck:
@@ -49,8 +49,8 @@ services:
     volumes:
       - minio_data:/data
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     networks:
       - erp_network
     healthcheck:
@@ -76,8 +76,6 @@ services:
       '
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     networks:
@@ -124,7 +122,7 @@ services:
       GCP_PRIVATE_KEY: ${GCP_PRIVATE_KEY:-}
       GCP_PROJECT_ID: ${GCP_PROJECT_ID:-}
     ports:
-      - "5000:5000"
+      - "127.0.0.1:5000:5000"
     networks:
       - erp_network
     depends_on:
@@ -153,11 +151,17 @@ services:
     container_name: erp-frontend
     restart: unless-stopped
     ports:
-      - "${FRONTEND_PORT:-3000}:80"
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:80"
     networks:
       - erp_network
     depends_on:
       - backend
+    healthcheck:
+      # localhost resolves to ::1 in this image, where nginx does not listen.
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://127.0.0.1/ || exit 1"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
 
   # ============================================================================
   # 5. ERP Automated Backup & Recovery Drills Service
@@ -191,6 +195,13 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    healthcheck:
+      # Unhealthy when the last run failed or is older than 26 hours.
+      test: ["CMD", "/usr/local/bin/erp_backup.py", "health"]
+      interval: 5m
+      timeout: 30s
+      start_period: 30s
+      retries: 1
 
   # ============================================================================
   # 6. pgAdmin 4 PostgreSQL Web Administration UI (Profile: admin-tools)
