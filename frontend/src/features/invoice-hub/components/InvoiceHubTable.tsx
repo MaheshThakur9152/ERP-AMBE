@@ -1482,6 +1482,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
             {/* Modal Body with SmartGeneratorForm */}
             <div className="p-6 overflow-y-auto bg-slate-50 flex-1">
               <SmartGeneratorForm
+                key={editingRecord?.id || 'new'}
                 initialRecord={editingRecord}
                 onClose={() => setIsEditModalOpen(false)}
                 onSuccess={(generatedData, createdRecord) => {

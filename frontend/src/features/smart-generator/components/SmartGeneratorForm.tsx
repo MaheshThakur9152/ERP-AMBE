@@ -22,6 +22,8 @@ import {
   ArrowRight,
   Loader2,
   AlertCircle,
+  Trash2,
+  Plus,
 } from 'lucide-react';
 import { InvoiceRecord } from '@/features/invoice-hub/types';
 
@@ -60,7 +62,21 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
       .then((data) => {
         setCompanies(data);
         if (data.length > 0) {
-          setSelectedCompanyId(data[0].id);
+          if (!initialRecord) {
+            setSelectedCompanyId(data[0].id);
+          } else {
+            const recCompanyId = initialRecord.companyId || (initialRecord as any).company_id || (initialRecord.companies as any)?.id;
+            const recCompName = (initialRecord as any).companyName || (initialRecord as any).company_name || initialRecord.companies?.name || initialRecord.companies?.legal_name || (initialRecord as any).company?.name;
+            const matched = data.find(
+              (c) => (recCompanyId && c.id === recCompanyId) ||
+                (recCompName && (c.name?.trim().toLowerCase() === recCompName.trim().toLowerCase() || c.legal_name?.trim().toLowerCase() === recCompName.trim().toLowerCase()))
+            );
+            if (matched) {
+              setSelectedCompanyId(matched.id);
+            } else if (!selectedCompanyId) {
+              setSelectedCompanyId(data[0].id);
+            }
+          }
         }
       })
       .catch((err) => {
@@ -158,14 +174,14 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
   }, [selectedCompanyId, invoiceType, companies, initialRecord, editId]);
 
   // Auto-populated line items & extra charges state
+  const isEditMode = Boolean(initialRecord || editId);
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([]);
   const [additionalCharges, setAdditionalCharges] = useState<{ name: string; amount: number }[]>([]);
-  const [isEditLoaded, setIsEditLoaded] = useState<boolean>(false);
+  const [isEditLoaded, setIsEditLoaded] = useState<boolean>(isEditMode);
 
   // Handle Edit Mode initialRecord populate
   useEffect(() => {
-    if (!initialRecord || !sites.length) return;
-    setIsEditLoaded(true);
+    if (!initialRecord) return;
 
     const recType = (initialRecord as any).type || (initialRecord as any).invoice_type || (initialRecord as any).invoiceType;
     if (recType === 'Proforma Invoice' || recType === 'Proforma') {
@@ -188,44 +204,108 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
     }
 
     // 1. Match Company
-    const recCompanyId = initialRecord.companyId || (initialRecord as any).company_id;
-    const recCompName = (initialRecord as any).companyName || (initialRecord as any).company_name || (initialRecord as any).company?.name;
-    const matchingCompany = companies.find(
-      (c) => (recCompanyId && c.id === recCompanyId) || (recCompName && (c.name?.trim().toLowerCase() === recCompName.trim().toLowerCase() || c.legal_name?.trim().toLowerCase() === recCompName.trim().toLowerCase()))
-    );
-    if (matchingCompany) {
-      setSelectedCompanyId(matchingCompany.id);
+    if (companies.length > 0) {
+      const recCompanyId = initialRecord.companyId || (initialRecord as any).company_id || (initialRecord.companies as any)?.id;
+      const recCompName = (initialRecord as any).companyName || (initialRecord as any).company_name || initialRecord.companies?.name || initialRecord.companies?.legal_name || (initialRecord as any).company?.name;
+      const matchingCompany = companies.find(
+        (c) => (recCompanyId && c.id === recCompanyId) ||
+          (recCompName && (c.name?.trim().toLowerCase() === recCompName.trim().toLowerCase() || c.legal_name?.trim().toLowerCase() === recCompName.trim().toLowerCase()))
+      );
+      if (matchingCompany) {
+        setSelectedCompanyId(matchingCompany.id);
+      }
     }
 
-    // 2. Match Site (STRICTLY by siteId or siteName -- NEVER match on shared clientName!)
-    const recSiteId = initialRecord.siteId || (initialRecord as any).site_id;
-    const recSiteName = initialRecord.siteName || (initialRecord as any).site_name || (initialRecord as any).party?.siteName;
+    // 2. Match Site (comprehensive match across id, site_name, code_name)
+    if (sites.length > 0) {
+      const recSiteId =
+        initialRecord.siteId ||
+        (initialRecord as any).site_id ||
+        initialRecord.sites?.id ||
+        (initialRecord.sites as any)?.site_id ||
+        (initialRecord as any).payload?.party?.siteId;
 
-    const matchingSite = sites.find((s) => {
-      if (recSiteId && s.id === recSiteId) return true;
-      if (recSiteName && s.siteName && s.siteName.trim().toLowerCase() === recSiteName.trim().toLowerCase()) return true;
-      if (recSiteName && (s as any).name && (s as any).name.trim().toLowerCase() === recSiteName.trim().toLowerCase()) return true;
-      return false;
-    });
+      const recSiteName =
+        initialRecord.siteName ||
+        (initialRecord as any).site_name ||
+        initialRecord.sites?.site_name ||
+        initialRecord.sites?.siteName ||
+        (initialRecord as any).payload?.party?.siteName;
 
-    if (matchingSite) {
-      setSelectedSiteId(matchingSite.id);
+      const recCodeName =
+        (initialRecord as any).codeName ||
+        (initialRecord as any).code_name ||
+        initialRecord.sites?.code_name ||
+        initialRecord.sites?.codeName;
+
+      const matchingSite = sites.find((s) => {
+        if (recSiteId && (s.id === recSiteId || (s as any).site_id === recSiteId)) return true;
+        const sNames = [
+          s.siteName,
+          (s as any).site_name,
+          s.codeName,
+          (s as any).code_name,
+          (s as any).name,
+        ].filter(Boolean).map((n: string) => n.trim().toLowerCase());
+
+        if (recSiteName && sNames.includes(recSiteName.trim().toLowerCase())) return true;
+        if (recCodeName && sNames.includes(recCodeName.trim().toLowerCase())) return true;
+        return false;
+      });
+
+      if (matchingSite) {
+        setSelectedSiteId(matchingSite.id);
+        const siteCompId = matchingSite.company_id || (matchingSite as any).companyId;
+        if (siteCompId) {
+          setSelectedCompanyId(siteCompId);
+        }
+      }
     }
 
-    const loadedItems = initialRecord.line_items || (initialRecord as any).items || initialRecord.payload?.items || initialRecord.payload?.line_items || [];
-    if (loadedItems.length > 0) {
+    // 3. Load Line Items
+    let loadedItems: any[] =
+      initialRecord.line_items ||
+      (initialRecord as any).items ||
+      initialRecord.payload?.items ||
+      initialRecord.payload?.line_items ||
+      [];
+
+    if (typeof loadedItems === 'string') {
+      try {
+        loadedItems = JSON.parse(loadedItems);
+      } catch (e) {
+        loadedItems = [];
+      }
+    }
+
+    if (!Array.isArray(loadedItems) || loadedItems.length === 0) {
+      const targetAmt = Number(initialRecord.amount || (initialRecord as any).grand_total || 0);
+      if (targetAmt > 0) {
+        loadedItems = [
+          {
+            id: 'item-1',
+            srNo: 1,
+            description: 'Services',
+            hsnCode: '9985',
+            rate: targetAmt,
+            workingDays: 31,
+            persons: 1,
+            amount: targetAmt,
+          },
+        ];
+      }
+    }
+
+    if (Array.isArray(loadedItems) && loadedItems.length > 0) {
       setLineItems(loadedItems);
     }
 
+    // 4. Load Additional Charges
     const existingAdd =
       initialRecord.payload?.additionalCharges ||
       initialRecord.payload?.additional_charges ||
       (initialRecord as any).additionalCharges ||
-      (initialRecord as any).additional_charges ||
-      (matchingSite as any)?.additional_charges ||
-      (matchingSite as any)?.additionalCharges ||
-      matchingSite?.default_additional_charges ||
-      matchingSite?.defaultAdditionalCharges;
+      (initialRecord as any).additional_charges;
 
     let finalAdditional: { name: string; amount: number }[] = [];
 
@@ -239,16 +319,12 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
         initialRecord.payload?.machineryCharges ||
         (initialRecord as any).machinery_charges ||
         (initialRecord as any).machineryCharges ||
-        matchingSite?.default_machinery_charges ||
-        matchingSite?.defaultMachineryCharges ||
         0
       );
       let mat = Number(
         initialRecord.payload?.materialCharges ||
         (initialRecord as any).material_charges ||
         (initialRecord as any).materialCharges ||
-        matchingSite?.default_material_charges ||
-        matchingSite?.defaultMaterialCharges ||
         0
       );
 
@@ -265,6 +341,7 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
 
   // Auto-populate Additional Charges when selected site changes
   useEffect(() => {
+    if (isEditLoaded) return;
     if (!selectedSite) return;
     const defaultAdd =
       (selectedSite as any).additional_charges ||
@@ -287,7 +364,7 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
       if (mat > 0) fallbacks.push({ name: 'Material Charges', amount: mat });
       setAdditionalCharges(fallbacks);
     }
-  }, [selectedSiteId, selectedSite, sites]);
+  }, [selectedSiteId, selectedSite, sites, isEditLoaded]);
 
   const handleMonthYearChange = (mIndex: number, yr: number) => {
     setSelectedMonth(mIndex);
@@ -317,24 +394,29 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
       const compId = s.company_id || (s as any).companyId;
       return !compId || compId === selectedCompanyId;
     });
+    // Ensure currently selected site is always present in dropdown options
+    if (selectedSiteId && !filtered.some((s) => s.id === selectedSiteId)) {
+      const current = sites.find((s) => s.id === selectedSiteId);
+      if (current) filtered.push(current);
+    }
     return filtered.length > 0 ? filtered : sites;
-  }, [sites, selectedCompanyId]);
+  }, [sites, selectedCompanyId, selectedSiteId]);
 
   // Auto-switch selectedSiteId if current site does not belong to selected company entity
   useEffect(() => {
-    if (isEditLoaded || !availableSites.length || !selectedCompanyId) return;
+    if (initialRecord || isEditLoaded || !availableSites.length || !selectedCompanyId) return;
     if (selectedSiteId && sites.some((s) => s.id === selectedSiteId)) return;
     const isCurrentSiteValid = availableSites.some((s) => s.id === selectedSiteId);
     if (!isCurrentSiteValid && availableSites.length > 0) {
       setSelectedSiteId(availableSites[0].id);
     }
-  }, [selectedCompanyId, availableSites, selectedSiteId, isEditLoaded, sites]);
+  }, [selectedCompanyId, availableSites, selectedSiteId, isEditLoaded, sites, initialRecord]);
 
   // Populate line items dynamically when selected site changes
   useEffect(() => {
     if (isEditLoaded) return;
     if (!selectedSite || !selectedSite.rateCards) {
-      setLineItems([]);
+      if (!initialRecord) setLineItems([]);
       return;
     }
 
@@ -372,7 +454,7 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
     });
 
     setLineItems(items);
-  }, [selectedSiteId, sites, isEditLoaded, selectedMonth, selectedYear]);
+  }, [selectedSiteId, sites, isEditLoaded, selectedMonth, selectedYear, initialRecord]);
 
   // Live item change handler
   const handleItemChange = (
@@ -761,11 +843,37 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-bold text-gray-900 flex items-center gap-2">
             <FileCheck className="w-4 h-4 text-[#20B2AA]" />
-            <span>Auto-Populated Line Items ({lineItems.length} rows)</span>
+            <span>Line Items ({lineItems.length} rows)</span>
           </h2>
-          <span className="text-xs text-gray-500">
-            Auto-linked from <strong className="text-[#20B2AA]">{selectedSite?.siteName || 'Selected Site'}</strong> Rate Cards
-          </span>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                const nextSr = lineItems.length + 1;
+                setLineItems([
+                  ...lineItems,
+                  {
+                    id: `sg-custom-${Date.now()}`,
+                    srNo: nextSr,
+                    description: '',
+                    location: '',
+                    hsnCode: '9985',
+                    rate: 0,
+                    workingDays: getDaysInMonth(selectedMonth, selectedYear),
+                    persons: 1,
+                    amount: 0,
+                  },
+                ]);
+              }}
+              className="px-2.5 py-1 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+            >
+              <Plus size={13} />
+              <span>Add Line Item</span>
+            </button>
+            <span className="text-xs text-gray-500">
+              {initialRecord ? 'Loaded from Bill' : `Auto-linked from ${selectedSite?.siteName || 'Selected Site'} Rate Cards`}
+            </span>
+          </div>
         </div>
 
         <div className="overflow-x-auto rounded-xl border border-gray-200">
@@ -785,13 +893,14 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
                     <th className="py-3 px-3 text-right w-28">Working Days / Hours</th>
                     <th className="py-3 px-3 text-right w-20">Persons</th>
                     <th className="py-3 px-3 text-right w-32">Amount (₹)</th>
+                    <th className="py-3 px-2 w-10 text-center"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 font-mono text-xs">
                   {lineItems.length === 0 ? (
                     <tr>
-                      <td colSpan={hasLocationColumn ? 8 : 7} className="py-8 text-center text-gray-500 text-xs font-medium">
-                        No rate cards configured for this site.
+                      <td colSpan={hasLocationColumn ? 9 : 8} className="py-8 text-center text-gray-500 text-xs font-medium">
+                        No line items found. Click &quot;Add Line Item&quot; to add one.
                       </td>
                     </tr>
                   ) : (
@@ -854,6 +963,16 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
                             placeholder="0.00"
                             className="w-28 bg-white border border-gray-200 rounded px-2.5 py-1 text-right text-teal-700 font-bold font-mono transition-all focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
                           />
+                        </td>
+                        <td className="py-2.5 px-2 text-center">
+                          <button
+                            type="button"
+                            onClick={() => setLineItems((prev) => prev.filter((_, i) => i !== idx).map((it, i) => ({ ...it, srNo: i + 1 })))}
+                            className="text-gray-400 hover:text-red-500 p-1 rounded transition-colors"
+                            title="Delete Item"
+                          >
+                            <Trash2 size={14} />
+                          </button>
                         </td>
                       </tr>
                     ))
@@ -980,11 +1099,11 @@ export const SmartGeneratorForm: React.FC<SmartGeneratorFormProps> = ({
             {isSubmitting ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Posting POST /api/invoices...</span>
+                <span>{initialRecord ? 'Updating Invoice...' : 'Posting POST /api/invoices...'}</span>
               </>
             ) : (
               <>
-                <span>Generate Bill</span>
+                <span>{initialRecord ? 'Update Invoice' : 'Generate Bill'}</span>
                 <ArrowRight className="w-4 h-4" />
               </>
             )}
