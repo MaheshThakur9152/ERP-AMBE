@@ -42,19 +42,27 @@ export const PayrollController = {
   async list(req: Request, res: Response): Promise<void> {
     try {
       const { site_id, month_year } = req.query;
-      let query = 'SELECT * FROM public.payroll_records WHERE 1=1';
+      // Payslip UI reads statutory/bank fallbacks from record.staff (uan_no, esic_no, bank details).
+      let query = `SELECT p.*, json_build_object(
+          'uan_no', s.uan_no, 'esic_no', s.esic_no, 'designation', s.designation,
+          'bank_account_no', s.bank_account_no, 'bank_ifsc_code', s.bank_ifsc_code,
+          'biometric_code', s.biometric_code, 'name', s.employee_name
+        ) AS staff
+        FROM public.payroll_records p
+        LEFT JOIN public.staff s ON s.id = p.staff_id
+        WHERE 1=1`;
       const params: any[] = [];
 
       if (month_year) {
         params.push(month_year);
-        query += ` AND month_year = $${params.length}`;
+        query += ` AND p.month_year = $${params.length}`;
       }
       if (site_id) {
         params.push(site_id);
-        query += ` AND site_id = $${params.length}`;
+        query += ` AND p.site_id = $${params.length}`;
       }
 
-      query += ' ORDER BY employee_name ASC';
+      query += ' ORDER BY p.employee_name ASC';
 
       const result = await pool.query(query, params);
       res.status(200).json({ success: true, data: result.rows });
