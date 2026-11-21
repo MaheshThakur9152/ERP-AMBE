@@ -44,7 +44,7 @@ interface InvoiceHubTableProps {
   onSaveInvoice?: (updatedInvoice: InvoiceData) => void;
 }
 
-const convertRecordToInvoiceData = (inv: InvoiceRecord): InvoiceData => {
+export const convertRecordToInvoiceData = (inv: InvoiceRecord): InvoiceData => {
   const comp = inv.companies;
   const site = inv.sites;
 

@@ -9,6 +9,7 @@ import {
   Building2,
   Wallet,
   Kanban,
+  BookOpen,
   ShieldCheck,
   ShieldAlert,
   LogOut,
@@ -176,6 +177,19 @@ export const Sidebar: React.FC = () => {
             >
               <Kanban size={18} />
             </NavLink>
+            <NavLink
+              to="/ledger"
+              title="Outstanding Ledger"
+              className={({ isActive }) =>
+                `w-full flex justify-center p-2.5 rounded-lg transition-colors duration-150 ${
+                  isActive
+                    ? 'bg-[#20B2AA] text-white shadow-md'
+                    : 'hover:bg-white/10 text-gray-300 hover:text-white'
+                }`
+              }
+            >
+              <BookOpen size={18} />
+            </NavLink>
           </>
         ) : (
           // Expanded: Collapsible Accordion
@@ -220,6 +234,19 @@ export const Sidebar: React.FC = () => {
                   }
                 >
                   <Kanban size={14} className="shrink-0" /> <span>Invoice Tracker</span>
+                </NavLink>
+
+                <NavLink
+                  to="/ledger"
+                  className={({ isActive }) =>
+                    `w-full flex gap-3 px-3 py-2 rounded-lg text-xs font-semibold transition-colors duration-150 items-center ${
+                      isActive
+                        ? 'bg-[#20B2AA] text-white shadow-md'
+                        : 'hover:bg-white/5 text-gray-300 hover:text-white'
+                    }`
+                  }
+                >
+                  <BookOpen size={14} className="shrink-0" /> <span>Outstanding Ledger</span>
                 </NavLink>
               </div>
             )}

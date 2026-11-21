@@ -11,6 +11,7 @@ import attendanceRoutes from './attendanceRoutes';
 import staffRoutes from './staffRoutes';
 import bonusRoutes from './bonusRoutes';
 import attendanceCalculatorRoutes from './attendanceCalculatorRoutes';
+import ledgerRoutes from './ledgerRoutes';
 import { OracleStorageService } from '../services/oracleStorageService';
 import { RedisCacheService } from '../config/redis';
 import { checkDbHealth } from '../db/pool';
@@ -87,5 +88,6 @@ router.use('/deployments', deploymentRoutes);
 router.use('/payroll', payrollRoutes);
 router.use('/bonus', bonusRoutes);
 router.use('/attendance-calculator', attendanceCalculatorRoutes);
+router.use('/ledger', ledgerRoutes);
 
 export default router;

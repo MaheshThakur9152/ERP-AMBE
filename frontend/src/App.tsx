@@ -20,6 +20,7 @@ import { AttendanceCalculatorPage } from '@/pages/AttendanceCalculatorPage';
 import { EmployeeDocuments } from '@/pages/EmployeeDocuments';
 import { InvoiceVault } from '@/pages/InvoiceVault';
 import { InvoiceTrackerPage } from '@/pages/InvoiceTrackerPage';
+import { LedgerPage } from '@/pages/LedgerPage';
 import { MaterialsMasterPage } from '@/pages/MaterialsMasterPage';
 import { MaterialGeneratorPage } from '@/pages/MaterialGeneratorPage';
 import { SecurityCenter } from '@/pages/SecurityCenter';
@@ -43,6 +44,7 @@ export const App: React.FC = () => {
             <Route path="/materials" element={<MaterialsMasterPage />} />
             <Route path="/invoice-hub" element={<InvoiceHubPage />} />
             <Route path="/invoice-tracker" element={<InvoiceTrackerPage />} />
+            <Route path="/ledger" element={<LedgerPage />} />
             <Route path="/smart-generator" element={<SmartGeneratorPage />} />
             <Route path="/material-generator" element={<MaterialGeneratorPage />} />
             <Route path="/invoices" element={<InvoicePage />} />
