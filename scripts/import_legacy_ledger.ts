@@ -73,8 +73,17 @@ const parseDate = (d: any): string | null => {
     return `${yr}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   }
 
+  // "24 November 2025", "11- Dec -2025", "05 February 2026". Parsed by hand: new Date().toISOString()
+  // shifts local midnight in IST back one day.
+  const m2 = s.match(/^(\d{1,2})[\s\-\/]*([A-Za-z]{3,})[\s\-\/,]*(\d{4})$/);
+  if (m2) {
+    const mon = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'].indexOf(m2[2].slice(0, 3).toLowerCase());
+    if (mon >= 0) return `${m2[3]}-${String(mon + 1).padStart(2, '0')}-${m2[1].padStart(2, '0')}`;
+  }
+
   const dt = new Date(s);
-  return isNaN(dt.getTime()) ? null : dt.toISOString().slice(0, 10);
+  if (isNaN(dt.getTime())) return null;
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
 };
 
 const esc = (s: string | null): string => {
@@ -170,7 +179,7 @@ export function generateSQL(outputFile: string) {
     const cPaidDate = getCol(/paid\s*date/i);
     const cPaidAmt = getCol(/paid\s*amt/i);
     const cRemark = getCol(/remark/i);
-    const cRemToPay = getCol(/rem/i);
+    const cRemToPay = getCol(/rem\s*to\s*pay/i); // not /rem/: that hits "Remark" first
     const cTds = getCol(/^tds$/i) !== -1 ? getCol(/^tds$/i) : getCol(/tds/i);
     const cTdsAmt = getCol(/tds\s*amt/i);
     // One CSV payment can settle several bills (e.g. 466197 on Jan's row = Jan 209015 + Feb 257182);
@@ -189,13 +198,21 @@ export function generateSQL(outputFile: string) {
       const isProforma = /\/P\//i.test(invNo) || /PI/i.test(nature) || (row[cInvNo - 1] && /PI/i.test(row[cInvNo - 1]));
       const subTotal = cSubTotal !== -1 ? cleanNum(row[cSubTotal]) : 0;
       const taxTotal = cGst !== -1 ? cleanNum(row[cGst]) : 0;
-      const grandTotal = cAmount !== -1 ? cleanNum(row[cAmount]) : 0;
+      let grandTotal = cAmount !== -1 ? cleanNum(row[cAmount]) : 0;
       const invDate = cDate !== -1 ? parseDate(row[cDate]) : null;
       let period = cPeriod !== -1 ? (row[cPeriod] || '').trim() || null : null;
       // Reissued rows hold a note ("Above changed to 15 Inv no") in the period column; use the invoice period instead.
       if (period && /changed to/i.test(period) && cInvPeriod !== -1) period = (row[cInvPeriod] || '').trim() || period;
 
       const statusCol = (cStatus !== -1 ? row[cStatus] : '').trim();
+      // No amount but another row bills the same period: replaced bill (Ajmera HK ASF/25-26/053, 054 by 006).
+      // No amount and nothing replaces it (Minerva 58th ASF/25-26/065): amount = sub total + GST.
+      const normPeriod = (r: string[]) => (cInvPeriod !== -1 ? (r[cInvPeriod] || '') : '').toLowerCase().replace(/\s+/g, ' ').trim();
+      if (grandTotal === 0) {
+        const replaced = normPeriod(row) !== '' && rows.some((o, j) => j !== i && normPeriod(o) === normPeriod(row) && cleanNum(o[cAmount]) > 0);
+        if (replaced || subTotal === 0) continue;
+        grandTotal = Math.round((subTotal + taxTotal) * 100) / 100;
+      }
       const paidAmtCol = cPaidAmt !== -1 ? cleanNum(row[cPaidAmt]) : 0;
       const remToPay = cRemToPay !== -1 ? cleanNum(row[cRemToPay]) : 0;
       const tds = cTds !== -1 ? cleanNum(row[cTds]) : 0;
@@ -209,7 +226,7 @@ export function generateSQL(outputFile: string) {
       const isPaid = /paid/i.test(statusCol) && !/unpaid/i.test(statusCol);
 
       if (isPaid) {
-        if (/not fully/i.test(statusCol) || /partial/i.test(statusCol)) {
+        if (/not\s*full/i.test(statusCol) || /partial/i.test(statusCol)) {
           finalPaid = remToPay > 0 ? Math.max(0, netReceivable - remToPay) : Math.min(paidAmtCol, netReceivable);
           finalTds = tds;
         } else {
@@ -250,15 +267,22 @@ export function generateSQL(outputFile: string) {
       sql.push(`      '24a111d0-b7ec-4eb2-8d04-b32f9b3f04c6', '${siteConfig.id}', ${esc(invNo)}, ${esc(isProforma ? 'Proforma Invoice' : 'Tax Invoice')},`);
       sql.push(`      'Generated', ${esc(invDate)}, ${esc(period)}, ${isMaterial}, true, 'Legacy CSV import', ${subTotal}, ${taxTotal}, ${grandTotal}, now()`);
       sql.push(`    ) RETURNING id INTO v_id;`);
+      sql.push(`  ELSE`);
+      sql.push(`    -- Re-run: refresh dates on rows this import created; never touch real platform bills`);
+      sql.push(`    UPDATE public.invoices SET invoice_date = ${esc(invDate)}, billing_period = ${esc(period)}`);
+      sql.push(`    WHERE id = v_id AND legacy_notes = 'Legacy CSV import';`);
       sql.push(`  END IF;`);
 
       if (finalPaid + finalTds > 0) {
         totalPayments++;
         const pDate = (carried ? carry.date : paidDate) || invDate || new Date().toISOString().slice(0, 10);
-        sql.push(`  -- Payment: Paid=₹${finalPaid}, TDS=₹${finalTds}`);
-        sql.push(`  DELETE FROM public.invoice_payments WHERE invoice_id = v_id;`);
-        sql.push(`  INSERT INTO public.invoice_payments (invoice_id, paid_date, amount, tds_amount, mode, remark, created_at)`);
-        sql.push(`  VALUES (v_id, ${esc(pDate)}, ${finalPaid}, ${finalTds}, ${esc(carried ? carry.mode : mode)}, ${esc(carried ? 'Paid with previous bill' : remark)}, now());`);
+        sql.push(`  -- Payment: Paid=₹${finalPaid}, TDS=₹${finalTds}. Only on legacy rows; payments typed in the ERP (created_by set) are kept.`);
+        sql.push(`  IF EXISTS (SELECT 1 FROM public.invoices WHERE id = v_id AND legacy_notes = 'Legacy CSV import') THEN`);
+        sql.push(`    DELETE FROM public.invoice_payments WHERE invoice_id = v_id AND created_by IS NULL;`);
+        sql.push(`    INSERT INTO public.invoice_payments (invoice_id, paid_date, amount, tds_amount, mode, remark, created_at)`);
+        sql.push(`    SELECT v_id, ${esc(pDate)}, ${finalPaid}, ${finalTds}, ${esc(carried ? carry.mode : mode)}, ${esc(carried ? 'Paid with previous bill' : remark)}, now()`);
+        sql.push(`    WHERE NOT EXISTS (SELECT 1 FROM public.invoice_payments WHERE invoice_id = v_id);`);
+        sql.push(`  END IF;`);
       }
 
       sql.push(`END $$;`);
