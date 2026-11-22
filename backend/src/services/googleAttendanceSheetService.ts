@@ -206,6 +206,113 @@ export class GoogleAttendanceSheetService {
   }
 
   /**
+   * Sheets API requests that reset rows 7..120 (cols B..AN) to a clean grid for `staffCount` two-row
+   * employee blocks plus 3 summary rows, show only the month's day columns, and colour statuses by value.
+   */
+  public static buildLayoutRequests(
+    sheetId: number,
+    staffCount: number,
+    daysInMonth: number,
+    tableEndRow: number,
+    existingRuleCount: number
+  ): any[] {
+    const B = 1, E = 5, F = 5, AJ = 36, AN = 40; // 0-based start / exclusive end column indexes
+    const grid = (r0: number, r1: number, c0: number, c1: number) =>
+      ({ sheetId, startRowIndex: r0, endRowIndex: r1, startColumnIndex: c0, endColumnIndex: c1 });
+    const solid = { style: 'SOLID', color: { red: 0, green: 0, blue: 0 } };
+    const none = { style: 'NONE' };
+    const req: any[] = [];
+
+    // Drop template conditional rules (delete from the end so indexes stay valid)
+    for (let i = existingRuleCount - 1; i >= 0; i--) req.push({ deleteConditionalFormatRule: { sheetId, index: i } });
+
+    req.push({ unmergeCells: { range: grid(6, 120, B, AN) } });
+    req.push({ repeatCell: { range: grid(6, 120, B, AN), cell: { userEnteredFormat: {} }, fields: 'userEnteredFormat' } });
+    req.push({
+      updateBorders: {
+        range: grid(6, 120, B, AN),
+        top: none, bottom: none, left: none, right: none, innerHorizontal: none, innerVertical: none,
+      },
+    });
+
+    // Day columns: show 1..daysInMonth, hide the rest
+    req.push({
+      updateDimensionProperties: {
+        range: { sheetId, dimension: 'COLUMNS', startIndex: F, endIndex: AJ },
+        properties: { hiddenByUser: false },
+        fields: 'hiddenByUser',
+      },
+    });
+    if (daysInMonth < 31) {
+      req.push({
+        updateDimensionProperties: {
+          range: { sheetId, dimension: 'COLUMNS', startIndex: F + daysInMonth, endIndex: AJ },
+          properties: { hiddenByUser: true },
+          fields: 'hiddenByUser',
+        },
+      });
+    }
+
+    if (staffCount === 0) return req;
+
+    const top = 6, end = tableEndRow; // 0-based first table row, exclusive end
+    req.push({
+      repeatCell: {
+        range: grid(top, end, B, AN),
+        cell: { userEnteredFormat: { horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE', wrapStrategy: 'WRAP', textFormat: { fontSize: 10 } } },
+        fields: 'userEnteredFormat(horizontalAlignment,verticalAlignment,wrapStrategy,textFormat)',
+      },
+    });
+    req.push({
+      repeatCell: {
+        range: grid(top, end, 3, 5), // Employee name + weekly off
+        cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 10 } } },
+        fields: 'userEnteredFormat.textFormat',
+      },
+    });
+    req.push({
+      updateBorders: {
+        range: grid(top, end, B, AN),
+        top: solid, bottom: solid, left: solid, right: solid, innerHorizontal: solid, innerVertical: solid,
+      },
+    });
+
+    for (let i = 0; i < staffCount; i++) {
+      const r0 = top + i * 2;
+      req.push({ mergeCells: { range: grid(r0, r0 + 2, B, E), mergeType: 'MERGE_COLUMNS' } }); // SR, code, name, weekly off
+      req.push({ mergeCells: { range: grid(r0, r0 + 2, AN - 1, AN), mergeType: 'MERGE_ALL' } }); // TOTAL
+    }
+    const s0 = top + staffCount * 2;
+    req.push({ mergeCells: { range: grid(s0, s0 + 3, B, E), mergeType: 'MERGE_ROWS' } });
+    req.push({
+      repeatCell: {
+        range: grid(s0, s0 + 3, B, AN),
+        cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 10 }, backgroundColor: { red: 0.95, green: 0.95, blue: 0.95 } } },
+        fields: 'userEnteredFormat(textFormat,backgroundColor)',
+      },
+    });
+
+    const statusRule = (text: string, bg: any, fg: any) => ({
+      addConditionalFormatRule: {
+        index: 0,
+        rule: {
+          ranges: [grid(top, s0, F, AJ)],
+          booleanRule: {
+            condition: { type: 'TEXT_EQ', values: [{ userEnteredValue: text }] },
+            format: { backgroundColor: bg, textFormat: { foregroundColor: fg, bold: true } },
+          },
+        },
+      },
+    });
+    const blue = { red: 0.1, green: 0.2, blue: 0.85 };
+    req.push(statusRule('W/O', { red: 0.8, green: 0.8, blue: 0.8 }, blue));
+    req.push(statusRule('WOP', { red: 0.55, green: 0.85, blue: 0.4 }, blue));
+    req.push(statusRule('A', { red: 1, green: 0.85, blue: 0.85 }, { red: 0.8, green: 0, blue: 0 }));
+    req.push(statusRule('HD', { red: 1, green: 0.9, blue: 0.6 }, { red: 0.6, green: 0.3, blue: 0 }));
+    return req;
+  }
+
+  /**
    * Helper: Column index to A1 notation letter
    */
   public static getColumnLetter(colIndex1Based: number): string {
@@ -636,6 +743,26 @@ export class GoogleAttendanceSheetService {
       console.warn('⚠️ Clear range warning:', clearErr.message);
     }
 
+    // 6b. Rebuild table structure. The copied template keeps its own merges, static colours and hidden
+    // day columns from the month it was made for; without this the new month's data lands in the wrong layout.
+    const tableEndRow = staffList.length > 0 ? 7 + staffList.length * 2 + 2 : 6; // last summary row (1-based)
+    try {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          requests: this.buildLayoutRequests(
+            targetSheetId,
+            staffList.length,
+            daysInMonth,
+            tableEndRow,
+            (targetSheet?.conditionalFormats || []).length
+          ),
+        },
+      });
+    } catch (layoutErr: any) {
+      console.warn('⚠️ Attendance layout reset warning:', layoutErr.message);
+    }
+
     // 7. Build batch value updates
     const monthName = new Date(yearNum, monthNum - 1, 1).toLocaleString('default', { month: 'long' });
     const valueUpdates: Array<{ range: string; values: any[][] }> = [];
@@ -670,7 +797,7 @@ export class GoogleAttendanceSheetService {
     for (let d = 1; d <= 31; d++) {
       if (d <= daysInMonth) {
         const dt = new Date(yearNum, monthNum - 1, d);
-        weekdaysRow.push(DAY_NAMES[dt.getDay()]);
+        weekdaysRow.push(DAY_NAMES[dt.getDay()].slice(0, 3));
       } else {
         weekdaysRow.push('');
       }
@@ -760,8 +887,8 @@ export class GoogleAttendanceSheetService {
 
       // Overtime present count (Col AK on row r+1)
       valueUpdates.push({
-        range: `'${targetSheetTitle}'!AK${r + 1}:AN${r + 1}`,
-        values: [[`=COUNTIF(F${r + 1}:AJ${r + 1},"P")`, '-', '-', '-']],
+        range: `'${targetSheetTitle}'!AK${r + 1}:AM${r + 1}`,
+        values: [[`=COUNTIF(F${r + 1}:AJ${r + 1},"P")`, '-', '-']],
       });
     }
 
@@ -784,8 +911,8 @@ export class GoogleAttendanceSheetService {
       }
 
       valueUpdates.push({
-        range: `'${targetSheetTitle}'!B${s1}:E${s1}`,
-        values: [['', '', '', 'WEEKLY OFF']],
+        range: `'${targetSheetTitle}'!B${s1}`,
+        values: [['WEEKLY OFF']],
       });
       valueUpdates.push({
         range: `'${targetSheetTitle}'!F${s1}:AJ${s1}`,
@@ -813,8 +940,8 @@ export class GoogleAttendanceSheetService {
       }
 
       valueUpdates.push({
-        range: `'${targetSheetTitle}'!B${s2}:E${s2}`,
-        values: [['', '', '', 'PRESENT STRENGTH']],
+        range: `'${targetSheetTitle}'!B${s2}`,
+        values: [['PRESENT STRENGTH']],
       });
       valueUpdates.push({
         range: `'${targetSheetTitle}'!F${s2}:AJ${s2}`,
@@ -837,8 +964,8 @@ export class GoogleAttendanceSheetService {
       }
 
       valueUpdates.push({
-        range: `'${targetSheetTitle}'!B${s3}:E${s3}`,
-        values: [['', '', '', 'TOTAL STRENGTH']],
+        range: `'${targetSheetTitle}'!B${s3}`,
+        values: [['TOTAL STRENGTH']],
       });
       valueUpdates.push({
         range: `'${targetSheetTitle}'!F${s3}:AJ${s3}`,
@@ -884,6 +1011,16 @@ export class GoogleAttendanceSheetService {
                     },
                   },
                   fields: 'userEnteredFormat(textRotation,horizontalAlignment,verticalAlignment)',
+                },
+              },
+              // Tab named for this site and month instead of the template's ("Updated SEPTEMBER_HK")
+              {
+                updateSheetProperties: {
+                  properties: {
+                    sheetId: targetSheetId,
+                    title: `${siteName} ${monthName} ${yearNum}`.replace(/[^A-Za-z0-9 _-]/g, '').slice(0, 90),
+                  },
+                  fields: 'title',
                 },
               },
               // Row 6 height 60px
