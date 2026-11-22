@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, ArrowUpDown, Check, ChevronDown, ChevronRight, Download, Eye, FileSpreadsheet,
-  Pencil, Plus, Printer, Search, Trash2, X,
+  Loader2, Pencil, Plus, Printer, Search, Trash2, Upload, X,
 } from 'lucide-react';
 import { fetchWithRetry } from '@/lib/apiClient';
 import { toast } from '@/components/ui/toast';
@@ -405,6 +405,9 @@ const SiteLedger: React.FC<{
   const [filter, setFilter] = useState<'All' | Status>('All');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [payFor, setPayFor] = useState<{ row: LedgerRow; payment?: Payment } | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const uploadFor = useRef<LedgerRow | null>(null);
+  const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [viewing, setViewing] = useState<{ id: string; type: string; url: string; fileName: string; title: string } | null>(null);
   const [templatePreview, setTemplatePreview] = useState<InvoiceData | null>(null);
   const [editingOpening, setEditingOpening] = useState<string | null>(null);
@@ -503,11 +506,44 @@ const SiteLedger: React.FC<{
     }
   };
 
+  const pickBill = (r: LedgerRow) => {
+    uploadFor.current = r;
+    fileRef.current?.click();
+  };
+
+  const uploadBill = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const r = uploadFor.current;
+    e.target.value = '';
+    if (!file || !r) return;
+    if (file.size > 10 * 1024 * 1024) return toast.error('File must be under 10 MB');
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('invoiceId', r.id);
+    fd.append('invoiceNo', r.invoice_no.trim());
+    fd.append('fileName', file.name);
+    setUploadingId(r.id);
+    try {
+      const res = await fetchWithRetry('/api/invoices/upload', { method: 'POST', body: fd, retries: 0, timeoutMs: 120000, skipErrorToast: true });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Upload failed (${res.status})`);
+      }
+      toast.success(`Bill uploaded for ${r.invoice_no.trim()}`);
+      load();
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setUploadingId(null);
+    }
+  };
+
   const toggle = (id: string) => setExpanded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const td = 'px-3 py-2.5';
 
   return (
     <div className="p-6 space-y-5 max-w-[1600px]">
+      <input ref={fileRef} type="file" accept="application/pdf,image/jpeg,image/png,image/webp" className="hidden" onChange={uploadBill} />
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <button onClick={onBack} className="text-sm text-slate-500 hover:text-slate-900 inline-flex items-center gap-1 mb-1.5">
@@ -676,6 +712,16 @@ const SiteLedger: React.FC<{
                           </button>
                         ) : (
                           <span className="p-1.5 text-slate-200" title="Legacy bill: no file uploaded"><Eye size={16} /></span>
+                        )}
+                        {!r.has_bill && (
+                          <button
+                            onClick={() => pickBill(r)}
+                            disabled={uploadingId === r.id}
+                            className="p-1.5 text-amber-600 hover:text-amber-800 disabled:opacity-50"
+                            title="Upload bill (PDF or image)"
+                          >
+                            {uploadingId === r.id ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
+                          </button>
                         )}
                         {!r.excluded && t.balance > 0 && (
                           <button
