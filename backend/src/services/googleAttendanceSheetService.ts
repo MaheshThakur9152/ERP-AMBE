@@ -312,10 +312,10 @@ export class GoogleAttendanceSheetService {
     req.push(fmt(grid(f0, f0 + 6, B, 4), { verticalAlignment: 'MIDDLE', textFormat: bold }));
     req.push(fmt(grid(f0, f0 + 6, B, 2), { horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE', textFormat: bold }));
     req.push(fmt(grid(f0 + 1, f0 + 2, B, 2), {
-      horizontalAlignment: 'CENTER', backgroundColor: { red: 0.8, green: 0.8, blue: 0.8 }, textFormat: { ...bold, foregroundColor: blueText },
+      horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE', backgroundColor: { red: 0.8, green: 0.8, blue: 0.8 }, textFormat: { ...bold, foregroundColor: blueText },
     }));
     req.push(fmt(grid(f0 + 2, f0 + 3, B, 2), {
-      horizontalAlignment: 'CENTER', backgroundColor: hdBlue, textFormat: { ...bold, foregroundColor: { red: 1, green: 1, blue: 1 } },
+      horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE', backgroundColor: hdBlue, textFormat: { ...bold, foregroundColor: { red: 1, green: 1, blue: 1 } },
     }));
     for (let k = 0; k < 6; k++) req.push({ mergeCells: { range: grid(f0 + k, f0 + k + 1, 2, 4), mergeType: 'MERGE_ALL' } });
     req.push(boxed(grid(f0, f0 + 6, B, 4)));
@@ -891,7 +891,8 @@ export class GoogleAttendanceSheetService {
 
           const rawOt = empOtMap.get(d);
           const workedOff = isWo && (rawStatus === 'P' || rawStatus === 'WOP');
-          otValues.push(rawOt || (workedOff ? 'P' : ''));
+          // Second row only ever shows P: overtime records saved as WOP are a worked weekly off
+          otValues.push(rawOt === 'WOP' ? 'P' : rawOt || (workedOff ? 'P' : ''));
         } else {
           dayValues.push('');
           otValues.push('');
@@ -975,7 +976,9 @@ export class GoogleAttendanceSheetService {
       for (let d = 1; d <= 31; d++) {
         if (d <= daysInMonth) {
           const colL = GoogleAttendanceSheetService.getColumnLetter(5 + d);
-          s2Cols.push(`=COUNTIF(${colL}7:${colL}${lastEmpRow},"P")+COUNTIF(${colL}7:${colL}${lastEmpRow},"WOP")+(COUNTIF(${colL}7:${colL}${lastEmpRow},"HD")*0.5)`);
+          // Attendance rows only (7, 9, 11...): the P under a W/O is the same person, already in WEEKLY OFF
+          const rng = `${colL}7:${colL}${lastEmpRow}`;
+          s2Cols.push(`=SUMPRODUCT((MOD(ROW(${rng}),2)=1)*(${rng}="P"))+SUMPRODUCT((MOD(ROW(${rng}),2)=1)*(${rng}="HD"))*0.5`);
         } else {
           s2Cols.push('');
         }
