@@ -177,6 +177,8 @@ export function generateSQL(outputFile: string) {
       const row = rows[i];
       const invNo = (row[cInvNo] || '').trim();
       if (!invNo || !invNo.toUpperCase().startsWith('ASF')) continue;
+      // Superseded bill: the next row reissues it ("Above changed to 15 Inv no").
+      if ((rows[i + 1] || []).some(c => /changed to/i.test(c))) continue;
 
       const nature = (cNature !== -1 ? row[cNature] : '').trim();
       const isMaterial = /^ASF(\/P)?\/M\//i.test(invNo) || /goods|material/i.test(nature);

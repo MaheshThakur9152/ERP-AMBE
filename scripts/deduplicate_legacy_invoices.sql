@@ -56,6 +56,12 @@ WHERE id IN (
     AND (original.legacy_notes IS DISTINCT FROM 'Legacy CSV import' OR original.created_at < legacy.created_at)
 );
 
+-- 3b. Delete superseded CSV rows (renumbered bills, blank amount) that carry no payments
+DELETE FROM public.invoices i
+WHERE i.legacy_notes = 'Legacy CSV import'
+  AND COALESCE(i.grand_total, 0) = 0
+  AND NOT EXISTS (SELECT 1 FROM public.invoice_payments p WHERE p.invoice_id = i.id);
+
 -- 4. Standardize types across any remaining imported legacy bills to ERP casing
 -- Skip rows whose number already exists under the new type (uq_company_type_invoice_no).
 UPDATE public.invoices i

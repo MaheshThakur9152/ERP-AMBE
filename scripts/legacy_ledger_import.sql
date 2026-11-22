@@ -2034,27 +2034,6 @@ BEGIN
   VALUES (v_id, '2026-03-17', 12959, 229, 'NEFT', NULL, now());
 END $$;
 
--- Invoice: ASF/25-26/062 (SERVICE)
-DO $$
-DECLARE
-  v_id uuid;
-BEGIN
-  -- 1. Check if invoice already exists in platform for this site
-  SELECT id INTO v_id FROM public.invoices
-  WHERE site_id = '5772ede7-7923-47fb-ab7b-fe4cd7c4309a' AND UPPER(TRIM(invoice_no)) = UPPER(TRIM('ASF/25-26/062'))
-  LIMIT 1;
-
-  IF v_id IS NULL THEN
-    INSERT INTO public.invoices (
-      company_id, site_id, invoice_no, type, status, invoice_date, billing_period,
-      is_material, is_legacy, legacy_notes, sub_total, tax_total, grand_total, created_at
-    ) VALUES (
-      '24a111d0-b7ec-4eb2-8d04-b32f9b3f04c6', '5772ede7-7923-47fb-ab7b-fe4cd7c4309a', 'ASF/25-26/062', 'Tax Invoice',
-      'Generated', '2026-04-03', 'November-25', false, true, 'Legacy CSV import', 29452, 5301, 0, now()
-    ) RETURNING id INTO v_id;
-  END IF;
-END $$;
-
 -- Invoice: ASF/26-27/015 (SERVICE)
 DO $$
 DECLARE
@@ -2078,27 +2057,6 @@ BEGIN
   DELETE FROM public.invoice_payments WHERE invoice_id = v_id;
   INSERT INTO public.invoice_payments (invoice_id, paid_date, amount, tds_amount, mode, remark, created_at)
   VALUES (v_id, '2026-05-29', 34164, 589, 'Cheque', NULL, now());
-END $$;
-
--- Invoice: ASF/25-26/064 (SERVICE)
-DO $$
-DECLARE
-  v_id uuid;
-BEGIN
-  -- 1. Check if invoice already exists in platform for this site
-  SELECT id INTO v_id FROM public.invoices
-  WHERE site_id = '5772ede7-7923-47fb-ab7b-fe4cd7c4309a' AND UPPER(TRIM(invoice_no)) = UPPER(TRIM('ASF/25-26/064'))
-  LIMIT 1;
-
-  IF v_id IS NULL THEN
-    INSERT INTO public.invoices (
-      company_id, site_id, invoice_no, type, status, invoice_date, billing_period,
-      is_material, is_legacy, legacy_notes, sub_total, tax_total, grand_total, created_at
-    ) VALUES (
-      '24a111d0-b7ec-4eb2-8d04-b32f9b3f04c6', '5772ede7-7923-47fb-ab7b-fe4cd7c4309a', 'ASF/25-26/064', 'Tax Invoice',
-      'Generated', '2026-04-03', 'February-26', false, true, 'Legacy CSV import', 491752, 88515, 0, now()
-    ) RETURNING id INTO v_id;
-  END IF;
 END $$;
 
 -- Invoice: ASF/26-27/016 (SERVICE)
