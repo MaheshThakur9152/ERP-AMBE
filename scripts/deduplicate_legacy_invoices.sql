@@ -57,12 +57,17 @@ WHERE id IN (
 );
 
 -- 4. Standardize types across any remaining imported legacy bills to ERP casing
-UPDATE public.invoices
+-- Skip rows whose number already exists under the new type (uq_company_type_invoice_no).
+UPDATE public.invoices i
 SET type = 'Tax Invoice'
-WHERE type = 'tax_invoice';
+WHERE i.type = 'tax_invoice'
+  AND NOT EXISTS (SELECT 1 FROM public.invoices o
+                  WHERE o.company_id = i.company_id AND o.type = 'Tax Invoice' AND o.invoice_no = i.invoice_no);
 
-UPDATE public.invoices
+UPDATE public.invoices i
 SET type = 'Proforma Invoice'
-WHERE type = 'proforma';
+WHERE i.type = 'proforma'
+  AND NOT EXISTS (SELECT 1 FROM public.invoices o
+                  WHERE o.company_id = i.company_id AND o.type = 'Proforma Invoice' AND o.invoice_no = i.invoice_no);
 
 COMMIT;
