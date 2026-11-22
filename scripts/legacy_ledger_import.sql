@@ -268,6 +268,10 @@ BEGIN
       'Generated', '2026-04-13', 'Feb 1', false, true, 'Legacy CSV import', 107083.21, 19275, 126359, now()
     ) RETURNING id INTO v_id;
   END IF;
+  -- Payment: Paid=₹124217, TDS=₹2141.6642
+  DELETE FROM public.invoice_payments WHERE invoice_id = v_id;
+  INSERT INTO public.invoice_payments (invoice_id, paid_date, amount, tds_amount, mode, remark, created_at)
+  VALUES (v_id, '2026-05-13', 124217, 2141.6642, 'NEFT', 'Paid with previous bill', now());
 END $$;
 
 -- Invoice: ASF/26-27/008 (SERVICE)
@@ -289,6 +293,10 @@ BEGIN
       'Generated', '2026-04-13', 'Mar 1', false, true, 'Legacy CSV import', 114204.19, 20557, 134761, now()
     ) RETURNING id INTO v_id;
   END IF;
+  -- Payment: Paid=₹132477, TDS=₹2284.0838
+  DELETE FROM public.invoice_payments WHERE invoice_id = v_id;
+  INSERT INTO public.invoice_payments (invoice_id, paid_date, amount, tds_amount, mode, remark, created_at)
+  VALUES (v_id, '2026-05-13', 132477, 2284.0838, 'NEFT', 'Paid with previous bill', now());
 END $$;
 
 -- Invoice: ASF/26-27/033 (SERVICE)
@@ -430,6 +438,10 @@ BEGIN
       'Generated', '2025-11-23', 'October-1', false, true, 'Legacy CSV import', 50000, 9000, 59000, now()
     ) RETURNING id INTO v_id;
   END IF;
+  -- Payment: Paid=₹58000, TDS=₹1000
+  DELETE FROM public.invoice_payments WHERE invoice_id = v_id;
+  INSERT INTO public.invoice_payments (invoice_id, paid_date, amount, tds_amount, mode, remark, created_at)
+  VALUES (v_id, '2025-11-23', 58000, 1000, 'NEFT', 'Paid with previous bill', now());
 END $$;
 
 -- Invoice: ASF/25-26/031 (SERVICE)
@@ -552,6 +564,10 @@ BEGIN
       'Generated', '2026-04-13', 'Mar-26', false, true, 'Legacy CSV import', 38709.68, 6967.7424, 45678, now()
     ) RETURNING id INTO v_id;
   END IF;
+  -- Payment: Paid=₹44904, TDS=₹774.1936
+  DELETE FROM public.invoice_payments WHERE invoice_id = v_id;
+  INSERT INTO public.invoice_payments (invoice_id, paid_date, amount, tds_amount, mode, remark, created_at)
+  VALUES (v_id, '2026-05-13', 44904, 774.1936, 'NEFT', 'Paid with previous bill', now());
 END $$;
 
 -- Invoice: ASF/26-27/032 (SERVICE)
@@ -1013,6 +1029,10 @@ BEGIN
       'Generated', '2026-03-25', 'February-1', false, true, 'Legacy CSV import', 221708, 39907.44, 261616, now()
     ) RETURNING id INTO v_id;
   END IF;
+  -- Payment: Paid=₹257182, TDS=₹4434.16
+  DELETE FROM public.invoice_payments WHERE invoice_id = v_id;
+  INSERT INTO public.invoice_payments (invoice_id, paid_date, amount, tds_amount, mode, remark, created_at)
+  VALUES (v_id, '2026-03-30', 257182, 4434.16, 'NEFT', 'Paid with previous bill', now());
 END $$;
 
 -- Invoice: ASF/25-26/061 (SERVICE)

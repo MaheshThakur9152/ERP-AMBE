@@ -173,6 +173,9 @@ export function generateSQL(outputFile: string) {
     const cRemToPay = getCol(/rem/i);
     const cTds = getCol(/^tds$/i) !== -1 ? getCol(/^tds$/i) : getCol(/tds/i);
     const cTdsAmt = getCol(/tds\s*amt/i);
+    // One CSV payment can settle several bills (e.g. 466197 on Jan's row = Jan 209015 + Feb 257182);
+    // the excess carries to the following rows that have no status of their own.
+    let carry = { amt: 0, date: null as string | null, mode: 'NEFT' };
 
     for (let i = headerIndex + 1; i < rows.length; i++) {
       const row = rows[i];
@@ -212,7 +215,18 @@ export function generateSQL(outputFile: string) {
         } else {
           finalPaid = netReceivable;
           finalTds = tds;
+          carry = paidAmtCol > netReceivable + 1
+            ? { amt: Math.round((paidAmtCol - netReceivable) * 100) / 100, date: paidDate, mode }
+            : { amt: 0, date: null, mode };
         }
+      }
+
+      let carried = false;
+      if (!isPaid && !statusCol && carry.amt > 0 && carry.amt >= netReceivable - 1) {
+        finalPaid = netReceivable;
+        finalTds = tds;
+        carried = true;
+        carry = { ...carry, amt: Math.round((carry.amt - netReceivable) * 100) / 100 };
       }
 
       totalInvoices++;
@@ -240,11 +254,11 @@ export function generateSQL(outputFile: string) {
 
       if (finalPaid + finalTds > 0) {
         totalPayments++;
-        const pDate = paidDate || invDate || new Date().toISOString().slice(0, 10);
+        const pDate = (carried ? carry.date : paidDate) || invDate || new Date().toISOString().slice(0, 10);
         sql.push(`  -- Payment: Paid=₹${finalPaid}, TDS=₹${finalTds}`);
         sql.push(`  DELETE FROM public.invoice_payments WHERE invoice_id = v_id;`);
         sql.push(`  INSERT INTO public.invoice_payments (invoice_id, paid_date, amount, tds_amount, mode, remark, created_at)`);
-        sql.push(`  VALUES (v_id, ${esc(pDate)}, ${finalPaid}, ${finalTds}, ${esc(mode)}, ${esc(remark)}, now());`);
+        sql.push(`  VALUES (v_id, ${esc(pDate)}, ${finalPaid}, ${finalTds}, ${esc(carried ? carry.mode : mode)}, ${esc(carried ? 'Paid with previous bill' : remark)}, now());`);
       }
 
       sql.push(`END $$;`);
