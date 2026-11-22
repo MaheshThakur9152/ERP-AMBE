@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { LedgerService, LedgerError } from '../services/ledgerService';
+import { LegacyLedgerService } from '../services/legacyLedgerService';
 import { addSiteSheet, addSummarySheet, newWorkbook } from '../services/ledgerExport';
 import ExcelJS from 'exceljs';
 
@@ -116,6 +117,56 @@ export class LedgerController {
     try {
       await LedgerService.deletePayment(req.params.id);
       res.json({ ok: true });
+    } catch (err) {
+      fail(err, res, next);
+    }
+  }
+
+  /** POST /api/ledger/legacy/preview (multipart file) - tabs found and the site each one matches. */
+  static async legacyPreview(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      if (!req.file) throw new LedgerError(400, 'Upload the legacy ledger .xlsx file');
+      res.json(await LegacyLedgerService.preview(req.file.buffer));
+    } catch (err) {
+      fail(err, res, next);
+    }
+  }
+
+  /** POST /api/ledger/legacy/import (multipart file + mapping JSON {tab: siteId}) */
+  static async legacyImport(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      if (!req.file) throw new LedgerError(400, 'Upload the legacy ledger .xlsx file');
+      const mapping = z.record(z.string(), z.string()).parse(JSON.parse(String(req.body.mapping || '{}')));
+      res.json(await LegacyLedgerService.import(req.file.buffer, mapping, req.file.originalname, (req as any).user?.id || null));
+    } catch (err) {
+      fail(err, res, next);
+    }
+  }
+
+  /** GET /api/ledger/sites/:siteId/legacy */
+  static async legacyRows(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      res.json(await LegacyLedgerService.rowsForSite(req.params.siteId));
+    } catch (err) {
+      fail(err, res, next);
+    }
+  }
+
+  /** POST /api/ledger/legacy/rows/:rowId/payments - money received after cut-off for an old xlsx bill. */
+  static async legacyAddPayment(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const p = paymentSchema.parse(req.body);
+      res.status(201).json(await LegacyLedgerService.addPayment(req.params.rowId, p, (req as any).user?.id || null));
+    } catch (err) {
+      fail(err, res, next);
+    }
+  }
+
+  /** DELETE /api/ledger/legacy/payments/:id */
+  static async legacyDeletePayment(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      await LegacyLedgerService.deletePayment(req.params.id);
+      res.status(204).end();
     } catch (err) {
       fail(err, res, next);
     }

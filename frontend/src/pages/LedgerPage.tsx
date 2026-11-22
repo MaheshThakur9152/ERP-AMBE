@@ -12,6 +12,7 @@ import { InvoiceRecord } from '@/features/invoice-hub/types';
 import { InvoiceData } from '@/features/invoices/types/invoice';
 import { InvoiceTemplate } from '@/features/invoices/components/InvoiceTemplate';
 import { MaterialInvoiceTemplate } from '@/features/invoices/components/MaterialInvoiceTemplate';
+import { LegacyTab, LegacyUploadModal } from '@/features/ledger/LegacyLedger';
 
 type Mode = 'NEFT' | 'RTGS' | 'IMPS' | 'UPI' | 'Cheque' | 'Cash' | 'Other';
 const MODES: Mode[] = ['NEFT', 'RTGS', 'IMPS', 'UPI', 'Cheque', 'Cash', 'Other'];
@@ -57,7 +58,10 @@ interface SiteInfo {
   work_order_ref: string | null;
   work_order_period: string | null;
   opening: number;
+  opening_manual: number;
   opening_note: string | null;
+  legacy_due: number;
+  cutoff: string | null;
 }
 
 interface SummaryRow {
@@ -201,7 +205,7 @@ export const LedgerPage: React.FC = () => {
       onBack={() => { setSiteId(null); loadSummary(); }}
     />
   ) : (
-    <Summary rows={summary} exporting={exporting} onExport={exportUrl} onOpen={setSiteId} />
+    <Summary rows={summary} exporting={exporting} onExport={exportUrl} onOpen={setSiteId} onReload={loadSummary} />
   );
 };
 
@@ -214,7 +218,9 @@ const Summary: React.FC<{
   exporting: boolean;
   onExport: (url: string, name: string) => void;
   onOpen: (siteId: string) => void;
-}> = ({ rows, exporting, onExport, onOpen }) => {
+  onReload: () => void;
+}> = ({ rows, exporting, onExport, onOpen, onReload }) => {
+  const [legacyUpload, setLegacyUpload] = useState(false);
   const [search, setSearch] = useState('');
   const [hideEmpty, setHideEmpty] = useState(true);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'outstanding', dir: -1 });
@@ -270,15 +276,21 @@ const Summary: React.FC<{
             {k.withDues} of {list.length} sites with dues · as of {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
           </p>
         </div>
-        <button
-          disabled={exporting}
-          onClick={() => onExport('/api/ledger/export', 'ALL_OUTSTANDING.xlsx')}
-          className={btnPrimary}
-          title="ALL sheet + one sheet per site"
-        >
-          <FileSpreadsheet size={16} /> {exporting ? 'Preparing…' : 'Export workbook'}
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => setLegacyUpload(true)} className={btnGhost} title="Old xlsx ledger, stored as-is per site">
+            <Upload size={16} /> Upload legacy xlsx
+          </button>
+          <button
+            disabled={exporting}
+            onClick={() => onExport('/api/ledger/export', 'ALL_OUTSTANDING.xlsx')}
+            className={btnPrimary}
+            title="ALL sheet + one sheet per site"
+          >
+            <FileSpreadsheet size={16} /> {exporting ? 'Preparing…' : 'Export workbook'}
+          </button>
+        </div>
       </div>
+      {legacyUpload && <LegacyUploadModal onClose={() => setLegacyUpload(false)} onDone={onReload} />}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Stat label="Total outstanding" value={`₹${inr(k.outstanding)}`} sub={`${k.withDues} sites`} tone="red" />
@@ -415,6 +427,7 @@ const SiteLedger: React.FC<{
   const [viewing, setViewing] = useState<{ id: string; type: string; url: string; fileName: string; title: string } | null>(null);
   const [templatePreview, setTemplatePreview] = useState<InvoiceData | null>(null);
   const [editingOpening, setEditingOpening] = useState<string | null>(null);
+  const [tab, setTab] = useState<'current' | 'legacy'>('current');
   const [loading, setLoading] = useState(true);
   const invoiceCache = useRef<InvoiceRecord[] | null>(null);
 
@@ -587,7 +600,21 @@ const SiteLedger: React.FC<{
         <Stat label="Proforma pending" value={`₹${inr(sum.proforma)}`} sub={`Grand total ₹${inr(sum.total)}`} />
       </div>
 
-      <div className="flex gap-1.5 flex-wrap">
+      <div className="flex items-center gap-1 border-b border-slate-200">
+        {([['current', site?.cutoff ? `Current · from ${new Date(`${site.cutoff}T00:00:00`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}` : 'Current'], ['legacy', 'Legacy (xlsx)']] as const).map(([k, l]) => (
+          <button
+            key={k}
+            onClick={() => setTab(k)}
+            className={`px-4 py-2 text-sm font-semibold border-b-2 -mb-px ${tab === k ? 'border-teal-600 text-teal-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+          >
+            {l}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'legacy' && <LegacyTab siteId={siteId} onChanged={load} />}
+
+      <div className={`flex gap-1.5 flex-wrap ${tab === 'legacy' ? 'hidden' : ''}`}>
         {(['All', 'Unpaid', 'Partial', 'Paid', 'Cancelled'] as const).map((f) => (
           <button
             key={f}
@@ -601,7 +628,7 @@ const SiteLedger: React.FC<{
         ))}
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-xl overflow-auto max-h-[70vh]">
+      <div className={`bg-white border border-slate-200 rounded-xl overflow-auto max-h-[70vh] ${tab === 'legacy' ? 'hidden' : ''}`}>
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wide sticky top-0 z-10 shadow-[0_1px_0_0_#e2e8f0]">
             <tr>
@@ -622,7 +649,14 @@ const SiteLedger: React.FC<{
           <tbody className="divide-y divide-slate-100">
             <tr className="bg-amber-50/60">
               <td />
-              <td className={`${td} font-semibold text-slate-700`} colSpan={5}>Previous year pending</td>
+              <td className={`${td} font-semibold text-slate-700`} colSpan={5}>
+                Previous year pending
+                {(site?.legacy_due || 0) > 0 && (
+                  <button onClick={() => setTab('legacy')} className="ml-2 text-xs font-normal text-teal-700 hover:underline">
+                    legacy unpaid ₹{inr2(site!.legacy_due)}{site!.opening_manual ? ` + manual ₹${inr2(site!.opening_manual)}` : ''}
+                  </button>
+                )}
+              </td>
               <td className={`${td} text-right tabular-nums font-semibold`}>
                 {editingOpening !== null ? (
                   <span className="inline-flex items-center gap-1">
@@ -638,7 +672,7 @@ const SiteLedger: React.FC<{
                     <button onClick={() => setEditingOpening(null)} className="text-slate-400 p-1"><X size={15} /></button>
                   </span>
                 ) : (
-                  <button onClick={() => setEditingOpening(String(site?.opening || 0))} className="inline-flex items-center gap-1.5 hover:text-teal-700 group">
+                  <button onClick={() => setEditingOpening(String(site?.opening_manual || 0))} title="Edit the manual part; legacy unpaid comes from the xlsx" className="inline-flex items-center gap-1.5 hover:text-teal-700 group">
                     {inr2(site?.opening || 0)} <Pencil size={12} className="opacity-0 group-hover:opacity-100" />
                   </button>
                 )}
@@ -777,7 +811,7 @@ const SiteLedger: React.FC<{
         </table>
       </div>
 
-      <div className="grid lg:grid-cols-3 gap-4">
+      <div className={`grid lg:grid-cols-3 gap-4 ${tab === 'legacy' ? 'hidden' : ''}`}>
         <div className="lg:col-span-2 bg-white border border-slate-200 rounded-xl p-4">
           <h2 className="text-sm font-bold text-slate-800 mb-3">Proforma invoices</h2>
           {proformas.length === 0 ? (

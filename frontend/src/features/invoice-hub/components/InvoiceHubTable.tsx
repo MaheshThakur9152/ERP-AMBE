@@ -632,9 +632,10 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
 
   const siteList = Array.from(
     new Set([
-      ...dbSites.map((s) => s.site_name).filter(Boolean),
+      // Code name first: several sites share a site name (Ajmera HK and KEYMAN are both "AJMERA REALTY & INFRA INDIA LIMITED")
+      ...dbSites.map((s) => s.code_name || s.site_name).filter(Boolean),
       ...invoices
-        .map((inv) => inv.sites?.site_name || inv.siteName || (inv as any).site_name || inv.payload?.party?.siteName || '')
+        .map((inv) => inv.sites?.code_name || inv.sites?.codeName || inv.sites?.site_name || inv.siteName || (inv as any).site_name || inv.payload?.party?.siteName || '')
         .filter(Boolean),
     ])
   );
@@ -656,8 +657,7 @@ export const InvoiceHubTable: React.FC<InvoiceHubTableProps> = ({
     const codeName = inv.sites?.code_name || inv.sites?.codeName || (inv as any).code_name || (inv as any).codeName || '';
     const matchesSite =
       filterSite === 'all' ||
-      siteName.toLowerCase() === filterSite.toLowerCase() ||
-      codeName.toLowerCase() === filterSite.toLowerCase();
+      (codeName ? codeName.toLowerCase() === filterSite.toLowerCase() : siteName.toLowerCase() === filterSite.toLowerCase());
 
     if (!matchesSite) return false;
 

@@ -1,5 +1,6 @@
 import { PoolClient } from 'pg';
 import { pool, withTransaction } from '../db/pool';
+import { BILL_MONTH, LEGACY_SITE_CTE, ensureLegacyTables } from './legacyLedgerService';
 
 // Bills that count toward outstanding: not cancelled, not proforma.
 export const ACTIVE_BILL = `i.cancelled_at IS NULL AND COALESCE(i.status, '') <> 'Cancelled' AND i.type NOT ILIKE '%proforma%'`;
@@ -60,8 +61,13 @@ export interface SiteInfo {
   code_name: string | null;
   work_order_ref: string | null;
   work_order_period: string | null;
+  /** Manual opening + unpaid legacy (xlsx) rows. */
   opening: number;
+  opening_manual: number;
   opening_note: string | null;
+  legacy_due: number;
+  /** First month shown from ERP bills; earlier months come from the legacy xlsx. Null: no legacy rows. */
+  cutoff: string | null;
 }
 
 export interface PaymentInput {
@@ -102,18 +108,22 @@ export function siteTotals(site: SiteInfo, rows: LedgerRow[]) {
 export const LedgerService = {
   /** One row per site with aging buckets on unpaid balances (the "ALL" sheet). */
   async summary() {
+    await ensureLegacyTables();
     const { rows } = await pool.query(`
       WITH p AS (
         SELECT invoice_id, SUM(amount) AS paid, SUM(tds_amount) AS tds, MAX(paid_date) AS last_paid
         FROM public.invoice_payments GROUP BY invoice_id
       ),
+      ${LEGACY_SITE_CTE},
       b AS (
         SELECT i.site_id, i.grand_total, COALESCE(p.paid, 0) AS paid, COALESCE(p.tds, 0) AS tds, p.last_paid,
                GREATEST(i.grand_total - COALESCE(p.paid, 0) - COALESCE(p.tds, 0), 0) AS due,
                COALESCE(CURRENT_DATE - i.invoice_date, 0) AS age
         FROM public.invoices i
         LEFT JOIN p ON p.invoice_id = i.id
+        LEFT JOIN lg cut ON cut.site_id = i.site_id
         WHERE ${ACTIVE_BILL} AND ${NOT_SHADOWED}
+          AND (cut.cutoff IS NULL OR ${BILL_MONTH()} >= cut.cutoff)
       )
       SELECT s.id AS site_id, s.client_name, s.site_name, NULLIF(TRIM(s.code_name), '') AS code_name, s.work_order_ref,
              COUNT(b.site_id)::int AS bills,
@@ -128,26 +138,35 @@ export const LedgerService = {
              COALESCE(SUM(b.due) FILTER (WHERE b.due > ${SETTLE_TOLERANCE} AND b.age > 90), 0)::float AS age_90_plus,
              MAX(b.age) FILTER (WHERE b.due > ${SETTLE_TOLERANCE})::int AS oldest_days,
              MAX(b.last_paid)::text AS last_paid,
-             COALESCE(ob.amount, 0)::float AS opening
+             (COALESCE(ob.amount, 0) + COALESCE(lg.due, 0))::float AS opening,
+             COALESCE(lg.due, 0)::float AS legacy_due,
+             lg.cutoff::text AS cutoff
       FROM public.sites s
       LEFT JOIN b ON b.site_id = s.id
       LEFT JOIN public.ledger_opening_balances ob ON ob.site_id = s.id
-      GROUP BY s.id, ob.amount
+      LEFT JOIN lg ON lg.site_id = s.id
+      GROUP BY s.id, ob.amount, lg.due, lg.cutoff
       ORDER BY COALESCE(NULLIF(TRIM(s.code_name), ''), s.client_name), s.site_name
     `);
     return rows.map((r) => ({ ...r, outstanding: r.opening + r.due }));
   },
 
   async site(siteId: string, from: string | null, to: string | null): Promise<{ site: SiteInfo; rows: LedgerRow[] }> {
+    await ensureLegacyTables();
     const siteRes = await pool.query(
-      `SELECT s.id, s.client_name, s.site_name, NULLIF(TRIM(s.code_name), '') AS code_name, s.work_order_ref, s.work_order_period,
-              COALESCE(ob.amount, 0)::float AS opening, ob.note AS opening_note
+      `WITH ${LEGACY_SITE_CTE}
+       SELECT s.id, s.client_name, s.site_name, NULLIF(TRIM(s.code_name), '') AS code_name, s.work_order_ref, s.work_order_period,
+              (COALESCE(ob.amount, 0) + COALESCE(lg.due, 0))::float AS opening,
+              COALESCE(ob.amount, 0)::float AS opening_manual, ob.note AS opening_note,
+              COALESCE(lg.due, 0)::float AS legacy_due, lg.cutoff::text AS cutoff
        FROM public.sites s
        LEFT JOIN public.ledger_opening_balances ob ON ob.site_id = s.id
+       LEFT JOIN lg ON lg.site_id = s.id
        WHERE s.id = $1`,
       [siteId]
     );
     if (!siteRes.rows.length) throw new LedgerError(404, 'Site not found');
+    const cutoff: string | null = siteRes.rows[0].cutoff;
 
     const { rows } = await pool.query(
       `SELECT i.id, i.invoice_no, i.type, i.status, i.invoice_date::text AS invoice_date, i.billing_period,
@@ -167,9 +186,10 @@ export const LedgerService = {
          AND ${NOT_SHADOWED}
          AND ($2::date IS NULL OR i.invoice_date >= $2::date)
          AND ($3::date IS NULL OR i.invoice_date <= $3::date)
+         AND ($4::date IS NULL OR ${BILL_MONTH()} >= $4::date)
        GROUP BY i.id
        ORDER BY i.invoice_date NULLS LAST, i.invoice_no`,
-      [siteId, from, to]
+      [siteId, from, to, cutoff]
     );
     return { site: siteRes.rows[0], rows };
   },
