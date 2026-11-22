@@ -886,7 +886,7 @@ const PaymentModal: React.FC<{ row: LedgerRow; payment?: Payment; onClose: () =>
     if (over) return;
     setSaving(true);
     try {
-      const body = { ...form, amount, tds_amount: tds };
+      const body = { ...form, amount, tds_amount: tds, ref_no: form.ref_no.trim() || null, remark: form.remark.trim() || null };
       if (payment) await api(`/api/ledger/payments/${payment.id}`, 'PATCH', body);
       else await api(`/api/ledger/invoices/${row.id}/payments`, 'POST', body);
       toast.success('Payment saved');
@@ -939,7 +939,7 @@ const PaymentModal: React.FC<{ row: LedgerRow; payment?: Payment; onClose: () =>
             Settle in full (remaining − TDS)
           </button>
           <div className="grid grid-cols-2 gap-3">
-            <label className={lbl}>UTR / Cheque no<input value={form.ref_no} onChange={set('ref_no')} className={field} /></label>
+            <label className={lbl}>UTR / Cheque no <span className="text-slate-400 font-normal">(optional)</span><input value={form.ref_no} onChange={set('ref_no')} className={field} /></label>
             <label className={lbl}>Remark<input value={form.remark} onChange={set('remark')} className={field} /></label>
           </div>
           {over && <p className="text-sm text-rose-600">Amount + TDS exceeds the remaining balance by ₹{inr2(-after)}.</p>}
