@@ -221,6 +221,8 @@ export class GoogleAttendanceSheetService {
       ({ sheetId, startRowIndex: r0, endRowIndex: r1, startColumnIndex: c0, endColumnIndex: c1 });
     const solid = { style: 'SOLID', color: { red: 0, green: 0, blue: 0 } };
     const none = { style: 'NONE' };
+    const blueText = { red: 0, green: 0, blue: 1 };
+    const hdBlue = { red: 0, green: 0.69, blue: 0.94 };
     const req: any[] = [];
 
     // Drop template conditional rules (delete from the end so indexes stay valid)
@@ -265,9 +267,16 @@ export class GoogleAttendanceSheetService {
     });
     req.push({
       repeatCell: {
-        range: grid(top, end, 3, 5), // Employee name + weekly off
+        range: grid(top, end, B, AN), // template is bold throughout
         cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 10 } } },
         fields: 'userEnteredFormat.textFormat',
+      },
+    });
+    req.push({
+      repeatCell: {
+        range: grid(top, end, AJ, AN),
+        cell: { userEnteredFormat: { numberFormat: { type: 'NUMBER', pattern: '0.00' } } },
+        fields: 'userEnteredFormat.numberFormat',
       },
     });
     req.push({
@@ -284,13 +293,46 @@ export class GoogleAttendanceSheetService {
     }
     const s0 = top + staffCount * 2;
     req.push({ mergeCells: { range: grid(s0, s0 + 3, B, E), mergeType: 'MERGE_ROWS' } });
+    req.push({ mergeCells: { range: grid(s0 + 1, s0 + 3, AJ + 1, AN), mergeType: 'MERGE_ALL' } }); // GOOD DAY
     req.push({
       repeatCell: {
-        range: grid(s0, s0 + 3, B, AN),
-        cell: { userEnteredFormat: { textFormat: { bold: true, fontSize: 10 }, backgroundColor: { red: 0.95, green: 0.95, blue: 0.95 } } },
-        fields: 'userEnteredFormat(textFormat,backgroundColor)',
+        range: grid(s0 + 1, s0 + 2, F, AJ), // PRESENT STRENGTH row is pink in the template
+        cell: { userEnteredFormat: { backgroundColor: { red: 0.96, green: 0.8, blue: 0.8 } } },
+        fields: 'userEnteredFormat.backgroundColor',
       },
     });
+
+    // Footer: legend (B:D) and manpower box (R:AB), 2 rows under the table like the template
+    const f0 = s0 + 5;
+    const fmt = (range: any, f: any) => ({ repeatCell: { range, cell: { userEnteredFormat: f }, fields: 'userEnteredFormat' } });
+    const boxed = (range: any) => ({
+      updateBorders: { range, top: solid, bottom: solid, left: solid, right: solid, innerHorizontal: solid, innerVertical: solid },
+    });
+    const bold = { bold: true, fontSize: 10 };
+    req.push(fmt(grid(f0, f0 + 6, B, 4), { verticalAlignment: 'MIDDLE', textFormat: bold }));
+    req.push(fmt(grid(f0, f0 + 6, B, 2), { horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE', textFormat: bold }));
+    req.push(fmt(grid(f0 + 1, f0 + 2, B, 2), {
+      horizontalAlignment: 'CENTER', backgroundColor: { red: 0.8, green: 0.8, blue: 0.8 }, textFormat: { ...bold, foregroundColor: blueText },
+    }));
+    req.push(fmt(grid(f0 + 2, f0 + 3, B, 2), {
+      horizontalAlignment: 'CENTER', backgroundColor: hdBlue, textFormat: { ...bold, foregroundColor: { red: 1, green: 1, blue: 1 } },
+    }));
+    for (let k = 0; k < 6; k++) req.push({ mergeCells: { range: grid(f0 + k, f0 + k + 1, 2, 4), mergeType: 'MERGE_ALL' } });
+    req.push(boxed(grid(f0, f0 + 6, B, 4)));
+
+    const R = 17, Y = 24, AA = 26, AC = 28;
+    req.push(fmt(grid(f0, f0 + 4, R, AC), { horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE', textFormat: bold }));
+    req.push({
+      repeatCell: {
+        range: grid(f0, f0 + 4, AA, AC),
+        cell: { userEnteredFormat: { horizontalAlignment: 'RIGHT', numberFormat: { type: 'NUMBER', pattern: '0.00' } } },
+        fields: 'userEnteredFormat(horizontalAlignment,numberFormat)',
+      },
+    });
+    for (const k of [0, 2, 3]) req.push({ mergeCells: { range: grid(f0 + k, f0 + k + 1, R, AA), mergeType: 'MERGE_ALL' } });
+    req.push({ mergeCells: { range: grid(f0 + 1, f0 + 2, R, Y), mergeType: 'MERGE_ALL' } });
+    for (let k = 0; k < 4; k++) req.push({ mergeCells: { range: grid(f0 + k, f0 + k + 1, AA, AC), mergeType: 'MERGE_ALL' } });
+    req.push(boxed(grid(f0, f0 + 4, R, AC)));
 
     const statusRule = (text: string, bg: any, fg: any) => ({
       addConditionalFormatRule: {
@@ -304,11 +346,10 @@ export class GoogleAttendanceSheetService {
         },
       },
     });
-    const blue = { red: 0.1, green: 0.2, blue: 0.85 };
-    req.push(statusRule('W/O', { red: 0.8, green: 0.8, blue: 0.8 }, blue));
-    req.push(statusRule('WOP', { red: 0.55, green: 0.85, blue: 0.4 }, blue));
-    req.push(statusRule('A', { red: 1, green: 0.85, blue: 0.85 }, { red: 0.8, green: 0, blue: 0 }));
-    req.push(statusRule('HD', { red: 1, green: 0.9, blue: 0.6 }, { red: 0.6, green: 0.3, blue: 0 }));
+    const white = { red: 1, green: 1, blue: 1 };
+    req.push(statusRule('W/O', { red: 0.8, green: 0.8, blue: 0.8 }, blueText));
+    req.push(statusRule('A', white, { red: 1, green: 0, blue: 0 }));
+    req.push(statusRule('HD', hdBlue, white));
     return req;
   }
 
@@ -842,14 +883,15 @@ export class GoogleAttendanceSheetService {
             if (!rawStatus || rawStatus === 'A') {
               finalStatus = 'W/O';
             } else if (rawStatus === 'P' || rawStatus === 'WOP') {
-              finalStatus = 'WOP';
+              finalStatus = 'W/O';
             }
           }
 
           dayValues.push(finalStatus || '');
 
           const rawOt = empOtMap.get(d);
-          otValues.push(rawOt || '');
+          const workedOff = isWo && (rawStatus === 'P' || rawStatus === 'WOP');
+          otValues.push(rawOt || (workedOff ? 'P' : ''));
         } else {
           dayValues.push('');
           otValues.push('');
@@ -949,7 +991,7 @@ export class GoogleAttendanceSheetService {
       });
       valueUpdates.push({
         range: `'${targetSheetTitle}'!AK${s2}:AN${s2}`,
-        values: [[`=SUM(AK7:AK${lastEmpRow})`, 'Good Day', '', '']],
+        values: [[`=SUM(F${s2}:AJ${s2})`, 'GOOD DAY', '', '']],
       });
 
       // Summary Row 3: TOTAL STRENGTH
@@ -973,8 +1015,32 @@ export class GoogleAttendanceSheetService {
       });
       valueUpdates.push({
         range: `'${targetSheetTitle}'!AK${s3}:AN${s3}`,
-        values: [[`=AN${s1}`, '', '', '']],
+        values: [[`=SUM(F${s3}:AJ${s3})`, '', '', '']],
       });
+
+      // Footer legend + manpower box (formatted in buildLayoutRequests at the same rows)
+      const f1 = s3 + 3;
+      valueUpdates.push({
+        range: `'${targetSheetTitle}'!B${f1}:C${f1 + 5}`,
+        values: [
+          ['N/J', 'NEW JOINING'],
+          ['W/O', 'WEEKLY OFF'],
+          ['HD', 'HOLIDAY'],
+          ['H/F', 'IN BIOMETRIC MISSING'],
+          ['H/F', 'OUT BIOMETRIC MISSING'],
+          ['', 'IN & OUT BIOMETRIC MISS'],
+        ],
+      });
+      valueUpdates.push({ range: `'${targetSheetTitle}'!R${f1}`, values: [['JANITORS']] });
+      valueUpdates.push({ range: `'${targetSheetTitle}'!AA${f1}`, values: [[`=AN${s1}`]] });
+      valueUpdates.push({
+        range: `'${targetSheetTitle}'!R${f1 + 1}:AA${f1 + 1}`,
+        values: [['Monthly Approved Manpower', '', '', '', '', '', '', staffList.length, daysInMonth, `=Y${f1 + 1}*Z${f1 + 1}`]],
+      });
+      valueUpdates.push({ range: `'${targetSheetTitle}'!R${f1 + 2}`, values: [['(Excess)/Shortage Manpower']] });
+      valueUpdates.push({ range: `'${targetSheetTitle}'!AA${f1 + 2}`, values: [[`=AA${f1 + 1}-AA${f1}`]] });
+      valueUpdates.push({ range: `'${targetSheetTitle}'!R${f1 + 3}`, values: [['Monthly %']] });
+      valueUpdates.push({ range: `'${targetSheetTitle}'!AA${f1 + 3}`, values: [[`=IFERROR(AA${f1}/AA${f1 + 1}*100,"-")`]] });
     }
 
     // 10. Execute batch value updates
