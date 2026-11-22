@@ -32,6 +32,12 @@ Thumbs.db
 *.sql.gz
 backups/
 
+# Spreadsheets & Legacy data
+*.xlsx
+*.csv
+*.tsv
+leger-lagcy/
+
 # Ignored folders
 old frontend/
 
