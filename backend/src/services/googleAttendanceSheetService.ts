@@ -797,7 +797,7 @@ export class GoogleAttendanceSheetService {
     for (let d = 1; d <= 31; d++) {
       if (d <= daysInMonth) {
         const dt = new Date(yearNum, monthNum - 1, d);
-        weekdaysRow.push(DAY_NAMES[dt.getDay()].slice(0, 3));
+        weekdaysRow.push(DAY_NAMES[dt.getDay()]);
       } else {
         weekdaysRow.push('');
       }
@@ -1005,7 +1005,8 @@ export class GoogleAttendanceSheetService {
                   },
                   cell: {
                     userEnteredFormat: {
-                      textRotation: { vertical: true },
+                      // angle 90 turns the word sideways; vertical:true stacks letters ("S a t")
+                      textRotation: { angle: 90 },
                       horizontalAlignment: 'CENTER',
                       verticalAlignment: 'MIDDLE',
                     },
@@ -1013,6 +1014,30 @@ export class GoogleAttendanceSheetService {
                   fields: 'userEnteredFormat(textRotation,horizontalAlignment,verticalAlignment)',
                 },
               },
+              // Header labels sideways like the template: Biometric Code, Weekly Off, TOTAL PRESENT DAYS, WEEKLY OFF, HD, TOTAL DAYS
+              ...[[2, 3], [4, 5], [36, 40]].map(([c0, c1]) => ({
+                repeatCell: {
+                  range: { sheetId: targetSheetId, startRowIndex: 4, endRowIndex: 6, startColumnIndex: c0, endColumnIndex: c1 },
+                  cell: {
+                    userEnteredFormat: {
+                      textRotation: { angle: 90 },
+                      horizontalAlignment: 'CENTER',
+                      verticalAlignment: 'MIDDLE',
+                      wrapStrategy: 'WRAP',
+                      textFormat: { bold: true },
+                    },
+                  },
+                  fields: 'userEnteredFormat(textRotation,horizontalAlignment,verticalAlignment,wrapStrategy,textFormat.bold)',
+                },
+              })),
+              // Narrow columns now that their headers are sideways
+              ...[[2, 3, 45], [4, 5, 60], [36, 39, 50], [39, 40, 70]].map(([c0, c1, px]) => ({
+                updateDimensionProperties: {
+                  range: { sheetId: targetSheetId, dimension: 'COLUMNS', startIndex: c0, endIndex: c1 },
+                  properties: { pixelSize: px },
+                  fields: 'pixelSize',
+                },
+              })),
               // Tab named for this site and month instead of the template's ("Updated SEPTEMBER_HK")
               {
                 updateSheetProperties: {
@@ -1023,7 +1048,7 @@ export class GoogleAttendanceSheetService {
                   fields: 'title',
                 },
               },
-              // Row 6 height 60px
+              // Row 6 tall enough for "Wednesday" / "TOTAL PRESENT DAYS" turned sideways
               {
                 updateDimensionProperties: {
                   range: {
@@ -1032,7 +1057,7 @@ export class GoogleAttendanceSheetService {
                     startIndex: 5,
                     endIndex: 6,
                   },
-                  properties: { pixelSize: 60 },
+                  properties: { pixelSize: 110 },
                   fields: 'pixelSize',
                 },
               },
