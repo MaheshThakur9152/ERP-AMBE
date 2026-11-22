@@ -14,7 +14,32 @@ export interface GoogleSheetSyncResult {
   year: string;
   lastSyncedAt: string;
   status: string;
+  version: number;
   missingBiometricStaff?: string[];
+}
+
+export interface SheetVersion {
+  version: number;
+  spreadsheetId: string;
+  spreadsheetUrl: string;
+  note: string | null;
+  sentAt: string | null;
+  createdAt: string | null;
+  lastSyncedAt: string | null;
+}
+
+export interface SyncOptions {
+  /** Client correction: copy the latest version into v(N+1) instead of updating it. */
+  newVersion?: boolean;
+  note?: string | null;
+}
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+function httpError(statusCode: number, message: string) {
+  const err: any = new Error(message);
+  err.statusCode = statusCode;
+  return err;
 }
 
 export class GoogleAttendanceSheetService {
@@ -69,10 +94,118 @@ export class GoogleAttendanceSheetService {
           updated_at timestamptz DEFAULT NOW()
         );
       `);
+      // Versioning: one row per version (v1, v2 ... after client corrections). Existing rows become v1.
+      await pool.query(`
+        ALTER TABLE public.google_attendance_sheets ADD COLUMN IF NOT EXISTS version int NOT NULL DEFAULT 1;
+        ALTER TABLE public.google_attendance_sheets ADD COLUMN IF NOT EXISTS note text;
+        ALTER TABLE public.google_attendance_sheets ADD COLUMN IF NOT EXISTS sent_at timestamptz;
+        ALTER TABLE public.google_attendance_sheets ADD COLUMN IF NOT EXISTS created_by uuid;
+        ALTER TABLE public.google_attendance_sheets DROP CONSTRAINT IF EXISTS uq_google_attendance_site_month_year;
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_google_att_site_month_year_version
+          ON public.google_attendance_sheets(site_id, month, year, version);
+      `);
       this.tablesInitialized = true;
     } catch (err: any) {
       console.warn('⚠️ Auto-init google_attendance_sheets warning:', err.message);
     }
+  }
+
+  private static async assertSiteAccess(siteId: string, user?: AuthUser) {
+    const siteRes = await pool.query('SELECT * FROM public.sites WHERE id = $1 LIMIT 1;', [siteId]);
+    if (!siteRes.rows?.length) throw httpError(404, 'Site not found');
+    const site = siteRes.rows[0];
+    const userCompanyId = user?.company_id || user?.companyId;
+    if (user && user.role !== 'superadmin' && userCompanyId && site.company_id && site.company_id !== userCompanyId) {
+      throw httpError(403, 'Access denied: Unauthorized site access');
+    }
+    return site;
+  }
+
+  private static async latestVersionRow(siteId: string, monthStr: string, yearStr: string) {
+    const res = await pool.query(
+      `SELECT * FROM public.google_attendance_sheets
+       WHERE site_id = $1 AND month = $2 AND year = $3 ORDER BY version DESC LIMIT 1;`,
+      [siteId, monthStr, yearStr]
+    );
+    return res.rows[0] || null;
+  }
+
+  /** Walks/creates root/<year>/<MM Month>/<site> and returns the site folder id. */
+  private static async ensureFolderPath(drive: any, rootId: string, names: string[]): Promise<string> {
+    let parent = rootId;
+    for (const name of names) {
+      const res = await drive.files.list({
+        q: `'${parent}' in parents and name = '${name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+        fields: 'files(id)',
+        supportsAllDrives: true,
+        includeItemsFromAllDrives: true,
+      });
+      const found = res.data.files?.[0]?.id;
+      if (found) {
+        parent = found;
+        continue;
+      }
+      const created = await drive.files.create({
+        requestBody: { name, mimeType: 'application/vnd.google-apps.folder', parents: [parent] },
+        fields: 'id',
+        supportsAllDrives: true,
+      });
+      parent = created.data.id!;
+    }
+    return parent;
+  }
+
+  /** All versions for the period, newest first. */
+  public static async listVersions(siteId: string, monthStr: string, yearStr: string): Promise<SheetVersion[]> {
+    const res = await pool.query(
+      `SELECT version, spreadsheet_id, spreadsheet_url, note, sent_at, created_at, last_synced_at
+       FROM public.google_attendance_sheets
+       WHERE site_id = $1 AND month = $2 AND year = $3 ORDER BY version DESC;`,
+      [siteId, monthStr, yearStr]
+    );
+    const iso = (d: any) => (d ? new Date(d).toISOString() : null);
+    return res.rows.map((r: any) => ({
+      version: r.version,
+      spreadsheetId: r.spreadsheet_id,
+      spreadsheetUrl: r.spreadsheet_url,
+      note: r.note,
+      sentAt: iso(r.sent_at),
+      createdAt: iso(r.created_at),
+      lastSyncedAt: iso(r.last_synced_at),
+    }));
+  }
+
+  /** Locks the latest version: no more syncs into it, and its tabs get an edit warning in Google Sheets. */
+  public static async markSent(siteId: string, monthStr: string, yearStr: string, user?: AuthUser) {
+    await this.ensureTablesExist();
+    await this.assertSiteAccess(siteId, user);
+    const latest = await this.latestVersionRow(siteId, monthStr, yearStr);
+    if (!latest) throw httpError(404, 'No Google Sheet exists for this site and month yet');
+    if (latest.sent_at) throw httpError(409, `v${latest.version} is already marked as sent`);
+
+    await pool.query('UPDATE public.google_attendance_sheets SET sent_at = NOW(), updated_at = NOW() WHERE id = $1;', [latest.id]);
+    try {
+      const { auth } = await this.getAuthClient();
+      const sheets = google.sheets({ version: 'v4', auth });
+      const meta = await sheets.spreadsheets.get({ spreadsheetId: latest.spreadsheet_id, fields: 'sheets.properties.sheetId' });
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId: latest.spreadsheet_id,
+        requestBody: {
+          requests: (meta.data.sheets || []).map((sh: any) => ({
+            addProtectedRange: {
+              protectedRange: {
+                range: { sheetId: sh.properties.sheetId },
+                description: `v${latest.version} sent to client - make a new version for corrections`,
+                warningOnly: true,
+              },
+            },
+          })),
+        },
+      });
+    } catch (protErr: any) {
+      console.warn('⚠️ Could not protect sent attendance sheet:', protErr.message);
+    }
+    return this.listVersions(siteId, monthStr, yearStr);
   }
 
   public static async clearStoredToken(): Promise<void> {
@@ -463,7 +596,15 @@ export class GoogleAttendanceSheetService {
     monthStr: string,
     yearStr: string,
     user?: AuthUser
-  ): Promise<{ spreadsheetId: string; spreadsheetUrl: string; lastSyncedAt?: string; status?: string } | null> {
+  ): Promise<{
+    spreadsheetId: string;
+    spreadsheetUrl: string;
+    lastSyncedAt?: string;
+    status?: string;
+    version: number;
+    sentAt: string | null;
+    versions: SheetVersion[];
+  } | null> {
     try {
       await this.ensureTablesExist();
 
@@ -478,20 +619,16 @@ export class GoogleAttendanceSheetService {
         return null;
       }
 
-      const existingRes = await pool.query(
-        `SELECT spreadsheet_id, spreadsheet_url, last_synced_at, sync_status
-         FROM public.google_attendance_sheets
-         WHERE site_id = $1 AND month = $2 AND year = $3 LIMIT 1;`,
-        [siteId, monthStr, yearStr]
-      );
-
-      if (existingRes.rows && existingRes.rows.length > 0) {
-        const row = existingRes.rows[0];
+      const row = await this.latestVersionRow(siteId, monthStr, yearStr);
+      if (row) {
         return {
           spreadsheetId: row.spreadsheet_id,
           spreadsheetUrl: row.spreadsheet_url,
           lastSyncedAt: row.last_synced_at ? new Date(row.last_synced_at).toISOString() : undefined,
           status: row.sync_status,
+          version: row.version,
+          sentAt: row.sent_at ? new Date(row.sent_at).toISOString() : null,
+          versions: await this.listVersions(siteId, monthStr, yearStr),
         };
       }
 
@@ -503,154 +640,137 @@ export class GoogleAttendanceSheetService {
   }
 
   /**
-   * Find or create persistent Google Spreadsheet for a given (siteId, month, year)
+   * Returns the spreadsheet to sync into. Default: the latest version (refused once it was sent to the
+   * client). With opts.newVersion: copies the latest version (or the template) into v(N+1).
+   * Files live in <root>/<year>/<MM Month>/<site>/"<site> - <Mon YYYY> - vN (DD-MM-YYYY)".
    */
   public static async getOrCreateSpreadsheet(
     siteId: string,
     monthStr: string,
     yearStr: string,
-    user?: AuthUser
-  ): Promise<{ spreadsheetId: string; spreadsheetUrl: string; isNew: boolean; templateFileId: string }> {
-    // Verify site authorization
-    const siteRes = await pool.query('SELECT * FROM public.sites WHERE id = $1 LIMIT 1;', [siteId]);
-    if (!siteRes.rows || siteRes.rows.length === 0) {
-      const err: any = new Error('Site not found');
-      err.statusCode = 404;
-      throw err;
-    }
-    const site = siteRes.rows[0];
-
-    const userCompanyId = user?.company_id || user?.companyId;
-    if (user && user.role !== 'superadmin' && userCompanyId && site.company_id && site.company_id !== userCompanyId) {
-      const err: any = new Error('Access denied: Unauthorized site access');
-      err.statusCode = 403;
-      throw err;
-    }
+    user?: AuthUser,
+    opts: SyncOptions = {}
+  ): Promise<{ id: string; spreadsheetId: string; spreadsheetUrl: string; isNew: boolean; templateFileId: string; version: number }> {
+    await this.ensureTablesExist();
+    const site = await this.assertSiteAccess(siteId, user);
 
     const { auth } = await this.getAuthClient();
     const drive = google.drive({ version: 'v3', auth });
+    const rootFolderId = process.env.DRIVE_ATTENDANCE_FOLDER_ID || '13-QiXNmxhFrvS3GCzfPU4U_4EcO4VhzS';
 
-    const folderId = process.env.DRIVE_ATTENDANCE_FOLDER_ID || '13-QiXNmxhFrvS3GCzfPU4U_4EcO4VhzS';
-
-    // 1. Check existing persistent mapping in database
-    const existingRes = await pool.query(
-      `SELECT * FROM public.google_attendance_sheets WHERE site_id = $1 AND month = $2 AND year = $3 LIMIT 1;`,
-      [siteId, monthStr, yearStr]
-    );
-
-    if (existingRes.rows && existingRes.rows.length > 0) {
-      const existing = existingRes.rows[0];
-      // Verify spreadsheet still exists in Drive
+    let latest = await this.latestVersionRow(siteId, monthStr, yearStr);
+    let latestFileOk = false;
+    if (latest) {
       try {
-        await drive.files.get({ fileId: existing.spreadsheet_id, fields: 'id, trashed', supportsAllDrives: true });
-        return {
-          spreadsheetId: existing.spreadsheet_id,
-          spreadsheetUrl: existing.spreadsheet_url,
-          isNew: false,
-          templateFileId: existing.template_file_id || '',
-        };
+        const f = await drive.files.get({ fileId: latest.spreadsheet_id, fields: 'id, trashed', supportsAllDrives: true });
+        latestFileOk = !f.data.trashed;
       } catch (checkErr: any) {
-        // If file was deleted/trashed on Drive (404), purge row and recreate
-        if (checkErr.code === 404 || checkErr.status === 404) {
-          await pool.query('DELETE FROM public.google_attendance_sheets WHERE id = $1;', [existing.id]);
-        } else {
-          // Pass through authorization or network errors
-          throw checkErr;
-        }
+        if (checkErr.code !== 404 && checkErr.status !== 404) throw checkErr;
       }
     }
 
-    // 2. Identify master template
-    const template = await this.findTemplateFile(drive, folderId);
+    if (latest && !opts.newVersion) {
+      if (latest.sent_at) {
+        throw httpError(409, `v${latest.version} was sent to the client and is locked. Create a new version for corrections.`);
+      }
+      if (latestFileOk) {
+        return {
+          id: latest.id,
+          spreadsheetId: latest.spreadsheet_id,
+          spreadsheetUrl: latest.spreadsheet_url,
+          isNew: false,
+          templateFileId: latest.template_file_id || '',
+          version: latest.version,
+        };
+      }
+      // Draft file deleted in Drive: recreate the same version number from the template
+      await pool.query('DELETE FROM public.google_attendance_sheets WHERE id = $1;', [latest.id]);
+      latest = null;
+    }
 
+    const version = latest ? latest.version + 1 : 1;
     const monthNum = parseInt(monthStr, 10);
-    const monthName = !isNaN(monthNum)
-      ? new Date(2000, monthNum - 1, 1).toLocaleString('default', { month: 'long' })
-      : monthStr;
-    const cleanSiteName = (site.site_name || site.name || 'Site').trim();
-    const sheetTitle = `Attendance - ${cleanSiteName} - ${monthName} ${yearStr}`;
+    const monthName = MONTH_NAMES[monthNum - 1] || monthStr;
+    const cleanSiteName = (site.site_name || site.name || 'Site').trim().replace(/[\\/]/g, '-');
+    const today = new Date().toLocaleDateString('en-GB', { timeZone: 'Asia/Kolkata' }).replace(/\//g, '-');
+    const sheetTitle = `${cleanSiteName} - ${monthName.slice(0, 3)} ${yearStr} - v${version} (${today})`;
+    const folderId = await this.ensureFolderPath(drive, rootFolderId, [
+      yearStr,
+      `${String(monthNum).padStart(2, '0')} ${monthName}`,
+      cleanSiteName,
+    ]);
 
-    let createdId = '';
-    let webViewLink = '';
-    let isExistingInDrive = false;
+    // A correction starts from the previous version so manual edits (approved manpower etc.) carry over.
+    const template = latest && latestFileOk
+      ? { id: latest.spreadsheet_id, name: 'previous version', isNative: true }
+      : await this.findTemplateFile(drive, rootFolderId);
 
-    // Check if sheet already exists in Drive folder to avoid duplicate creation
-    try {
-      const existingInDrive = await drive.files.list({
-        q: `'${folderId}' in parents and name = '${sheetTitle.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false`,
-        fields: 'files(id, name, webViewLink)',
+    let createdId: string;
+    let webViewLink: string;
+    if (template.isNative) {
+      const copyRes = await drive.files.copy({
+        fileId: template.id,
+        requestBody: { name: sheetTitle, parents: [folderId] },
+        fields: 'id, webViewLink',
         supportsAllDrives: true,
-        includeItemsFromAllDrives: true,
       });
-      if (existingInDrive.data.files && existingInDrive.data.files.length > 0) {
-        const found = existingInDrive.data.files[0];
-        createdId = found.id!;
-        webViewLink = found.webViewLink || `https://docs.google.com/spreadsheets/d/${createdId}/edit`;
-        isExistingInDrive = true;
-      }
-    } catch {
-      // Ignore search error, fallback to create
+      createdId = copyRes.data.id!;
+      webViewLink = copyRes.data.webViewLink || `https://docs.google.com/spreadsheets/d/${createdId}/edit`;
+    } else {
+      // Convert / import XLSX template into a native Google Sheet
+      const xlsxBuffer = await drive.files.get(
+        { fileId: template.id, alt: 'media', supportsAllDrives: true },
+        { responseType: 'arraybuffer' }
+      );
+      const createRes = await drive.files.create({
+        requestBody: { name: sheetTitle, mimeType: 'application/vnd.google-apps.spreadsheet', parents: [folderId] },
+        media: {
+          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          body: Readable.from(Buffer.from(xlsxBuffer.data as ArrayBuffer)),
+        },
+        fields: 'id, webViewLink',
+        supportsAllDrives: true,
+      });
+      createdId = createRes.data.id!;
+      webViewLink = createRes.data.webViewLink || `https://docs.google.com/spreadsheets/d/${createdId}/edit`;
     }
 
-    if (!createdId) {
-      if (template.isNative) {
-        // Copy native Google Sheet template
-        const copyRes = await drive.files.copy({
-          fileId: template.id,
-          requestBody: {
-            name: sheetTitle,
-            parents: [folderId],
-          },
-          fields: 'id, name, webViewLink',
-          supportsAllDrives: true,
-        });
-        createdId = copyRes.data.id!;
-        webViewLink = copyRes.data.webViewLink || `https://docs.google.com/spreadsheets/d/${createdId}/edit`;
-      } else {
-        // Convert / import XLSX template into a native Google Sheet
-        const xlsxBuffer = await drive.files.get(
-          { fileId: template.id, alt: 'media', supportsAllDrives: true },
-          { responseType: 'arraybuffer' }
-        );
-        const stream = Readable.from(Buffer.from(xlsxBuffer.data as ArrayBuffer));
-
-        const createRes = await drive.files.create({
-          requestBody: {
-            name: sheetTitle,
-            mimeType: 'application/vnd.google-apps.spreadsheet',
-            parents: [folderId],
-          },
-          media: {
-            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            body: stream,
-          },
-          fields: 'id, name, webViewLink',
-          supportsAllDrives: true,
-        });
-        createdId = createRes.data.id!;
-        webViewLink = createRes.data.webViewLink || `https://docs.google.com/spreadsheets/d/${createdId}/edit`;
+    if (template.name === 'previous version') {
+      // The copy inherits v(N-1)'s "sent" edit warnings; the new version is a draft again.
+      try {
+        const sheets = google.sheets({ version: 'v4', auth });
+        const meta = await sheets.spreadsheets.get({ spreadsheetId: createdId, fields: 'sheets.protectedRanges.protectedRangeId' });
+        const ids = (meta.data.sheets || []).flatMap((sh: any) => (sh.protectedRanges || []).map((pr: any) => pr.protectedRangeId));
+        if (ids.length) {
+          await sheets.spreadsheets.batchUpdate({
+            spreadsheetId: createdId,
+            requestBody: { requests: ids.map((protectedRangeId: number) => ({ deleteProtectedRange: { protectedRangeId } })) },
+          });
+        }
+      } catch (protErr: any) {
+        console.warn('⚠️ Could not clear inherited protection:', protErr.message);
       }
     }
 
-    // Persist mapping with conflict guard
     const insertRes = await pool.query(
       `INSERT INTO public.google_attendance_sheets (
-         company_id, site_id, month, year, spreadsheet_id, spreadsheet_url, template_file_id, sync_status, last_synced_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', NOW())
-       ON CONFLICT (site_id, month, year) DO UPDATE SET
-         spreadsheet_id = EXCLUDED.spreadsheet_id,
-         spreadsheet_url = EXCLUDED.spreadsheet_url,
-         template_file_id = EXCLUDED.template_file_id,
-         updated_at = NOW()
-       RETURNING *;`,
-      [site.company_id || null, siteId, monthStr, yearStr, createdId, webViewLink, template.id]
+         company_id, site_id, month, year, version, note, created_by,
+         spreadsheet_id, spreadsheet_url, template_file_id, sync_status, last_synced_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'pending', NOW())
+       RETURNING id;`,
+      [
+        site.company_id || null, siteId, monthStr, yearStr, version, opts.note?.trim() || null,
+        user?.id || null, createdId, webViewLink, template.id,
+      ]
     );
 
     return {
+      id: insertRes.rows[0].id,
       spreadsheetId: createdId,
       spreadsheetUrl: webViewLink,
-      isNew: !isExistingInDrive,
+      isNew: true,
       templateFileId: template.id,
+      version,
     };
   }
 
@@ -661,7 +781,8 @@ export class GoogleAttendanceSheetService {
     siteId: string,
     month: string | number,
     year: string | number,
-    user?: AuthUser
+    user?: AuthUser,
+    opts: SyncOptions = {}
   ): Promise<GoogleSheetSyncResult> {
     const monthStr = String(month);
     const yearStr = String(year);
@@ -669,11 +790,12 @@ export class GoogleAttendanceSheetService {
     const yearNum = parseInt(yearStr, 10);
 
     // 1. Get or create persistent spreadsheet
-    const { spreadsheetId, spreadsheetUrl, isNew } = await this.getOrCreateSpreadsheet(
+    const { id: sheetRowId, spreadsheetId, spreadsheetUrl, isNew, version } = await this.getOrCreateSpreadsheet(
       siteId,
       monthStr,
       yearStr,
-      user
+      user,
+      opts
     );
 
     const { auth } = await this.getAuthClient();
@@ -1141,8 +1263,8 @@ export class GoogleAttendanceSheetService {
       await pool.query(
         `UPDATE public.google_attendance_sheets
          SET sync_status = 'synced', last_synced_at = NOW(), last_error = NULL, updated_at = NOW()
-         WHERE site_id = $1 AND month = $2 AND year = $3;`,
-        [siteId, monthStr, yearStr]
+         WHERE id = $1;`,
+        [sheetRowId]
       );
 
       return {
@@ -1154,6 +1276,7 @@ export class GoogleAttendanceSheetService {
         year: yearStr,
         lastSyncedAt: new Date().toISOString(),
         status: 'synced',
+        version,
         missingBiometricStaff: missingBiometricStaff.length > 0 ? missingBiometricStaff : undefined,
       };
     } catch (apiErr: any) {
@@ -1164,8 +1287,8 @@ export class GoogleAttendanceSheetService {
       await pool.query(
         `UPDATE public.google_attendance_sheets
          SET sync_status = 'failed', last_error = $1, updated_at = NOW()
-         WHERE site_id = $2 AND month = $3 AND year = $4;`,
-        [safeErrorMsg, siteId, monthStr, yearStr]
+         WHERE id = $2;`,
+        [safeErrorMsg, sheetRowId]
       );
 
       throw apiErr;

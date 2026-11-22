@@ -10,6 +10,7 @@ router.get('/google-sheet/auth', requireAuth, requireAdmin, GoogleAttendanceShee
 router.get('/google-sheet/callback', GoogleAttendanceSheetController.handleAuthCallback);
 router.get('/google-sheet', requireAuth, GoogleAttendanceSheetController.getExistingSheet);
 router.post('/google-sheet/sync', requireAuth, requireAdmin, GoogleAttendanceSheetController.syncSheet);
+router.post('/google-sheet/mark-sent', requireAuth, requireAdmin, GoogleAttendanceSheetController.markSent);
 
 router.get('/records', requireAuth, AttendanceController.getRecords);
 router.post('/records', requireAuth, requireAdmin, AttendanceController.upsertRecords);

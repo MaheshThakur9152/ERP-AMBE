@@ -100,17 +100,24 @@ export class GoogleAttendanceSheetController {
    */
   static async syncSheet(req: Request, res: Response): Promise<void> {
     try {
-      const { siteId, month, year } = req.body;
+      const { siteId, month, year, newVersion, note } = req.body;
 
       if (!siteId || !month || !year) {
         res.status(400).json({ success: false, error: 'siteId, month, and year are required in request body' });
         return;
       }
 
-      const result = await GoogleAttendanceSheetService.syncAttendanceData(siteId, month, year, req.user);
+      const result = await GoogleAttendanceSheetService.syncAttendanceData(siteId, month, year, req.user, {
+        newVersion: Boolean(newVersion),
+        note: typeof note === 'string' ? note.slice(0, 500) : null,
+      });
       res.json({ success: true, data: result });
     } catch (error: any) {
       console.error('❌ Controller error syncing Google Sheet:', error);
+      if ([403, 404, 409].includes(error.statusCode)) {
+        res.status(error.statusCode).json({ success: false, error: error.message });
+        return;
+      }
       const parsed = parseGoogleError(error);
       res.status(parsed.status).json({
         success: false,
@@ -119,6 +126,28 @@ export class GoogleAttendanceSheetController {
         authUrl: parsed.authUrl,
         consoleUrl: parsed.consoleUrl,
       });
+    }
+  }
+
+  /**
+   * Lock the latest version as sent to the client; later corrections go into a new version.
+   */
+  static async markSent(req: Request, res: Response): Promise<void> {
+    try {
+      const { siteId, month, year } = req.body;
+      if (!siteId || !month || !year) {
+        res.status(400).json({ success: false, error: 'siteId, month, and year are required in request body' });
+        return;
+      }
+      const versions = await GoogleAttendanceSheetService.markSent(siteId, String(month), String(year), req.user);
+      res.json({ success: true, data: { versions } });
+    } catch (error: any) {
+      if ([403, 404, 409].includes(error.statusCode)) {
+        res.status(error.statusCode).json({ success: false, error: error.message });
+        return;
+      }
+      const parsed = parseGoogleError(error);
+      res.status(parsed.status).json({ success: false, error: parsed.message, requiresAuth: parsed.requiresAuth, authUrl: parsed.authUrl });
     }
   }
 

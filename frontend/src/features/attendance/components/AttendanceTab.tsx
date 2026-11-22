@@ -77,6 +77,9 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
     spreadsheetId: string;
     spreadsheetUrl: string;
     lastSyncedAt?: string;
+    version?: number;
+    sentAt?: string | null;
+    versions?: Array<{ version: number; spreadsheetUrl: string; note: string | null; sentAt: string | null; createdAt: string | null }>;
   } | null>(null);
   const [googleAuthModal, setGoogleAuthModal] = useState<{
     isOpen: boolean;
@@ -675,9 +678,7 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
         );
         if (res.ok) {
           const json = await res.json();
-          if (!isCancelled && json.data) {
-            setGoogleSheetInfo(json.data);
-          }
+          if (!isCancelled) setGoogleSheetInfo(json.data || null);
         }
       } catch {
         if (!isCancelled) setGoogleSheetInfo(null);
@@ -689,11 +690,42 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
     };
   }, [selectedSiteFilter, selectedMonth, selectedYear]);
 
-  // Handle Google Sheet Synchronization
-  const handleSyncGoogleSheet = async () => {
+  const refreshGoogleSheetInfo = async () => {
+    const res = await fetchWithRetry(
+      `/api/attendance/google-sheet?siteId=${selectedSiteFilter}&month=${selectedMonth}&year=${selectedYear}`,
+      { skipErrorToast: true }
+    );
+    if (res.ok) setGoogleSheetInfo((await res.json()).data || null);
+  };
+
+  // Lock the latest version once it goes to the client; corrections then need a new version.
+  const handleMarkSheetSent = async () => {
+    if (!googleSheetInfo || !window.confirm(`Mark v${googleSheetInfo.version ?? 1} as sent to the client? It will be locked.`)) return;
+    try {
+      const res = await fetchWithRetry('/api/attendance/google-sheet/mark-sent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ siteId: selectedSiteFilter, month: selectedMonth, year: selectedYear }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed to mark as sent');
+      toast.success(`v${googleSheetInfo.version ?? 1} marked as sent`);
+      await refreshGoogleSheetInfo();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to mark as sent');
+    }
+  };
+
+  // Handle Google Sheet Synchronization (newVersion: client correction into v(N+1), old file kept)
+  const handleSyncGoogleSheet = async (newVersion = false) => {
     if (selectedSiteFilter === 'all') {
       toast.info('Please select a specific site location to generate or sync its Google Sheet.');
       return;
+    }
+    let note: string | null = null;
+    if (newVersion) {
+      note = window.prompt('What did the client correct? (saved with the new version)', '');
+      if (note === null) return;
     }
 
     setIsSyncingGoogleSheet(true);
@@ -705,16 +737,18 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
           siteId: selectedSiteFilter,
           month: selectedMonth,
           year: selectedYear,
+          newVersion,
+          note,
         }),
       });
 
       const json = await res.json();
       if (res.ok && json.data) {
-        setGoogleSheetInfo(json.data);
+        await refreshGoogleSheetInfo();
         toast.success(
           json.data.isNew
-            ? 'Created and synchronized new Google Sheet!'
-            : 'Synchronized attendance to Google Sheet!'
+            ? `Created v${json.data.version} and synchronized attendance!`
+            : `Synchronized attendance to v${json.data.version}!`
         );
         if (json.data.spreadsheetUrl) {
           window.open(json.data.spreadsheetUrl, '_blank', 'noopener,noreferrer');
@@ -916,12 +950,14 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
-                disabled={isSyncingGoogleSheet}
-                onClick={handleSyncGoogleSheet}
+                disabled={isSyncingGoogleSheet || Boolean(googleSheetInfo?.sentAt)}
+                onClick={() => handleSyncGoogleSheet()}
                 className="bg-[#0F9D58] hover:bg-emerald-700 disabled:opacity-60 text-white px-3.5 py-1.5 rounded-lg flex items-center gap-1.5 shadow-xs text-xs font-bold transition-all cursor-pointer"
                 title={
                   selectedSiteFilter === 'all'
                     ? 'Select a specific site to create or open Google Sheet'
+                    : googleSheetInfo?.sentAt
+                    ? `v${googleSheetInfo.version} was sent to the client and is locked. Use New version for corrections.`
                     : googleSheetInfo
                     ? 'Sync latest attendance data to persistent Google Sheet'
                     : 'Create and sync persistent Google Sheet for this site and month'
@@ -936,7 +972,7 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
                   {isSyncingGoogleSheet
                     ? 'Syncing Sheet...'
                     : googleSheetInfo
-                    ? 'Sync Google Sheet'
+                    ? `Sync v${googleSheetInfo.version ?? 1}`
                     : 'Google Sheet'}
                 </span>
               </button>
@@ -950,8 +986,50 @@ export const AttendanceTab: React.FC<AttendanceTabProps> = ({
                   title="Open existing Google Sheet in new tab"
                 >
                   <ExternalLink size={13} />
-                  <span>Open Sheet</span>
+                  <span>Open v{googleSheetInfo.version ?? 1}</span>
                 </a>
+              )}
+
+              {googleSheetInfo && !googleSheetInfo.sentAt && (
+                <button
+                  type="button"
+                  onClick={handleMarkSheetSent}
+                  className="bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 px-2.5 py-1.5 rounded-lg text-xs font-bold shadow-2xs cursor-pointer"
+                  title="Lock this version as the one sent to the client"
+                >
+                  Mark sent
+                </button>
+              )}
+
+              {googleSheetInfo && (
+                <button
+                  type="button"
+                  disabled={isSyncingGoogleSheet}
+                  onClick={() => handleSyncGoogleSheet(true)}
+                  className="bg-white hover:bg-amber-50 text-amber-700 border border-amber-300 disabled:opacity-60 px-2.5 py-1.5 rounded-lg text-xs font-bold shadow-2xs cursor-pointer"
+                  title="Client correction: keep the current file and create the next version with today's date"
+                >
+                  New version
+                </button>
+              )}
+
+              {(googleSheetInfo?.versions?.length ?? 0) > 1 && (
+                <select
+                  value=""
+                  onChange={(e) => e.target.value && window.open(e.target.value, '_blank', 'noopener,noreferrer')}
+                  className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs font-bold text-gray-700 bg-white"
+                  title="Open an older version"
+                >
+                  <option value="">History</option>
+                  {googleSheetInfo!.versions!.map((v) => (
+                    <option key={v.version} value={v.spreadsheetUrl}>
+                      v{v.version}
+                      {v.createdAt ? ` · ${new Date(v.createdAt).toLocaleDateString('en-GB')}` : ''}
+                      {v.sentAt ? ' · sent' : ' · draft'}
+                      {v.note ? ` · ${v.note.slice(0, 40)}` : ''}
+                    </option>
+                  ))}
+                </select>
               )}
             </div>
 
