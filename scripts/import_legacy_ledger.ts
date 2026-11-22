@@ -218,16 +218,20 @@ export function generateSQL(outputFile: string) {
       sql.push(`DECLARE`);
       sql.push(`  v_id uuid;`);
       sql.push(`BEGIN`);
-      sql.push(`  INSERT INTO public.invoices (`);
-      sql.push(`    company_id, site_id, invoice_no, type, status, invoice_date, billing_period,`);
-      sql.push(`    is_material, is_legacy, legacy_notes, sub_total, tax_total, grand_total, created_at`);
-      sql.push(`  ) VALUES (`);
-      sql.push(`    '24a111d0-b7ec-4eb2-8d04-b32f9b3f04c6', '${siteConfig.id}', ${esc(invNo)}, ${esc(isProforma ? 'proforma' : 'tax_invoice')},`);
-      sql.push(`    'Generated', ${esc(invDate)}, ${esc(period)}, ${isMaterial}, true, 'Legacy CSV import', ${subTotal}, ${taxTotal}, ${grandTotal}, now()`);
-      sql.push(`  )`);
-      sql.push(`  ON CONFLICT (company_id, type, invoice_no) DO UPDATE SET`);
-      sql.push(`    sub_total = EXCLUDED.sub_total, tax_total = EXCLUDED.tax_total, grand_total = EXCLUDED.grand_total, is_material = EXCLUDED.is_material`);
-      sql.push(`  RETURNING id INTO v_id;`);
+      sql.push(`  -- 1. Check if invoice already exists in platform for this site`);
+      sql.push(`  SELECT id INTO v_id FROM public.invoices`);
+      sql.push(`  WHERE site_id = '${siteConfig.id}' AND UPPER(TRIM(invoice_no)) = UPPER(TRIM(${esc(invNo)}))`);
+      sql.push(`  LIMIT 1;`);
+      sql.push(``);
+      sql.push(`  IF v_id IS NULL THEN`);
+      sql.push(`    INSERT INTO public.invoices (`);
+      sql.push(`      company_id, site_id, invoice_no, type, status, invoice_date, billing_period,`);
+      sql.push(`      is_material, is_legacy, legacy_notes, sub_total, tax_total, grand_total, created_at`);
+      sql.push(`    ) VALUES (`);
+      sql.push(`      '24a111d0-b7ec-4eb2-8d04-b32f9b3f04c6', '${siteConfig.id}', ${esc(invNo)}, ${esc(isProforma ? 'Proforma Invoice' : 'Tax Invoice')},`);
+      sql.push(`      'Generated', ${esc(invDate)}, ${esc(period)}, ${isMaterial}, true, 'Legacy CSV import', ${subTotal}, ${taxTotal}, ${grandTotal}, now()`);
+      sql.push(`    ) RETURNING id INTO v_id;`);
+      sql.push(`  END IF;`);
 
       if (finalPaid + finalTds > 0) {
         totalPayments++;
