@@ -159,6 +159,7 @@ export function generateSQL(outputFile: string) {
 
     const cInvNo = getCol(/invoice\s*no/i);
     const cPeriod = getCol(/billing\s*period/i);
+    const cInvPeriod = getCol(/invoice\s*period/i);
     const cNature = getCol(/nature/i);
     const cDate = getCol(/invoice\s*date/i);
     const cSubTotal = getCol(/sub\s*total/i);
@@ -187,7 +188,9 @@ export function generateSQL(outputFile: string) {
       const taxTotal = cGst !== -1 ? cleanNum(row[cGst]) : 0;
       const grandTotal = cAmount !== -1 ? cleanNum(row[cAmount]) : 0;
       const invDate = cDate !== -1 ? parseDate(row[cDate]) : null;
-      const period = cPeriod !== -1 ? (row[cPeriod] || '').trim() || null : null;
+      let period = cPeriod !== -1 ? (row[cPeriod] || '').trim() || null : null;
+      // Reissued rows hold a note ("Above changed to 15 Inv no") in the period column; use the invoice period instead.
+      if (period && /changed to/i.test(period) && cInvPeriod !== -1) period = (row[cInvPeriod] || '').trim() || period;
 
       const statusCol = (cStatus !== -1 ? row[cStatus] : '').trim();
       const paidAmtCol = cPaidAmt !== -1 ? cleanNum(row[cPaidAmt]) : 0;

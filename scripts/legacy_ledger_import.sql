@@ -2050,7 +2050,7 @@ BEGIN
       is_material, is_legacy, legacy_notes, sub_total, tax_total, grand_total, created_at
     ) VALUES (
       '24a111d0-b7ec-4eb2-8d04-b32f9b3f04c6', '5772ede7-7923-47fb-ab7b-fe4cd7c4309a', 'ASF/26-27/015', 'Tax Invoice',
-      'Generated', '2026-05-04', 'Above changed to 15 Inv no', false, true, 'Legacy CSV import', 29452, 5301, 34753, now()
+      'Generated', '2026-05-04', '1st to 30th Novmber  2025', false, true, 'Legacy CSV import', 29452, 5301, 34753, now()
     ) RETURNING id INTO v_id;
   END IF;
   -- Payment: Paid=₹34164, TDS=₹589
@@ -2075,7 +2075,7 @@ BEGIN
       is_material, is_legacy, legacy_notes, sub_total, tax_total, grand_total, created_at
     ) VALUES (
       '24a111d0-b7ec-4eb2-8d04-b32f9b3f04c6', '5772ede7-7923-47fb-ab7b-fe4cd7c4309a', 'ASF/26-27/016', 'Tax Invoice',
-      'Generated', '2026-05-04', 'Above changed to 16 Inv no', false, true, 'Legacy CSV import', 491752, 88515, 580267, now()
+      'Generated', '2026-05-04', '1st to 28th February 2026', false, true, 'Legacy CSV import', 491752, 88515, 580267, now()
     ) RETURNING id INTO v_id;
   END IF;
   -- Payment: Paid=₹570432, TDS=₹9835

@@ -62,6 +62,12 @@ WHERE i.legacy_notes = 'Legacy CSV import'
   AND COALESCE(i.grand_total, 0) = 0
   AND NOT EXISTS (SELECT 1 FROM public.invoice_payments p WHERE p.invoice_id = i.id);
 
+-- 3c. Reissued bills imported with the CSV note as their billing period
+UPDATE public.invoices SET billing_period = '1st to 30th November 2025'
+WHERE legacy_notes = 'Legacy CSV import' AND billing_period ILIKE 'Above changed to 15%' AND TRIM(invoice_no) = 'ASF/26-27/015';
+UPDATE public.invoices SET billing_period = '1st to 28th February 2026'
+WHERE legacy_notes = 'Legacy CSV import' AND billing_period ILIKE 'Above changed to 16%' AND TRIM(invoice_no) = 'ASF/26-27/016';
+
 -- 4. Standardize types across any remaining imported legacy bills to ERP casing
 -- Skip rows whose number already exists under the new type (uq_company_type_invoice_no).
 UPDATE public.invoices i

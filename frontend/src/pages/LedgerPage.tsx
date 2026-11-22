@@ -82,6 +82,16 @@ interface SummaryRow {
 
 type Status = 'Paid' | 'Partial' | 'Unpaid' | 'Cancelled';
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// Billing periods are free text ("January-26", "1st to 31st AUGUST 2026", "Novmber 2025"); pull out "Aug 2026".
+const billMonth = (period: string | null): string | null => {
+  const m = (period || '').match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?[\s,'-]*(\d{4}|\d{2}(?!\d))?/i);
+  if (!m) return null;
+  const mon = MONTHS.find((x) => x.toLowerCase() === m[1].toLowerCase());
+  const yr = m[2] ? (m[2].length === 2 ? `20${m[2]}` : m[2]) : '';
+  return `${mon} ${yr}`.trim();
+};
+
 const inr = (n: number) => (n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 const inr2 = (n: number) => (n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = (d: string | null) =>
@@ -528,8 +538,9 @@ const SiteLedger: React.FC<{
         </div>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
         <Stat label="Outstanding" value={`₹${inr(sum.outstanding)}`} sub={sum.opening ? `incl. ₹${inr(sum.opening)} previous year` : `${counts.Unpaid + counts.Partial} bills due`} tone={sum.outstanding > SETTLE_TOLERANCE ? 'red' : 'green'} />
+        <Stat label="Unpaid" value={`₹${inr(sum.unpaid)}`} sub={`${counts.Unpaid + counts.Partial} unpaid bills`} tone={sum.unpaid > SETTLE_TOLERANCE ? 'red' : 'green'} />
         <Stat label="Billed" value={`₹${inr(sum.billed)}`} sub={`${bills.length - counts.Cancelled} bills`} />
         <Stat label="Received" value={`₹${inr(sum.received)}`} tone="green" />
         <Stat label="TDS deducted" value={`₹${inr(sum.tds)}`} />
@@ -556,6 +567,7 @@ const SiteLedger: React.FC<{
             <tr>
               <th className="w-8" />
               <th className={`${td} text-left font-semibold`}>Invoice</th>
+              <th className={`${td} text-left font-semibold`}>Month</th>
               <th className={`${td} text-left font-semibold`}>Date</th>
               <th className={`${td} text-right font-semibold`}>Sub total</th>
               <th className={`${td} text-right font-semibold`}>GST</th>
@@ -570,7 +582,7 @@ const SiteLedger: React.FC<{
           <tbody className="divide-y divide-slate-100">
             <tr className="bg-amber-50/60">
               <td />
-              <td className={`${td} font-semibold text-slate-700`} colSpan={4}>Previous year pending</td>
+              <td className={`${td} font-semibold text-slate-700`} colSpan={5}>Previous year pending</td>
               <td className={`${td} text-right tabular-nums font-semibold`}>
                 {editingOpening !== null ? (
                   <span className="inline-flex items-center gap-1">
@@ -594,14 +606,15 @@ const SiteLedger: React.FC<{
               <td colSpan={5} />
             </tr>
 
-            {loading && <tr><td colSpan={11} className="px-3 py-10 text-center text-slate-400">Loading…</td></tr>}
-            {!loading && !visible.length && <tr><td colSpan={11} className="px-3 py-10 text-center text-slate-400">No bills.</td></tr>}
+            {loading && <tr><td colSpan={12} className="px-3 py-10 text-center text-slate-400">Loading…</td></tr>}
+            {!loading && !visible.length && <tr><td colSpan={12} className="px-3 py-10 text-center text-slate-400">No bills.</td></tr>}
 
             {!loading && visible.map((r) => {
               const t = totals(r);
               const last = r.payments[r.payments.length - 1];
               const open = expanded.has(r.id);
               const note = [r.cancelled_reason, r.legacy_notes].filter(Boolean).join(' · ');
+              const month = billMonth(r.billing_period);
               const dim = r.excluded ? 'text-slate-400 line-through' : '';
               return (
                 <React.Fragment key={r.id}>
@@ -622,6 +635,11 @@ const SiteLedger: React.FC<{
                       <div className="text-xs text-slate-500 truncate max-w-[220px]" title={note || r.billing_period || ''}>
                         {r.billing_period}{note && <span className="text-amber-600"> · {note}</span>}
                       </div>
+                    </td>
+                    <td className={`${td} whitespace-nowrap`}>
+                      {month
+                        ? <span className="inline-block px-2 py-1 rounded-md bg-teal-50 text-teal-800 ring-1 ring-inset ring-teal-600/20 text-xs font-bold">{month}</span>
+                        : <span className="text-slate-300">—</span>}
                     </td>
                     <td className={`${td} whitespace-nowrap`}>
                       <div className="text-slate-700">{fmtDate(r.invoice_date)}</div>
@@ -673,7 +691,7 @@ const SiteLedger: React.FC<{
                   {open && r.payments.map((p, i) => (
                     <tr key={p.id} className="bg-slate-50/80 text-xs">
                       <td />
-                      <td className="px-3 py-1.5 text-slate-500" colSpan={2}>
+                      <td className="px-3 py-1.5 text-slate-500" colSpan={3}>
                         <span className="text-slate-400">Payment {i + 1}</span> · {fmtDate(p.paid_date)} · {p.mode}
                         {p.ref_no && <span className="text-slate-400"> · {p.ref_no}</span>}
                       </td>
@@ -696,7 +714,7 @@ const SiteLedger: React.FC<{
           <tfoot className="bg-slate-50 font-semibold border-t-2 border-slate-200 sticky bottom-0">
             <tr>
               <td />
-              <td className={td} colSpan={4}>Total</td>
+              <td className={td} colSpan={5}>Total</td>
               <td className={`${td} text-right tabular-nums`}>{inr2(sum.billed)}</td>
               <td className={`${td} text-right tabular-nums text-emerald-700`}>
                 {inr2(sum.received)}
