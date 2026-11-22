@@ -53,6 +53,7 @@ interface SiteInfo {
   id: string;
   client_name: string;
   site_name: string;
+  code_name: string | null;
   work_order_ref: string | null;
   work_order_period: string | null;
   opening: number;
@@ -63,6 +64,7 @@ interface SummaryRow {
   site_id: string;
   client_name: string;
   site_name: string;
+  code_name: string | null;
   work_order_ref: string | null;
   bills: number;
   unpaid_bills: number;
@@ -220,11 +222,12 @@ const Summary: React.FC<{
   const list = useMemo(() => {
     const q = search.toLowerCase();
     return rows
-      .filter((s) => `${s.client_name} ${s.site_name} ${s.work_order_ref || ''}`.toLowerCase().includes(q))
+      .filter((s) => `${s.code_name || ''} ${s.client_name} ${s.site_name} ${s.work_order_ref || ''}`.toLowerCase().includes(q))
       .filter((s) => !hideEmpty || s.outstanding > SETTLE_TOLERANCE || s.bills > 0)
       .sort((a, b) => {
-        const x = a[sort.key] ?? -1;
-        const y = b[sort.key] ?? -1;
+        // Name column sorts by what it shows: code name first
+        const x = sort.key === 'client_name' ? a.code_name || a.client_name : a[sort.key] ?? -1;
+        const y = sort.key === 'client_name' ? b.code_name || b.client_name : b[sort.key] ?? -1;
         return (typeof x === 'string' ? x.localeCompare(String(y)) : (x as number) - (y as number)) * sort.dir;
       });
   }, [rows, search, hideEmpty, sort]);
@@ -342,9 +345,10 @@ const Summary: React.FC<{
               return (
                 <tr key={s.site_id} onClick={() => onOpen(s.site_id)} className="hover:bg-teal-50/50 cursor-pointer group">
                   <td className="px-3 py-2.5">
-                    <div className="font-semibold text-slate-900 group-hover:text-teal-700">{s.client_name}</div>
+                    <div className="font-semibold text-slate-900 group-hover:text-teal-700">{s.code_name || s.client_name}</div>
                     <div className="text-xs text-slate-500">
-                      {s.site_name}{s.work_order_ref && <span className="text-slate-400"> · {s.work_order_ref}</span>}
+                      {s.code_name ? `${s.client_name} · ${s.site_name}` : s.site_name}
+                      {s.work_order_ref && <span className="text-slate-400"> · {s.work_order_ref}</span>}
                     </div>
                   </td>
                   <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
@@ -549,9 +553,9 @@ const SiteLedger: React.FC<{
           <button onClick={onBack} className="text-sm text-slate-500 hover:text-slate-900 inline-flex items-center gap-1 mb-1.5">
             <ArrowLeft size={15} /> All clients
           </button>
-          <h1 className="text-2xl font-bold text-slate-900">{site?.client_name || '…'}</h1>
+          <h1 className="text-2xl font-bold text-slate-900">{site?.code_name || site?.client_name || '…'}</h1>
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-slate-500 mt-0.5">
-            <span>{site?.site_name}</span>
+            <span>{site?.code_name ? `${site.client_name} · ${site.site_name}` : site?.site_name}</span>
             {site?.work_order_ref && <span>WO <span className="font-medium text-slate-700">{site.work_order_ref}</span></span>}
             {site?.work_order_period && <span>Period {site.work_order_period}</span>}
           </div>

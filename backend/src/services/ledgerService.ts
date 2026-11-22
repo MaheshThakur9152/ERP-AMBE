@@ -57,6 +57,7 @@ export interface SiteInfo {
   id: string;
   client_name: string;
   site_name: string;
+  code_name: string | null;
   work_order_ref: string | null;
   work_order_period: string | null;
   opening: number;
@@ -114,7 +115,7 @@ export const LedgerService = {
         LEFT JOIN p ON p.invoice_id = i.id
         WHERE ${ACTIVE_BILL} AND ${NOT_SHADOWED}
       )
-      SELECT s.id AS site_id, s.client_name, s.site_name, s.work_order_ref,
+      SELECT s.id AS site_id, s.client_name, s.site_name, NULLIF(TRIM(s.code_name), '') AS code_name, s.work_order_ref,
              COUNT(b.site_id)::int AS bills,
              COUNT(b.site_id) FILTER (WHERE b.due > ${SETTLE_TOLERANCE})::int AS unpaid_bills,
              COALESCE(SUM(b.grand_total), 0)::float AS billed,
@@ -132,14 +133,14 @@ export const LedgerService = {
       LEFT JOIN b ON b.site_id = s.id
       LEFT JOIN public.ledger_opening_balances ob ON ob.site_id = s.id
       GROUP BY s.id, ob.amount
-      ORDER BY s.client_name, s.site_name
+      ORDER BY COALESCE(NULLIF(TRIM(s.code_name), ''), s.client_name), s.site_name
     `);
     return rows.map((r) => ({ ...r, outstanding: r.opening + r.due }));
   },
 
   async site(siteId: string, from: string | null, to: string | null): Promise<{ site: SiteInfo; rows: LedgerRow[] }> {
     const siteRes = await pool.query(
-      `SELECT s.id, s.client_name, s.site_name, s.work_order_ref, s.work_order_period,
+      `SELECT s.id, s.client_name, s.site_name, NULLIF(TRIM(s.code_name), '') AS code_name, s.work_order_ref, s.work_order_period,
               COALESCE(ob.amount, 0)::float AS opening, ob.note AS opening_note
        FROM public.sites s
        LEFT JOIN public.ledger_opening_balances ob ON ob.site_id = s.id

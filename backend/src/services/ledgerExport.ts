@@ -109,7 +109,7 @@ const SITE_DATES = [5, 11];
 export function addSiteSheet(wb: ExcelJS.Workbook, site: SiteInfo, rows: LedgerRow[], range?: string) {
   // "Lokhandwala Kataria Construction Pvt. Ltd." -> "LKCPL", matching the manual workbook's tab names.
   const initials = site.client_name.split(/[^A-Za-z]+/).filter(Boolean).map((w) => w[0].toUpperCase()).join('').slice(0, 6);
-  const base = `${initials}-${site.site_name}`;
+  const base = site.code_name || `${initials}-${site.site_name}`;
   const ws = wb.addWorksheet(sheetName(wb, base, site.work_order_ref), {
     properties: { tabColor: { argb: C.brand } },
   });
@@ -117,7 +117,7 @@ export function addSiteSheet(wb: ExcelJS.Workbook, site: SiteInfo, rows: LedgerR
   SITE_COLS.forEach(([, w], i) => (ws.getColumn(i + 1).width = w));
 
   titleBlock(ws, n, 'AMBE SERVICE — Outstanding Ledger', [
-    `Client Name : ${site.client_name}   |   Site : ${site.site_name}`,
+    `Client Name : ${site.client_name}   |   Site : ${site.code_name || site.site_name}`,
     `Work Order Ref No. : ${site.work_order_ref || '—'}   |   Work Order Period : ${site.work_order_period || '—'}`,
     `Generated ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}${range ? `   |   ${range}` : ''}`,
   ]);
@@ -251,7 +251,7 @@ export function addSummarySheet(wb: ExcelJS.Workbook, rows: any[]) {
 
   rows.forEach((r, i) => {
     const row = ws.addRow([
-      r.client_name, r.site_name, r.work_order_ref || '', r.bills, r.unpaid_bills,
+      r.client_name, r.code_name || r.site_name, r.work_order_ref || '', r.bills, r.unpaid_bills,
       z(r.opening), r.billed, z(r.received), z(r.tds),
       z(r.age_0_30), z(r.age_31_60), z(r.age_61_90), z(r.age_90_plus),
       r.outstanding, r.oldest_days ?? null, toDate(r.last_paid),
