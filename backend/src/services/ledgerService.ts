@@ -4,6 +4,15 @@ import { pool, withTransaction } from '../db/pool';
 // Bills that count toward outstanding: not cancelled, not proforma.
 export const ACTIVE_BILL = `i.cancelled_at IS NULL AND COALESCE(i.status, '') <> 'Cancelled' AND i.type NOT ILIKE '%proforma%'`;
 
+// Legacy CSV rows duplicated by a real bill (same site, same number ignoring case/spaces/punctuation)
+// are hidden so the ledger never counts a bill twice.
+const normNo = (col: string) => `regexp_replace(upper(${col}), '[^A-Z0-9]', '', 'g')`;
+export const NOT_SHADOWED = `NOT (i.legacy_notes = 'Legacy CSV import' AND EXISTS (
+  SELECT 1 FROM public.invoices o
+  WHERE o.site_id = i.site_id AND o.id <> i.id
+    AND ${normNo('o.invoice_no')} = ${normNo('i.invoice_no')}
+    AND (o.legacy_notes IS DISTINCT FROM 'Legacy CSV import' OR o.created_at < i.created_at)))`;
+
 // Clients round off; a balance within ₹1 counts as settled.
 export const SETTLE_TOLERANCE = 1;
 
@@ -103,7 +112,7 @@ export const LedgerService = {
                COALESCE(CURRENT_DATE - i.invoice_date, 0) AS age
         FROM public.invoices i
         LEFT JOIN p ON p.invoice_id = i.id
-        WHERE ${ACTIVE_BILL}
+        WHERE ${ACTIVE_BILL} AND ${NOT_SHADOWED}
       )
       SELECT s.id AS site_id, s.client_name, s.site_name, s.work_order_ref,
              COUNT(b.site_id)::int AS bills,
@@ -154,6 +163,7 @@ export const LedgerService = {
        FROM public.invoices i
        LEFT JOIN public.invoice_payments p ON p.invoice_id = i.id
        WHERE i.site_id = $1
+         AND ${NOT_SHADOWED}
          AND ($2::date IS NULL OR i.invoice_date >= $2::date)
          AND ($3::date IS NULL OR i.invoice_date <= $3::date)
        GROUP BY i.id

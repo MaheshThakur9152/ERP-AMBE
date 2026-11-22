@@ -13,7 +13,7 @@ WITH dupes AS (
     legacy.invoice_no
   FROM public.invoices legacy
   JOIN public.invoices original 
-    ON UPPER(TRIM(legacy.invoice_no)) = UPPER(TRIM(original.invoice_no))
+    ON regexp_replace(UPPER(legacy.invoice_no), '[^A-Z0-9]', '', 'g') = regexp_replace(UPPER(original.invoice_no), '[^A-Z0-9]', '', 'g')
    AND legacy.site_id = original.site_id
    AND legacy.id <> original.id
   WHERE legacy.legacy_notes = 'Legacy CSV import'
@@ -36,7 +36,7 @@ WHERE invoice_id IN (
   SELECT legacy.id
   FROM public.invoices legacy
   JOIN public.invoices original 
-    ON UPPER(TRIM(legacy.invoice_no)) = UPPER(TRIM(original.invoice_no))
+    ON regexp_replace(UPPER(legacy.invoice_no), '[^A-Z0-9]', '', 'g') = regexp_replace(UPPER(original.invoice_no), '[^A-Z0-9]', '', 'g')
    AND legacy.site_id = original.site_id
    AND legacy.id <> original.id
   WHERE legacy.legacy_notes = 'Legacy CSV import'
@@ -49,7 +49,7 @@ WHERE id IN (
   SELECT legacy.id
   FROM public.invoices legacy
   JOIN public.invoices original 
-    ON UPPER(TRIM(legacy.invoice_no)) = UPPER(TRIM(original.invoice_no))
+    ON regexp_replace(UPPER(legacy.invoice_no), '[^A-Z0-9]', '', 'g') = regexp_replace(UPPER(original.invoice_no), '[^A-Z0-9]', '', 'g')
    AND legacy.site_id = original.site_id
    AND legacy.id <> original.id
   WHERE legacy.legacy_notes = 'Legacy CSV import'
